@@ -6,7 +6,7 @@ Ergänzt 0016. Ersetzt dort im Abschnitt „Nicht“ den Satz zu `X-Forwarded-Fo
 
 ## Entscheidung
 
-Der Server spricht selbst kein TLS. Wer ihn außerhalb des eigenen Netzes erreichen will, stellt einen Reverse-Proxy davor oder benutzt ein VPN, siehe `docs/DEPLOY.md` und ADR 0039.
+Der Server spricht selbst kein TLS. Wer ihn außerhalb des eigenen Netzes erreichen will, stellt einen Reverse-Proxy davor oder benutzt ein VPN, siehe ADR 0040.
 
 **Vertraute Proxys.** `INKHASH_TRUSTED_PROXIES` ist eine Liste aus Adressen und Netzen (`127.0.0.1`, `172.31.87.0/24`, `::1`), durch Komma getrennt. Kommt eine Anfrage von einer dieser Adressen, liest der Server `X-Forwarded-For` von rechts und nimmt die erste Adresse, die kein vertrauter Proxy ist. Ist die Variable leer, gilt wie bisher nur die Adresse der Verbindung. Schickt ein nicht vertrauter Absender `X-Forwarded-For`, schreibt der Server das einmal ins Log, weil sich dann alle Clients hinter diesem Proxy einen Zähler teilen.
 

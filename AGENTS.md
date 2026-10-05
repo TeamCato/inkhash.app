@@ -41,7 +41,7 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 - `make server-lan` — bindet `0.0.0.0`
 - `make server-test` — Testserver aus `.test-env/env`: eigener Port, alle Interfaces, eigene Daten. Die Datei ist lokal und nicht eingecheckt
 - `make ipad-device TEAM=… DEVICE=…` — signiert aufs echte iPad oder iPhone. Braucht ein Apple-Konto in Xcode
-- `make server-package VERSION=X.Y.Z` — Release-Paket des Servers nach `.build/release/`. Veröffentlicht wird per Tag `server-vX.Y.Z`, siehe `docs/DEPLOY.md`
+- `make server-package VERSION=X.Y.Z` — Release-Paket des Servers nach `.build/release/`. Veröffentlicht wird per Tag `server-vX.Y.Z`, siehe `docs/RELEASE.md`
 - `make generate` — Xcode-Projekt erzeugen
 - `make mac` / `make ipad` / `make iphone` — bauen
 

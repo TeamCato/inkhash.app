@@ -1,11 +1,11 @@
 # Server installieren
 
-Der Server ist optional. Er gleicht Geräte ab und speichert Notizen in einem Verzeichnis, sonst nichts (ADR 0017). Es gibt ihn als Release-Paket für Linux mit systemd und als Container-Image, beide aus derselben Version (ADR 0039):
+Der Server ist optional. Er gleicht Geräte ab und speichert Notizen in einem Verzeichnis, sonst nichts. Es gibt ihn als Release-Paket für Linux mit systemd und als Container-Image, beide aus derselben Version:
 
 - Paket: [GitHub Releases](https://github.com/teamCato/inkhash.app/releases), `inkhash-server-X.Y.Z.tar.gz`
 - Image: `ghcr.io/teamcato/inkhash-server:X.Y.Z` für amd64 und arm64
 
-Diese Anleitung richtet den Server im Heimnetz ein. Danach erreichen iPad, iPhone und Mac ihn unter `http://<lan-adresse>:8787`, zum Beispiel `http://192.168.1.20:8787`. Der Server spricht nur HTTP. Zugriff von außen ist nicht Teil dieser Anleitung (ADR 0040). Wer einen eigenen Reverse-Proxy davor setzt, trägt ihn in `INKHASH_TRUSTED_PROXIES` ein (ADR 0038); unter Docker ist der Host (`172.31.87.1`) schon eingetragen.
+Diese Anleitung richtet den Server im Heimnetz ein. Danach erreichen iPad, iPhone und Mac ihn unter `http://<lan-adresse>:8787`, zum Beispiel `http://192.168.1.20:8787`. Der Server spricht nur HTTP. Zugriff von außen ist nicht Teil dieser Anleitung. Wer einen eigenen Reverse-Proxy davor setzt, trägt ihn in `INKHASH_TRUSTED_PROXIES` ein; unter Docker ist der Host (`172.31.87.1`) schon eingetragen.
 
 ## Linux mit systemd
 
@@ -69,13 +69,11 @@ docker compose logs inkhash
 
 Anderer Port auf dem Host: in `compose.yaml` die linke Seite von `8787:8787` ändern.
 
-Der Container läuft als Nutzer `node` (UID 1000), mit schreibgeschütztem Dateisystem und ohne Capabilities. Die Notizen liegen in `./data`. Gehört das Verzeichnis jemand anderem, beendet sich der Server mit `cannot write /data` (P-023). Docker veröffentlicht Ports an ufw und firewalld vorbei; ohne `INKHASH_BIND=0.0.0.0` ist der Port nur auf dem Rechner selbst erreichbar.
+Der Container läuft als Nutzer `node` (UID 1000), mit schreibgeschütztem Dateisystem und ohne Capabilities. Die Notizen liegen in `./data`. Gehört das Verzeichnis jemand anderem, beendet sich der Server mit `cannot write /data`. Docker veröffentlicht Ports an ufw und firewalld vorbei; ohne `INKHASH_BIND=0.0.0.0` ist der Port nur auf dem Rechner selbst erreichbar.
 
 **Version festhalten:** `INKHASH_VERSION=0.1` in `.env` bekommt Fehlerbehebungen, aber keine neue Minor-Version. **Update:** `docker compose pull && docker compose up -d`.
 
 Auf einem NAS (Synology, QNAP) gilt dasselbe: `data` muss UID 1000 gehören.
-
-**Aus dem Quellcode:** im Repo `docker compose up --build`, der Setup-Token steht in `docker compose logs inkhash`. Ein Volume aus einer älteren Version gehört noch root und muss einmal umgestellt werden: `docker compose run --rm -u root inkhash chown -R node:node /data`.
 
 ## Einrichten
 
@@ -90,7 +88,7 @@ setup token: …
 
 Linux: `journalctl -u inkhash | grep -A1 'not set up'`. Docker: `docker compose logs inkhash`. Der Token gilt bis zum nächsten Neustart; danach steht ein neuer im Log.
 
-Im Browser `http://<lan-adresse>:8787/admin` öffnen, Token, Name und Passwort eingeben. Das ist der Admin. Er legt auf derselben Seite weitere Accounts mit Startpasswort an (ADR 0021).
+Im Browser `http://<lan-adresse>:8787/admin` öffnen, Token, Name und Passwort eingeben. Das ist der Admin. Er legt auf derselben Seite weitere Accounts mit Startpasswort an.
 
 In der App unter Server die Adresse `http://<lan-adresse>:8787` eintragen, dann Name und Passwort. Beim ersten Mal fragt iOS nach Zugriff aufs lokale Netzwerk; ohne Erlaubnis erreicht die App den Server nicht (Einstellungen → Datenschutz → Lokales Netzwerk).
 
@@ -106,13 +104,13 @@ Notizen liegen unverschlüsselt im Datenverzeichnis. Wer Zugriff auf die Maschin
 
 ## Sichern und Wiederherstellen
 
-Sichern ist das Kopieren des Datenverzeichnisses (`/var/lib/inkhash` oder `./data`), auch im laufenden Betrieb: Notizdateien werden atomar geschrieben, das Änderungsprotokoll wird beim Start repariert (ADR 0015). Zum Beispiel mit restic:
+Sichern ist das Kopieren des Datenverzeichnisses (`/var/lib/inkhash` oder `./data`), auch im laufenden Betrieb: Notizdateien werden atomar geschrieben, das Änderungsprotokoll wird beim Start repariert. Zum Beispiel mit restic:
 
 ```sh
 sudo restic -r /mnt/backup/inkhash backup /var/lib/inkhash
 ```
 
-Wiederherstellen: Dienst stoppen, Verzeichnis ersetzen, Rechte prüfen (`inkhash` bzw. UID 1000, Modus `0700`), starten. Geräte gleichen danach alles einmal ab und laden fehlende Notizen wieder hoch (API.md, „Änderungen“).
+Wiederherstellen: Dienst stoppen, Verzeichnis ersetzen, Rechte prüfen (`inkhash` bzw. UID 1000, Modus `0700`), starten. Geräte gleichen danach alles einmal ab und laden fehlende Notizen wieder hoch.
 
 ## Gerät verloren, Passwort vergessen
 
@@ -148,13 +146,4 @@ Das Passwort steht danach in der Shell-History; `history -d` oder ein führendes
 | `INKHASH_HOST` | `127.0.0.1`, im Image `0.0.0.0` | Adresse, auf der der Server lauscht |
 | `INKHASH_PORT` | `8787` | Port |
 | `INKHASH_DATA` | `/data`, unter systemd `/var/lib/inkhash` | Datenverzeichnis |
-| `INKHASH_TRUSTED_PROXIES` | leer | Nur hinter einem Proxy nötig, ADR 0038 |
-
-## Ein Release machen
-
-```sh
-git tag server-v0.1.0
-git push origin server-v0.1.0
-```
-
-Die Action `Server release` testet, baut das Paket (`deploy/package.sh`), schiebt das Image nach GHCR und legt das GitHub-Release an. Lokal baut `make server-package VERSION=0.1.0` dasselbe Paket nach `.build/release/`. Beim ersten Mal das Paket `inkhash-server` auf GitHub unter Packages auf öffentlich stellen, sonst braucht `docker pull` eine Anmeldung.
+| `INKHASH_TRUSTED_PROXIES` | leer | Nur hinter einem Proxy nötig |

@@ -1,5 +1,5 @@
 # A tag server-vX.Y.Z publishes the release package on GitHub Releases and the image on GHCR.
-# See ADR 0039 and docs/DEPLOY.md.
+# See ADR 0039 and docs/RELEASE.md.
 name: Server release
 
 on:

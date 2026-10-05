@@ -139,7 +139,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Der Container startet nach dem Update, aber jedes Schreiben endet mit 500 und `EACCES`.
 **Ursache.** Das Image läuft als `node`. Ein Volume aus der Zeit, als der Container root war, gehört noch root.
-**Wache.** Einmalig: `docker compose run --rm -u root inkhash chown -R node:node /data`, bei einem Bind-Mount `sudo chown -R 1000:1000 data`. Siehe `docs/DEPLOY.md`. Ist das Datenverzeichnis beim Start nicht schreibbar, beendet sich der Server mit `cannot write <pfad> as uid <n>` statt mit einem Stacktrace (`openAccounts` in `Server/inkhashd.ts`).
+**Wache.** Einmalig: `docker compose run --rm -u root inkhash chown -R node:node /data`, bei einem Bind-Mount `sudo chown -R 1000:1000 data`. Siehe `docs/RELEASE.md`. Ist das Datenverzeichnis beim Start nicht schreibbar, beendet sich der Server mit `cannot write <pfad> as uid <n>` statt mit einem Stacktrace (`openAccounts` in `Server/inkhashd.ts`).
 
 ## P-024 · Seiten im Änderungsprotokoll
 
