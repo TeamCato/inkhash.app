@@ -32,7 +32,7 @@ node -e '
   fs.writeFileSync(process.argv[3], JSON.stringify(out, null, 2) + "\n");
 ' "$root/Server/package.json" "$version" "$pkg/package.json"
 cp "$root/deploy/linux/install.sh" "$root/deploy/linux/inkhash.service" "$root/deploy/linux/env.example" "$pkg/"
-cp "$root/deploy/Caddyfile.example" "$root/docs/DEPLOY.md" "$pkg/"
+cp "$root/docs/DEPLOY.md" "$pkg/"
 chmod 0755 "$pkg/install.sh"
 
 COPYFILE_DISABLE=1 tar -C "$stage" -czf "$out/$name.tar.gz" "$name"

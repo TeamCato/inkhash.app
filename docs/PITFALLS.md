@@ -290,7 +290,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Hinter Caddy, nginx oder `tailscale serve` kann sich 15 Minuten lang niemand anmelden, obwohl nur einer falsch getippt oder geraten hat. Oder nginx antwortet bei Zeichnungen mit 413.
 **Ursache.** Der Server sieht nur die Adresse des Proxys, alle Fehlversuche landen in einem Zähler. nginx nimmt standardmäßig höchstens 1 MB an, Blobs haben bis zu 20 MiB.
-**Wache.** ADR 0038: `INKHASH_TRUSTED_PROXIES` und `clientAddress` in `Server/inkhashd.ts`, Test „a trusted proxy names the client, others share the proxy's counter“. Der Server meldet einmal im Log, wenn ein nicht vertrauter Absender `X-Forwarded-For` schickt. Für nginx `client_max_body_size 25m` und `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`, siehe `docs/DEPLOY.md`.
+**Wache.** ADR 0038: `INKHASH_TRUSTED_PROXIES` und `clientAddress` in `Server/inkhashd.ts`, Test „a trusted proxy names the client, others share the proxy's counter“. Der Server meldet einmal im Log, wenn ein nicht vertrauter Absender `X-Forwarded-For` schickt. Für nginx `client_max_body_size 25m` und `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`.
 
 ## P-049 · Docker öffnet Ports an der Firewall vorbei
 

@@ -6,12 +6,12 @@ Status: angenommen
 
 Ein Git-Tag `server-vX.Y.Z` im Repository `teamCato/inkhash.app` löst eine GitHub Action aus. Sie testet den Server und veröffentlicht zwei Dinge in derselben Version:
 
-- **Release-Paket** auf GitHub Releases: `inkhash-server-X.Y.Z.tar.gz` mit Prüfsumme. Es enthält das gebaute `dist/`, `package.json`, `install.sh`, die systemd-Unit und eine Caddyfile-Vorlage. Der Server hat keine npm-Abhängigkeiten, das Paket gilt für jede Architektur. Auf dem Host muss Node 24 oder neuer liegen.
+- **Release-Paket** auf GitHub Releases: `inkhash-server-X.Y.Z.tar.gz` mit Prüfsumme. Es enthält das gebaute `dist/`, `package.json`, `install.sh`, die systemd-Unit und `DEPLOY.md`. Der Server hat keine npm-Abhängigkeiten, das Paket gilt für jede Architektur. Auf dem Host muss Node 24 oder neuer liegen.
 - **Container-Image** auf GHCR: `ghcr.io/teamcato/inkhash-server` für `linux/amd64` und `linux/arm64`, mit den Tags `X.Y.Z`, `X.Y`, `X` und `latest`.
 
-Unter Linux installiert `install.sh` den Server als systemd-Dienst: Nutzer `inkhash`, Programm unter `/opt/inkhash/<version>` mit dem Link `current`, Daten unter `/var/lib/inkhash`, Einstellungen in `/etc/inkhash/env`. Ein Update ist dasselbe Skript mit dem neuen Paket; die alte Version bleibt für ein Zurück liegen. Für Docker liegt unter `deploy/docker/` eine Compose-Datei, wahlweise mit Caddy davor.
+Unter Linux installiert `install.sh` den Server als systemd-Dienst: Nutzer `inkhash`, Programm unter `/opt/inkhash/<version>` mit dem Link `current`, Daten unter `/var/lib/inkhash`, Einstellungen in `/etc/inkhash/env`. Ein Update ist dasselbe Skript mit dem neuen Paket; die alte Version bleibt für ein Zurück liegen. Für Docker liegt unter `deploy/docker/` eine Compose-Datei.
 
-Der Server lauscht in beiden Fällen auf Loopback oder hinter einem Proxy. Empfohlen ist für den Zugriff von außen ein VPN, sonst ein Reverse-Proxy mit TLS. Siehe `docs/DEPLOY.md` und ADR 0038.
+Der Server lauscht in beiden Fällen auf Loopback oder hinter einem Proxy. Zugriff von außen ist Sache des Betreibers, siehe ADR 0040.
 
 ## Warum
 

@@ -24,7 +24,7 @@ App/Shared               SwiftUI für iPad, iPhone und Mac
 App/iOS                  Einstieg iPad und iPhone
 App/macOS                Einstieg Mac
 Server                   TypeScript auf Node, ohne Framework
-deploy                   Release-Paket, systemd-Unit, install.sh, Compose und Caddy. Siehe docs/DEPLOY.md
+deploy                   Release-Paket, systemd-Unit, install.sh und Compose. Siehe docs/DEPLOY.md
 .github/workflows        Server testen, Release-Paket und Image veröffentlichen (ADR 0039)
 docs                     Produkt, Vertrag, Entscheidungen, Fallen
 tools                    Werkzeuge, mit swiftc gegen die Quellen gebaut: Icon, Import-Spike

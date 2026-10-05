@@ -1,23 +1,17 @@
-# Server betreiben
+# Server installieren
 
 Der Server ist optional. Er gleicht Geräte ab und speichert Notizen in einem Verzeichnis, sonst nichts (ADR 0017). Es gibt ihn als Release-Paket für Linux mit systemd und als Container-Image, beide aus derselben Version (ADR 0039):
 
 - Paket: [GitHub Releases](https://github.com/teamCato/inkhash.app/releases), `inkhash-server-X.Y.Z.tar.gz`
 - Image: `ghcr.io/teamcato/inkhash-server:X.Y.Z` für amd64 und arm64
 
-Der Server spricht nur HTTP und lauscht standardmäßig auf `127.0.0.1:8787`. Für Zugriff von außen gehört etwas davor, das TLS kann. Siehe [Zugriff von außen](#zugriff-von-außen).
-
-## Welcher Weg
-
-| Ziel | Weg |
-| --- | --- |
-| Nur im Heimnetz | `INKHASH_HOST=0.0.0.0` (Linux) oder `INKHASH_BIND=0.0.0.0` (Docker). Die App verbindet sich mit `http://<lan-adresse>:8787` |
-| Auch unterwegs, empfohlen | VPN, am einfachsten Tailscale mit `tailscale serve`. Kein offener Port, gültiges Zertifikat, geht auch hinter DS-Lite |
-| Öffentlich unter eigener Domain | Caddy davor, Ports 80 und 443 freigeben. Vorher die [Checkliste](#checkliste-vor-dem-öffnen) |
+Diese Anleitung richtet den Server im Heimnetz ein. Danach erreichen iPad, iPhone und Mac ihn unter `http://<lan-adresse>:8787`, zum Beispiel `http://192.168.1.20:8787`. Der Server spricht nur HTTP. Zugriff von außen ist nicht Teil dieser Anleitung (ADR 0040). Wer einen eigenen Reverse-Proxy davor setzt, trägt ihn in `INKHASH_TRUSTED_PROXIES` ein (ADR 0038); unter Docker ist der Host (`172.31.87.1`) schon eingetragen.
 
 ## Linux mit systemd
 
 Voraussetzungen: systemd, Node 24 oder neuer systemweit installiert (z. B. aus [NodeSource](https://github.com/nodesource/distributions) oder dem Paket der Distribution, nicht über nvm im Home-Verzeichnis).
+
+Version von der Release-Seite nehmen:
 
 ```sh
 VERSION=0.1.0
@@ -30,6 +24,14 @@ sudo ./install.sh
 ```
 
 `install.sh` legt den Systemnutzer `inkhash` an, kopiert das Programm nach `/opt/inkhash/<version>`, setzt `/opt/inkhash/current` darauf und startet den Dienst `inkhash`. Daten liegen in `/var/lib/inkhash` (nur für `inkhash` lesbar), Einstellungen in `/etc/inkhash/env`. Die Datei wird beim ersten Mal angelegt und danach nie überschrieben.
+
+Standardmäßig lauscht der Server nur auf `127.0.0.1`. Fürs Heimnetz in `/etc/inkhash/env` setzen:
+
+```sh
+INKHASH_HOST=0.0.0.0
+```
+
+Port ändern: `INKHASH_PORT`. Dann `sudo systemctl restart inkhash`. Läuft eine Firewall, Port 8787 fürs Heimnetz freigeben, z. B. `sudo ufw allow from 192.168.1.0/24 to any port 8787`.
 
 | Befehl | Wofür |
 | --- | --- |
@@ -45,86 +47,58 @@ sudo ./install.sh
 
 ```sh
 mkdir inkhash && cd inkhash
-for f in compose.yaml env.example Caddyfile; do
+for f in compose.yaml env.example; do
   curl -LO https://raw.githubusercontent.com/teamCato/inkhash.app/main/deploy/docker/$f
 done
 cp env.example .env
 mkdir -p data && sudo chown 1000:1000 data
+```
+
+Fürs Heimnetz in `.env` setzen:
+
+```sh
+INKHASH_BIND=0.0.0.0
+```
+
+Dann starten:
+
+```sh
 docker compose up -d
 docker compose logs inkhash
 ```
 
-Der Container läuft als Nutzer `node` (UID 1000), mit schreibgeschütztem Dateisystem und ohne Capabilities. Die Notizen liegen in `./data`. Gehört das Verzeichnis jemand anderem, beendet sich der Server mit `cannot write /data` (P-023).
+Anderer Port auf dem Host: in `compose.yaml` die linke Seite von `8787:8787` ändern.
 
-Der Port ist nur an `127.0.0.1` gebunden. Docker veröffentlicht Ports an ufw und firewalld vorbei; `INKHASH_BIND=0.0.0.0` in `.env` öffnet ihn fürs Heimnetz.
+Der Container läuft als Nutzer `node` (UID 1000), mit schreibgeschütztem Dateisystem und ohne Capabilities. Die Notizen liegen in `./data`. Gehört das Verzeichnis jemand anderem, beendet sich der Server mit `cannot write /data` (P-023). Docker veröffentlicht Ports an ufw und firewalld vorbei; ohne `INKHASH_BIND=0.0.0.0` ist der Port nur auf dem Rechner selbst erreichbar.
 
 **Version festhalten:** `INKHASH_VERSION=0.1` in `.env` bekommt Fehlerbehebungen, aber keine neue Minor-Version. **Update:** `docker compose pull && docker compose up -d`.
 
-**Mit Caddy davor:** In `.env` `INKHASH_DOMAIN=notizen.example.org` setzen, dann `docker compose --profile caddy up -d`. Caddy holt das Zertifikat selbst und braucht dafür die Ports 80 und 443.
-
 Auf einem NAS (Synology, QNAP) gilt dasselbe: `data` muss UID 1000 gehören.
 
+**Aus dem Quellcode:** im Repo `docker compose up --build`, der Setup-Token steht in `docker compose logs inkhash`. Ein Volume aus einer älteren Version gehört noch root und muss einmal umgestellt werden: `docker compose run --rm -u root inkhash chown -R node:node /data`.
+
 ## Einrichten
+
+LAN-Adresse des Servers herausfinden, z. B. mit `hostname -I` (Linux) oder in der Geräteliste des Routers. Im Router am besten eine feste Adresse für den Server vergeben, sonst ändert sie sich irgendwann und die App findet ihn nicht mehr.
 
 Beim ersten Start ohne Account schreibt der Server einen Setup-Token ins Log:
 
 ```
-not set up yet: open http://127.0.0.1:8787/admin
+not set up yet: open http://<this host>:8787/admin
 setup token: …
 ```
 
-Im Browser `/admin` öffnen, Token, Name und Passwort eingeben. Das ist der Admin. Er legt auf derselben Seite weitere Accounts mit Startpasswort an (ADR 0021).
+Linux: `journalctl -u inkhash | grep -A1 'not set up'`. Docker: `docker compose logs inkhash`. Der Token gilt bis zum nächsten Neustart; danach steht ein neuer im Log.
 
-Einrichten, bevor der Server nach außen offen ist, und nicht über reines HTTP aus dem Internet: Token und Passwort gingen sonst im Klartext. Läuft der Server auf einer anderen Maschine nur an `127.0.0.1`, reicht ein SSH-Tunnel:
+Im Browser `http://<lan-adresse>:8787/admin` öffnen, Token, Name und Passwort eingeben. Das ist der Admin. Er legt auf derselben Seite weitere Accounts mit Startpasswort an (ADR 0021).
 
-```sh
-ssh -L 8787:127.0.0.1:8787 server
-# dann im eigenen Browser: http://127.0.0.1:8787/admin
-```
+In der App unter Server die Adresse `http://<lan-adresse>:8787` eintragen, dann Name und Passwort. Beim ersten Mal fragt iOS nach Zugriff aufs lokale Netzwerk; ohne Erlaubnis erreicht die App den Server nicht (Einstellungen → Datenschutz → Lokales Netzwerk).
 
-In der App unter Server die Adresse eintragen (`https://…` von außen, `http://<lan-adresse>:8787` im Heimnetz), dann Name und Passwort.
+Für reines HTTP nur eine IP-Adresse oder einen Namen auf `.local` verwenden. Andere Namen (`inkhash.home.arpa`, `nas.lan`) blockiert iOS ohne HTTPS (App Transport Security). Wer solche Namen will, braucht einen eigenen Reverse-Proxy mit TLS davor.
 
-## Zugriff von außen
+**Läuft es?** `curl http://<lan-adresse>:8787/v1/health` von einem anderen Rechner im Netz. Kommt keine Antwort: lauscht der Server auf `0.0.0.0` (`INKHASH_HOST` bzw. `INKHASH_BIND`), ist der Port in der Firewall frei?
 
-### Tailscale (empfohlen)
-
-Tailscale auf dem Server und auf iPad, iPhone, Mac. In der Tailscale-Verwaltung MagicDNS und HTTPS-Zertifikate einschalten. Dann auf dem Server:
-
-```sh
-sudo tailscale serve --bg http://127.0.0.1:8787
-```
-
-Die App verbindet sich mit `https://<maschine>.<tailnet>.ts.net`. Kein Port im Router, keine Domain. Für Linux zusätzlich `INKHASH_TRUSTED_PROXIES=127.0.0.1,::1` in `/etc/inkhash/env`; die Docker-Compose-Datei vertraut dem Host schon.
-
-### Caddy mit eigener Domain
-
-1. Eine Domain oder DynDNS-Adresse, die auf den Anschluss zeigt.
-2. Im Router die Ports 80 und 443 auf den Server weiterleiten. **Nicht** 8787.
-3. Linux: Caddy installieren, `Caddyfile.example` aus dem Paket nach `/etc/caddy/Caddyfile`, den Namen einsetzen, `INKHASH_TRUSTED_PROXIES=127.0.0.1,::1` in `/etc/inkhash/env`, beide Dienste neu starten. Docker: `--profile caddy`, siehe oben.
-
-**DS-Lite** (viele Kabel- und Glasfaseranschlüsse): Von außen gibt es keine eigene IPv4-Adresse, Portfreigaben für IPv4 gehen nicht. Entweder nur über IPv6 (AAAA-Eintrag, Freigabe für IPv6 im Router) oder Tailscale.
-
-### Andere Proxys
-
-- **nginx** nimmt standardmäßig nur 1 MB an, Blobs haben bis zu 20 MiB: `client_max_body_size 25m;`. Dazu `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;` (P-048).
-- **Cloudflare Tunnel** funktioniert ohne Portfreigabe, aber TLS endet bei Cloudflare: Cloudflare kann die Notizen lesen.
-
-Jeder Proxy muss in `INKHASH_TRUSTED_PROXIES` stehen, sonst sieht der Server alle Clients unter der Adresse des Proxys, und 30 Fehlversuche von irgendwem sperren für 15 Minuten alle Anmeldungen (ADR 0038). Der Server meldet im Log einmal, wenn ein nicht vertrauter Absender `X-Forwarded-For` schickt.
-
-## Checkliste vor dem Öffnen
-
-- [ ] Admin eingerichtet, Setup-Token damit verbraucht
-- [ ] Nur HTTPS von außen, Port 8787 nicht im Router freigegeben
-- [ ] `INKHASH_TRUSTED_PROXIES` gesetzt. Probe: eine falsche Anmeldung von außen zeigt im Log `auth failed /v1/session 401 from <deine öffentliche Adresse>`, nicht die des Proxys
-- [ ] Lange Passwörter. Namen sind nicht geheim: acht Fehlversuche sperren einen Namen 15 Minuten
-- [ ] Sicherung eingerichtet
-
-Optional fail2ban mit diesem Filter auf das Log des Dienstes:
-
-```ini
-[Definition]
-failregex = ^.*auth failed /v1/(setup|session) \d+ from <HOST>$
-```
+Im Heimnetz gehen Token und Passwort unverschlüsselt über das Netz. Wer dem eigenen WLAN nicht traut, richtet den Admin über einen SSH-Tunnel ein (`ssh -L 8787:127.0.0.1:8787 server`, dann `http://127.0.0.1:8787/admin`).
 
 ## Was der Betreiber sieht
 
@@ -174,7 +148,7 @@ Das Passwort steht danach in der Shell-History; `history -d` oder ein führendes
 | `INKHASH_HOST` | `127.0.0.1`, im Image `0.0.0.0` | Adresse, auf der der Server lauscht |
 | `INKHASH_PORT` | `8787` | Port |
 | `INKHASH_DATA` | `/data`, unter systemd `/var/lib/inkhash` | Datenverzeichnis |
-| `INKHASH_TRUSTED_PROXIES` | leer | Adressen und Netze (`127.0.0.1,::1`, `172.31.87.0/24`), deren `X-Forwarded-For` gilt. ADR 0038 |
+| `INKHASH_TRUSTED_PROXIES` | leer | Nur hinter einem Proxy nötig, ADR 0038 |
 
 ## Ein Release machen
 
