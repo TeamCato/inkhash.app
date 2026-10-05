@@ -1,0 +1,22 @@
+{
+  "schemaVersion": 1,
+  "id": "8a2b4c6d-1e3f-4a5b-9c7d-0e1f2a3b4c5d",
+  "kind": "ink",
+  "title": "",
+  "revision": 2,
+  "updatedAt": "2026-09-30T06:00:00Z",
+  "deletedAt": null,
+  "markdown": null,
+  "transcript": "Reise #alpen",
+  "tags": ["alpen"],
+  "pages": [
+    {
+      "id": "11111111-2222-4333-8444-555555555555",
+      "blob": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+      "width": 768,
+      "height": 1024,
+      "transcript": "Reise #alpen",
+      "tags": ["alpen"]
+    }
+  ]
+}

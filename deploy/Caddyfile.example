@@ -1,0 +1,7 @@
+# Caddy in front of inkhash on the same machine. Put your own name in place of notes.example.org;
+# Caddy fetches and renews the certificate. Ports 80 and 443 must reach this machine.
+# In /etc/inkhash/env: INKHASH_TRUSTED_PROXIES=127.0.0.1,::1   See docs/DEPLOY.md.
+notes.example.org {
+	reverse_proxy 127.0.0.1:8787
+	header Strict-Transport-Security "max-age=31536000"
+}

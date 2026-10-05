@@ -1,0 +1,10 @@
+services:
+  inkhash:
+    build: ./Server
+    ports:
+      - "8787:8787"
+    volumes:
+      - inkhash-data:/data
+
+volumes:
+  inkhash-data:

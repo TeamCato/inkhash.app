@@ -1,0 +1,17 @@
+.DS_Store
+.data/
+data/
+.build/
+DerivedData/
+*.xcodeproj
+xcuserdata/
+__pycache__/
+*.pyc
+.venv/
+Server/node_modules/
+Server/dist/
+Packages/InkhashCore/.build
+*.xcuserstate
+.test-env/
+.claude/*.lock
+.claude/settings.local.json

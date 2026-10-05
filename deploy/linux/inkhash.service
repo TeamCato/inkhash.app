@@ -1,0 +1,49 @@
+# inkhash server. Installed by install.sh, which fills in the path to node. See docs/DEPLOY.md.
+[Unit]
+Description=inkhash server
+Documentation=https://github.com/teamCato/inkhash.app/blob/main/docs/DEPLOY.md
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=inkhash
+Group=inkhash
+Environment=INKHASH_DATA=/var/lib/inkhash
+Environment=INKHASH_HOST=127.0.0.1
+Environment=INKHASH_PORT=8787
+Environment=NODE_ENV=production
+# Overrides the lines above. Changing INKHASH_DATA also needs ReadWritePaths= for the new place.
+EnvironmentFile=-/etc/inkhash/env
+ExecStart=@NODE@ /opt/inkhash/current/dist/inkhashd.js
+Restart=on-failure
+RestartSec=5
+TimeoutStopSec=10
+
+StateDirectory=inkhash
+StateDirectoryMode=0700
+UMask=0077
+
+NoNewPrivileges=yes
+CapabilityBoundingSet=
+AmbientCapabilities=
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectKernelLogs=yes
+ProtectControlGroups=yes
+ProtectClock=yes
+ProtectHostname=yes
+RestrictAddressFamilies=AF_INET AF_INET6 AF_UNIX
+RestrictNamespaces=yes
+RestrictRealtime=yes
+RestrictSUIDSGID=yes
+LockPersonality=yes
+SystemCallArchitectures=native
+# No MemoryDenyWriteExecute: the V8 JIT needs writable and executable memory.
+
+[Install]
+WantedBy=multi-user.target

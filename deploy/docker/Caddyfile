@@ -1,0 +1,5 @@
+# Used by compose.yaml with --profile caddy. The name comes from INKHASH_DOMAIN in .env.
+{$INKHASH_DOMAIN} {
+	reverse_proxy inkhash:8787
+	header Strict-Transport-Security "max-age=31536000"
+}

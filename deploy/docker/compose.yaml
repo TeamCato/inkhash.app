@@ -1,0 +1,54 @@
+# inkhash server from GHCR. See docs/DEPLOY.md.
+#   cp env.example .env
+#   mkdir -p data && sudo chown 1000:1000 data
+#   docker compose up -d
+#   docker compose logs inkhash          # setup token on the first start
+# With Caddy in front: INKHASH_DOMAIN in .env, then docker compose --profile caddy up -d
+name: inkhash
+
+services:
+  inkhash:
+    image: ghcr.io/teamcato/inkhash-server:${INKHASH_VERSION:-latest}
+    restart: unless-stopped
+    # Docker publishes ports past ufw and firewalld; 127.0.0.1 keeps it on this machine.
+    ports:
+      - "${INKHASH_BIND:-127.0.0.1}:8787:8787"
+    volumes:
+      - ./data:/data
+    environment:
+      # .1 is a proxy on the host, .10 the Caddy below. See ADR 0038.
+      INKHASH_TRUSTED_PROXIES: "172.31.87.1,172.31.87.10"
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    networks:
+      inkhash: {}
+
+  caddy:
+    image: caddy:2
+    profiles: [caddy]
+    restart: unless-stopped
+    depends_on: [inkhash]
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      INKHASH_DOMAIN: ${INKHASH_DOMAIN:-}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      inkhash:
+        ipv4_address: 172.31.87.10
+
+networks:
+  inkhash:
+    ipam:
+      config:
+        - subnet: 172.31.87.0/24
+
+volumes:
+  caddy-data:
+  caddy-config:

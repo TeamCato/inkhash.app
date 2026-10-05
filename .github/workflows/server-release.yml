@@ -1,0 +1,70 @@
+# A tag server-vX.Y.Z publishes the release package on GitHub Releases and the image on GHCR.
+# See ADR 0039 and docs/DEPLOY.md.
+name: Server release
+
+on:
+  push:
+    tags: ["server-v*"]
+
+permissions:
+  contents: read
+
+env:
+  IMAGE: ghcr.io/teamcato/inkhash-server
+
+jobs:
+  test:
+    uses: ./.github/workflows/server.yml
+
+  release:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Server/package-lock.json
+      - id: version
+        run: |
+          version="${GITHUB_REF_NAME#server-v}"
+          [[ "$version" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || { echo "Tag muss server-vX.Y.Z sein" >&2; exit 1; }
+          echo "version=$version" >>"$GITHUB_OUTPUT"
+      - run: deploy/package.sh "${{ steps.version.outputs.version }}" release
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}}.{{minor}},value=${{ steps.version.outputs.version }}
+            type=semver,pattern={{major}},value=${{ steps.version.outputs.version }}
+            type=raw,value=latest
+      - uses: docker/build-push-action@v6
+        with:
+          context: Server
+          platforms: linux/amd64,linux/arm64
+          push: true
+          build-args: VERSION=${{ steps.version.outputs.version }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" release/* \
+            --title "Server ${{ steps.version.outputs.version }}" \
+            --generate-notes

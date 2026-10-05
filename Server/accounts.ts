@@ -1,0 +1,564 @@
+/** Accounts and sessions. Notes stay in a Store per account. */
+
+import { pbkdf2, randomBytes, randomUUID, timingSafeEqual, createHash } from "node:crypto";
+import { existsSync, readdirSync, readFileSync, renameSync, rmSync, mkdirSync } from "node:fs";
+import { isIPv6 } from "node:net";
+import { join } from "node:path";
+import { promisify } from "node:util";
+
+import { DIR_MODE, Store, StoreError, atomicWrite, canonicalId } from "./store.js";
+
+const pbkdf2Async = promisify(pbkdf2);
+
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/;
+const NAME_RE = /^[a-z0-9][a-z0-9._-]{0,30}[a-z0-9]$/;
+const MIN_PASSWORD = 8;
+const HOUR = 60 * 60 * 1000;
+const DAY = 24 * HOUR;
+
+export const DEFAULT_ROUNDS = 600_000;
+export const NAME_LOCK_AFTER = 8;
+export const CLIENT_LOCK_AFTER = 30;
+/** Password checks running at once, in all and per client key. See ADR 0038. */
+export const MAX_HASHING = 16;
+export const MAX_HASHING_PER_CLIENT = 2;
+const LOCK_MS = 15 * 60 * 1000;
+export const SESSION_IDLE_DAYS = 90;
+const SESSION_TOUCH_MS = DAY;
+const THROTTLE_KEYS = 10_000;
+export const MAIN_WORKSPACE = "main";
+const DEFAULT_MAIN_NAME = "Privat";
+const MAX_WORKSPACES = 50;
+const MAX_WORKSPACE_NAME = 40;
+
+export interface Workspace {
+  id: string;
+  name: string;
+}
+
+function workspaceName(value: unknown): string {
+  if (typeof value !== "string") throw new StoreError(400, "bad-request", { reason: "name" });
+  const name = value.trim();
+  if (name.length < 1 || name.length > MAX_WORKSPACE_NAME || [...name].some((ch) => (ch.codePointAt(0) ?? 0) < 32)) {
+    throw new StoreError(400, "bad-request", { reason: "name" });
+  }
+  return name;
+}
+
+interface Identity {
+  id: string;
+  name: string;
+  passwordHash: string;
+  createdAt: string;
+  /** The one account that may create others. See ADR 0021. */
+  admin?: boolean;
+}
+
+export interface AccountSummary {
+  id: string;
+  name: string;
+  admin: boolean;
+  createdAt: string;
+}
+
+interface SessionRecord {
+  accountId?: unknown;
+  createdAt?: unknown;
+  lastSeenAt?: unknown;
+}
+
+type Opened = { token: string; account: { id: string; name: string; admin: boolean } };
+
+function stamp(date = new Date()): string {
+  return date.toISOString().replace(/\.\d{3}Z$/, "Z");
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function summary(identity: Identity): AccountSummary {
+  return { id: identity.id, name: identity.name, admin: identity.admin === true, createdAt: identity.createdAt };
+}
+
+function normalizeName(value: unknown): string {
+  if (typeof value !== "string") throw new StoreError(400, "bad-request", { reason: "name" });
+  const name = value.trim().toLowerCase();
+  if (!NAME_RE.test(name)) throw new StoreError(400, "bad-request", { reason: "name" });
+  return name;
+}
+
+function passwordOf(value: unknown): string {
+  if (typeof value !== "string" || value.length < MIN_PASSWORD || value.length > 200) {
+    throw new StoreError(400, "bad-request", { reason: "password" });
+  }
+  return value;
+}
+
+function tokenHash(token: string): string {
+  return createHash("sha256").update(token).digest("hex");
+}
+
+function tokenUrlSafe(bytes: number): string {
+  return randomBytes(bytes).toString("base64url");
+}
+
+function sameSecret(got: string, expected: string): boolean {
+  if (!got || !expected) return false;
+  const left = createHash("sha256").update(got).digest();
+  const right = createHash("sha256").update(expected).digest();
+  return timingSafeEqual(left, right);
+}
+
+/** Eight groups of an IPv6 address, without compression. An IPv4 tail counts as two groups. */
+function ipv6Groups(address: string): string[] {
+  const parts = (text: string): string[] => {
+    if (!text) return [];
+    const groups = text.split(":");
+    const last = groups.at(-1) ?? "";
+    if (!last.includes(".")) return groups;
+    const [a = 0, b = 0, c = 0, d = 0] = last.split(".").map(Number);
+    return [...groups.slice(0, -1), ((a << 8) | b).toString(16), ((c << 8) | d).toString(16)];
+  };
+  const [head = "", tail] = address.split("::");
+  const left = parts(head);
+  const right = tail === undefined ? [] : parts(tail);
+  const middle = tail === undefined ? [] : Array<string>(8 - left.length - right.length).fill("0");
+  return [...left, ...middle, ...right].map((group) => Number.parseInt(group, 16).toString(16));
+}
+
+/**
+ * The key failed attempts count under: the address for IPv4, the /64 network for IPv6,
+ * because one connection usually gets a whole /64. See ADR 0038.
+ */
+export function clientKey(address: string): string {
+  const bare = address.split("%")[0] ?? address;
+  const mapped = /^::ffff:(\d{1,3}(?:\.\d{1,3}){3})$/i.exec(bare);
+  if (mapped?.[1]) return mapped[1];
+  if (!isIPv6(bare)) return bare;
+  return `${ipv6Groups(bare).slice(0, 4).join(":")}::/64`;
+}
+
+function slowDown(): StoreError {
+  return new StoreError(429, "slow-down");
+}
+
+/**
+ * Counts failures per key. `limit` failures within the window block the key until the
+ * window after the last failure has passed. Memory only: a restart forgets it.
+ */
+export class Throttle {
+  private readonly limit: number;
+  private readonly windowMs: number;
+  private readonly entries = new Map<string, { count: number; resetAt: number }>();
+
+  constructor(limit: number, windowMs: number) {
+    this.limit = limit;
+    this.windowMs = windowMs;
+  }
+
+  blocked(key: string): boolean {
+    const entry = this.entries.get(key);
+    return entry !== undefined && entry.count >= this.limit && Date.now() < entry.resetAt;
+  }
+
+  fail(key: string): void {
+    const now = Date.now();
+    const entry = this.entries.get(key);
+    if (!entry || now >= entry.resetAt) {
+      this.entries.delete(key);
+      this.entries.set(key, { count: 1, resetAt: now + this.windowMs });
+      this.prune(now);
+      return;
+    }
+    entry.count += 1;
+    entry.resetAt = now + this.windowMs;
+  }
+
+  clear(key: string): void {
+    this.entries.delete(key);
+  }
+
+  get size(): number {
+    return this.entries.size;
+  }
+
+  /** Random names must not grow the map without bound. */
+  private prune(now: number): void {
+    if (this.entries.size <= THROTTLE_KEYS) return;
+    for (const [key, entry] of this.entries) {
+      if (entry.resetAt <= now) this.entries.delete(key);
+    }
+    for (const key of this.entries.keys()) {
+      if (this.entries.size <= THROTTLE_KEYS) break;
+      this.entries.delete(key);
+    }
+  }
+}
+
+export class Accounts {
+  readonly root: string;
+  private readonly identities: string;
+  private readonly spaces: string;
+  private readonly sessions: string;
+  private readonly rounds: number;
+  private readonly stores = new Map<string, Store>();
+  /** Wrong passwords per account name. */
+  private readonly names = new Throttle(NAME_LOCK_AFTER, LOCK_MS);
+  /** Every failed unauthenticated attempt per client key (`clientKey`): logins and the setup token. */
+  private readonly clients = new Throttle(CLIENT_LOCK_AFTER, LOCK_MS);
+  private hashing = 0;
+  private readonly hashingBy = new Map<string, number>();
+  private dummy: Promise<string> | null = null;
+  /** Opens the first account. Null once any account exists. Memory only, see ADR 0021. */
+  private setupSecret: string | null;
+
+  constructor(root: string, rounds = DEFAULT_ROUNDS, setupToken = tokenUrlSafe(24)) {
+    this.root = root;
+    this.rounds = rounds;
+    this.identities = join(root, "identities");
+    this.spaces = join(root, "spaces");
+    this.sessions = join(root, "sessions");
+    for (const path of [this.identities, this.spaces, this.sessions]) {
+      mkdirSync(path, { recursive: true, mode: DIR_MODE });
+    }
+    // Opening every store repairs its change log now, not on the first request.
+    for (const name of readdirSync(this.spaces)) {
+      if (UUID_RE.test(name)) this.storeFor(name);
+    }
+    this.ensureAdmin();
+    this.setupSecret = this.any() ? null : setupToken;
+    this.sweep();
+  }
+
+  /** The setup token while the server waits for its first account, else null. */
+  get setupToken(): string | null {
+    return this.setupSecret;
+  }
+
+  registration(): "setup" | "closed" {
+    return this.setupSecret === null ? "closed" : "setup";
+  }
+
+  /** Creates the admin with the setup token. The token is spent with it. */
+  async setup(body: unknown, client: string): Promise<Opened> {
+    const key = clientKey(client);
+    if (this.clients.blocked(key)) throw slowDown();
+    // Once there is an admin, the answer is setup-done whatever the body says. See API.md.
+    if (this.setupSecret === null) throw new StoreError(403, "setup-done");
+    if (!isRecord(body)) throw new StoreError(400, "bad-request");
+    const name = normalizeName(body.name);
+    const password = passwordOf(body.password);
+    if (!sameSecret(typeof body.setupToken === "string" ? body.setupToken : "", this.setupSecret)) {
+      this.clients.fail(key);
+      throw new StoreError(401, "unauthorized");
+    }
+    const passwordHash = await this.hashPassword(password);
+    // Two setup requests can race through the await. Only the first one becomes the admin.
+    if (this.setupSecret === null) throw new StoreError(403, "setup-done");
+    const identity = this.create(name, passwordHash, true);
+    this.setupSecret = null;
+    return this.openSession(identity);
+  }
+
+  /** The admin creates an account with a starting password. No session for it. */
+  async createAccount(adminId: string, body: unknown): Promise<AccountSummary> {
+    this.requireAdmin(adminId);
+    if (!isRecord(body)) throw new StoreError(400, "bad-request");
+    const name = normalizeName(body.name);
+    const password = passwordOf(body.password);
+    if (existsSync(join(this.identities, `${name}.json`))) throw new StoreError(409, "name-taken");
+    const passwordHash = await this.hashPassword(password);
+    return summary(this.create(name, passwordHash, false));
+  }
+
+  listAccounts(adminId: string): AccountSummary[] {
+    this.requireAdmin(adminId);
+    return this.allIdentities()
+      .map(summary)
+      .sort((left, right) => left.name.localeCompare(right.name));
+  }
+
+  async login(body: unknown, client: string): Promise<Opened> {
+    const key = clientKey(client);
+    if (this.clients.blocked(key)) throw slowDown();
+    if (!isRecord(body)) throw new StoreError(400, "bad-request");
+    const name = normalizeName(body.name);
+    const password = passwordOf(body.password);
+    if (this.names.blocked(name)) throw slowDown();
+    return this.limitHashing(key, async () => {
+      const identity = this.readIdentity(name);
+      const stored = identity ? identity.passwordHash : await this.dummyHash();
+      if (!identity || !(await this.verifyPassword(password, stored))) {
+        this.names.fail(name);
+        this.clients.fail(key);
+        throw new StoreError(401, "unauthorized");
+      }
+      this.names.clear(name);
+      if (this.roundsOf(identity.passwordHash) < this.rounds) {
+        const upgraded: Identity = { ...identity, passwordHash: await this.hashPassword(password) };
+        atomicWrite(join(this.identities, `${name}.json`), Buffer.from(JSON.stringify(upgraded)));
+      }
+      return this.openSession(identity);
+    });
+  }
+
+  /**
+   * Failures are counted after the hash, so without a bound a burst of requests would all
+   * reach PBKDF2 before the first one counts. Beyond the bound the answer is 429 at once.
+   */
+  private async limitHashing<T>(key: string, work: () => Promise<T>): Promise<T> {
+    const mine = this.hashingBy.get(key) ?? 0;
+    if (this.hashing >= MAX_HASHING || mine >= MAX_HASHING_PER_CLIENT) throw slowDown();
+    this.hashing += 1;
+    this.hashingBy.set(key, mine + 1);
+    try {
+      return await work();
+    } finally {
+      this.hashing -= 1;
+      const left = (this.hashingBy.get(key) ?? 1) - 1;
+      if (left > 0) this.hashingBy.set(key, left);
+      else this.hashingBy.delete(key);
+    }
+  }
+
+  logout(token: string): void {
+    const path = join(this.sessions, `${tokenHash(token)}.json`);
+    if (existsSync(path)) rmSync(path);
+  }
+
+  /** The account behind a session, or null. A session ends after `SESSION_IDLE_DAYS` without use. */
+  accountId(token: string): string | null {
+    if (!token) return null;
+    const path = join(this.sessions, `${tokenHash(token)}.json`);
+    const record = this.readSession(path);
+    if (!record || typeof record.accountId !== "string") return null;
+    const now = Date.now();
+    const lastSeen = this.lastSeen(record);
+    if (now - lastSeen > SESSION_IDLE_DAYS * DAY) {
+      rmSync(path, { force: true });
+      return null;
+    }
+    if (now - lastSeen > SESSION_TOUCH_MS) {
+      atomicWrite(path, Buffer.from(JSON.stringify({ ...record, lastSeenAt: stamp() })));
+    }
+    return record.accountId;
+  }
+
+  storeFor(accountId: string): Store {
+    const id = canonicalId(accountId);
+    const cached = this.stores.get(id);
+    if (cached) return cached;
+    const space = join(this.spaces, id);
+    if (!existsSync(space)) throw new StoreError(401, "unauthorized");
+    const store = new Store(space);
+    this.stores.set(id, store);
+    return store;
+  }
+
+  /**
+   * Workspaces of an account. `main` is the account's own space and always there; it is what
+   * clients from before workspaces sync with. Others live under `workspaces/<id>`. See ADR 0020.
+   */
+  workspaces(accountId: string): Workspace[] {
+    return [{ id: MAIN_WORKSPACE, name: this.mainName(accountId) }, ...this.readWorkspaces(accountId)];
+  }
+
+  createWorkspace(accountId: string, body: unknown): Workspace {
+    const name = workspaceName(isRecord(body) ? body.name : undefined);
+    const list = this.readWorkspaces(accountId);
+    // `main` counts too: at most 50 workspaces in all.
+    if (list.length + 1 >= MAX_WORKSPACES) throw new StoreError(400, "bad-request", { reason: "too many workspaces" });
+    const workspace = { id: randomUUID(), name };
+    mkdirSync(join(this.spaceOf(accountId), "workspaces", workspace.id), { recursive: true, mode: DIR_MODE });
+    this.writeWorkspaces(accountId, [...list, workspace]);
+    return workspace;
+  }
+
+  renameWorkspace(accountId: string, workspaceId: string, body: unknown): Workspace {
+    const name = workspaceName(isRecord(body) ? body.name : undefined);
+    if (workspaceId === MAIN_WORKSPACE) {
+      atomicWrite(join(this.spaceOf(accountId), "name.txt"), Buffer.from(name));
+      return { id: MAIN_WORKSPACE, name };
+    }
+    const id = canonicalId(workspaceId);
+    const list = this.readWorkspaces(accountId);
+    const index = list.findIndex((workspace) => workspace.id === id);
+    if (index < 0) throw new StoreError(404, "not-found");
+    list[index] = { id, name };
+    this.writeWorkspaces(accountId, list);
+    return list[index];
+  }
+
+  /** The store of one workspace. Unknown workspaces are 404, never created on the fly. */
+  workspaceStore(accountId: string, workspaceId: string): Store {
+    if (workspaceId === MAIN_WORKSPACE) return this.storeFor(accountId);
+    const id = canonicalId(workspaceId);
+    if (!this.readWorkspaces(accountId).some((workspace) => workspace.id === id)) {
+      throw new StoreError(404, "not-found", { reason: "unknown workspace" });
+    }
+    const key = `${canonicalId(accountId)}/${id}`;
+    const cached = this.stores.get(key);
+    if (cached) return cached;
+    const store = new Store(join(this.spaceOf(accountId), "workspaces", id));
+    this.stores.set(key, store);
+    return store;
+  }
+
+  private spaceOf(accountId: string): string {
+    const space = join(this.spaces, canonicalId(accountId));
+    if (!existsSync(space)) throw new StoreError(401, "unauthorized");
+    return space;
+  }
+
+  private mainName(accountId: string): string {
+    const path = join(this.spaceOf(accountId), "name.txt");
+    if (!existsSync(path)) return DEFAULT_MAIN_NAME;
+    const name = readFileSync(path, "utf8").trim();
+    return name || DEFAULT_MAIN_NAME;
+  }
+
+  private readWorkspaces(accountId: string): Workspace[] {
+    const path = join(this.spaceOf(accountId), "workspaces.json");
+    if (!existsSync(path)) return [];
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) throw new Error(`${path}: not a list`);
+    return parsed.filter(
+      (item): item is Workspace => isRecord(item) && typeof item.id === "string" && typeof item.name === "string",
+    );
+  }
+
+  private writeWorkspaces(accountId: string, list: Workspace[]): void {
+    atomicWrite(join(this.spaceOf(accountId), "workspaces.json"), Buffer.from(JSON.stringify(list, null, 2)));
+  }
+
+  /** Removes sessions past their idle limit. */
+  sweep(): void {
+    const now = Date.now();
+    for (const name of readdirSync(this.sessions)) {
+      if (!name.endsWith(".json")) continue;
+      const path = join(this.sessions, name);
+      const record = this.readSession(path);
+      if (!record) continue;
+      if (now - this.lastSeen(record) > SESSION_IDLE_DAYS * DAY) rmSync(path, { force: true });
+    }
+  }
+
+  /** The first account is the admin. It also claims notes from before accounts existed. */
+  private create(name: string, passwordHash: string, admin: boolean): Identity {
+    // Re-checked here because callers hash the password in between.
+    if (existsSync(join(this.identities, `${name}.json`))) throw new StoreError(409, "name-taken");
+    const accountId = randomUUID();
+    const space = join(this.spaces, accountId);
+    mkdirSync(space, { mode: DIR_MODE });
+    if (admin) this.claimLegacy(space);
+    const identity: Identity = {
+      id: accountId,
+      name,
+      passwordHash,
+      createdAt: stamp(),
+      ...(admin ? { admin: true } : {}),
+    };
+    atomicWrite(join(this.identities, `${name}.json`), Buffer.from(JSON.stringify(identity)));
+    this.storeFor(accountId);
+    return identity;
+  }
+
+  /** Servers from before ADR 0021 have accounts but no admin. The oldest one becomes it. */
+  private ensureAdmin(): void {
+    const all = this.allIdentities();
+    if (all.length === 0 || all.some((identity) => identity.admin === true)) return;
+    const oldest = all.reduce((left, right) =>
+      right.createdAt < left.createdAt || (right.createdAt === left.createdAt && right.name < left.name) ? right : left,
+    );
+    atomicWrite(join(this.identities, `${oldest.name}.json`), Buffer.from(JSON.stringify({ ...oldest, admin: true })));
+  }
+
+  private requireAdmin(accountId: string): void {
+    if (this.allIdentities().some((identity) => identity.id === accountId && identity.admin === true)) return;
+    throw new StoreError(403, "forbidden");
+  }
+
+  private allIdentities(): Identity[] {
+    return readdirSync(this.identities)
+      .filter((name) => name.endsWith(".json"))
+      .map((name) => JSON.parse(readFileSync(join(this.identities, name), "utf8")) as Identity);
+  }
+
+  private claimLegacy(space: string): void {
+    for (const name of ["notes", "blobs", "changes.jsonl", "state.json"]) {
+      const source = join(this.root, name);
+      const target = join(space, name);
+      if (existsSync(source) && !existsSync(target)) renameSync(source, target);
+    }
+  }
+
+  private openSession(identity: Identity): Opened {
+    const token = tokenUrlSafe(32);
+    const now = stamp();
+    const record = { accountId: identity.id, createdAt: now, lastSeenAt: now };
+    atomicWrite(join(this.sessions, `${tokenHash(token)}.json`), Buffer.from(JSON.stringify(record)));
+    return { token, account: { id: identity.id, name: identity.name, admin: identity.admin === true } };
+  }
+
+  private readSession(path: string): SessionRecord | null {
+    if (!existsSync(path)) return null;
+    try {
+      const record = JSON.parse(readFileSync(path, "utf8")) as unknown;
+      if (isRecord(record)) return record;
+    } catch {
+      // A broken session file is no session.
+    }
+    rmSync(path, { force: true });
+    return null;
+  }
+
+  /** Sessions from before idle expiry have no `lastSeenAt` and count from their creation. */
+  private lastSeen(record: SessionRecord): number {
+    const raw = typeof record.lastSeenAt === "string" ? record.lastSeenAt : record.createdAt;
+    const parsed = typeof raw === "string" ? Date.parse(raw) : Number.NaN;
+    return Number.isFinite(parsed) ? parsed : 0;
+  }
+
+  private any(): boolean {
+    return readdirSync(this.identities).some((name) => name.endsWith(".json"));
+  }
+
+  private readIdentity(name: string): Identity | null {
+    const path = join(this.identities, `${name}.json`);
+    if (!existsSync(path)) return null;
+    return JSON.parse(readFileSync(path, "utf8")) as Identity;
+  }
+
+  /** Unknown names cost the same work as known ones, so timing does not reveal them. */
+  private dummyHash(): Promise<string> {
+    this.dummy ??= this.hashPassword("inkhash-dummy-password");
+    return this.dummy;
+  }
+
+  private async hashPassword(password: string): Promise<string> {
+    const salt = randomBytes(16);
+    const digest = await pbkdf2Async(password, salt, this.rounds, 32, "sha256");
+    return `pbkdf2_sha256$${this.rounds}$${salt.toString("hex")}$${digest.toString("hex")}`;
+  }
+
+  private roundsOf(stored: string): number {
+    const rounds = Number(stored.split("$")[1]);
+    return Number.isInteger(rounds) ? rounds : 0;
+  }
+
+  private async verifyPassword(password: string, stored: string): Promise<boolean> {
+    const [scheme, roundsRaw, saltHex, digestHex] = stored.split("$");
+    if (scheme !== "pbkdf2_sha256" || !roundsRaw || !saltHex || !digestHex) return false;
+    const rounds = Number(roundsRaw);
+    if (!Number.isInteger(rounds) || rounds < 1) return false;
+    try {
+      const digest = await pbkdf2Async(password, Buffer.from(saltHex, "hex"), rounds, 32, "sha256");
+      const expected = Buffer.from(digestHex, "hex");
+      if (digest.length !== expected.length) return false;
+      return timingSafeEqual(digest, expected);
+    } catch {
+      return false;
+    }
+  }
+}

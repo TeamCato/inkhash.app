@@ -1,0 +1,38 @@
+# Tests the server on every change. server-release.yml calls it before publishing.
+name: Server
+
+on:
+  workflow_call:
+  push:
+    branches: [main]
+    paths:
+      - "Server/**"
+      - "deploy/**"
+      - "docs/DEPLOY.md"
+      - ".github/workflows/server.yml"
+  pull_request:
+    paths:
+      - "Server/**"
+      - "deploy/**"
+      - "docs/DEPLOY.md"
+      - ".github/workflows/server.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-node@v5
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: Server/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        working-directory: Server
+      - run: npm test
+        working-directory: Server
+      - run: shellcheck deploy/linux/install.sh deploy/package.sh
+      - run: docker build --pull -t inkhash-server:test Server
