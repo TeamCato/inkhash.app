@@ -5,6 +5,7 @@ struct TextNoteView: View {
     @State private var session: TextSession
     @Environment(AppModel.self) private var model
     @State private var compact = false
+    @State private var showsPaper = false
 
     /// Title and path start where the text starts, right of the marker column.
     static var gutter: CGFloat { NoteDocument.gutter }
@@ -49,9 +50,21 @@ struct TextNoteView: View {
                 proxy.scrollTo(Self.caretID)
             }
         }
-        .background(Ink.paper.ignoresSafeArea())
+        // A text note has a colour only, no pattern. See ADR 0042.
+        .background((record?.note.shownPaper ?? .standard).fill.ignoresSafeArea())
         .compactWidth($compact)
         .navigationTitle("")
+        .toolbar {
+            ToolbarItem(placement: .primaryAction) {
+                Button { showsPaper = true } label: { Image(systemName: "paintpalette") }
+                    .accessibilityLabel("Papierfarbe")
+                    .popover(isPresented: $showsPaper) {
+                        PaperPicker(paper: record?.note.shownPaper ?? .standard, patterns: false) {
+                            model.setPaper(noteID: session.noteID, paper: $0)
+                        }
+                    }
+            }
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         #endif

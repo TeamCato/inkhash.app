@@ -57,6 +57,8 @@ public struct Note: Equatable, Sendable, Identifiable {
     /// Folder path, segments joined by "/". Empty means no folder. See ADR 0020.
     public var folder: String
     public var favorite: Bool
+    /// Colour and pattern under the writing. Nil is `Paper.standard`. See ADR 0042.
+    public var paper: Paper?
 
     public init(
         schemaVersion: Int = Note.schema,
@@ -71,7 +73,8 @@ public struct Note: Equatable, Sendable, Identifiable {
         tags: [String] = [],
         pages: [InkPage]? = nil,
         folder: String = "",
-        favorite: Bool = false
+        favorite: Bool = false,
+        paper: Paper? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
@@ -86,6 +89,7 @@ public struct Note: Equatable, Sendable, Identifiable {
         self.pages = pages
         self.folder = folder
         self.favorite = favorite
+        self.paper = paper
     }
 
     /// Equal in everything a person wrote. Ignores revision and timestamps.
@@ -98,6 +102,7 @@ public struct Note: Equatable, Sendable, Identifiable {
             && pages == other.pages
             && folder == other.folder
             && favorite == other.favorite
+            && paper == other.paper
             && (deletedAt == nil) == (other.deletedAt == nil)
     }
 
@@ -195,9 +200,61 @@ public struct Note: Equatable, Sendable, Identifiable {
         self.pages = pages
         self.kind = .ink
         self.markdown = nil
-        self.transcript = pages.map(\.transcript).filter { !$0.isEmpty }.joined(separator: "\n\n")
-        self.tags = Hashtags.unique(pages.flatMap(\.tags))
+        refreshInkSummary()
         return true
+    }
+
+    /// The paper as shown: the standard where the note has none.
+    public var shownPaper: Paper { paper ?? .standard }
+
+    /// Sets the paper. A text note keeps only the colour; the standard paper clears the field.
+    /// Returns false if nothing changed. See ADR 0042.
+    @discardableResult
+    public mutating func setPaper(_ next: Paper) -> Bool {
+        var next = next
+        if kind == .text { next.pattern = .blank }
+        let stored: Paper? = next == .standard ? nil : next
+        guard stored != paper else { return false }
+        paper = stored
+        return true
+    }
+
+    /// Puts the pages in the given order. The ids must be exactly the pages there are.
+    @discardableResult
+    public mutating func reorderPages(_ order: [UUID]) -> Bool {
+        guard let pages, order.count == pages.count, Set(order) == Set(pages.map(\.id)),
+              order != pages.map(\.id) else { return false }
+        let byID = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, $0) })
+        self.pages = order.compactMap { byID[$0] }
+        refreshInkSummary()
+        return true
+    }
+
+    /// Moves one page by `offset` places, as far as the ends allow.
+    @discardableResult
+    public mutating func movePage(_ pageID: UUID, by offset: Int) -> Bool {
+        guard var order = pages?.map(\.id), let from = order.firstIndex(of: pageID) else { return false }
+        let to = min(max(from + offset, 0), order.count - 1)
+        guard to != from else { return false }
+        order.insert(order.remove(at: from), at: to)
+        return reorderPages(order)
+    }
+
+    /// Removes a page. The last page of a note stays.
+    @discardableResult
+    public mutating func removePage(_ pageID: UUID) -> Bool {
+        guard var pages, pages.count > 1, let index = pages.firstIndex(where: { $0.id == pageID }) else { return false }
+        pages.remove(at: index)
+        self.pages = pages
+        refreshInkSummary()
+        return true
+    }
+
+    /// Transcript and tags of an ink note follow its pages, in page order.
+    private mutating func refreshInkSummary() {
+        guard let pages else { return }
+        transcript = pages.map(\.transcript).filter { !$0.isEmpty }.joined(separator: "\n\n")
+        tags = Hashtags.unique(pages.flatMap(\.tags))
     }
 
     private static func firstLine(_ transcript: String?) -> String? {
@@ -218,7 +275,7 @@ public struct Note: Equatable, Sendable, Identifiable {
 extension Note: Codable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, id, kind, title, revision, updatedAt, deletedAt
-        case markdown, transcript, tags, pages, folder, favorite
+        case markdown, transcript, tags, pages, folder, favorite, paper
     }
 
     public init(from decoder: Decoder) throws {
@@ -241,6 +298,8 @@ extension Note: Codable {
         // Notes from before folders carry neither field.
         self.folder = try container.decodeIfPresent(String.self, forKey: .folder) ?? ""
         self.favorite = try container.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
+        // Notes from before ADR 0042 have the standard paper.
+        self.paper = try container.decodeIfPresent(Paper.self, forKey: .paper)
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -274,6 +333,8 @@ extension Note: Codable {
         }
         try container.encode(folder, forKey: .folder)
         try container.encode(favorite, forKey: .favorite)
+        // Left out, not null, so notes on the standard paper look as they did before.
+        try container.encodeIfPresent(paper, forKey: .paper)
     }
 }
 

@@ -19,6 +19,8 @@ struct InkNoteView: View {
     @State private var editor = InkEditorState()
     @State private var pageIndex = 0
     @State private var compact = false
+    @State private var showsPaper = false
+    @State private var showsPages = false
     #if os(iOS)
     @State private var photoItem: PhotosPickerItem?
     @State private var showsPhotos = false
@@ -68,7 +70,8 @@ struct InkNoteView: View {
             #endif
         }
         .compactWidth($compact)
-        .background(Ink.paper.ignoresSafeArea())
+        // The paper's colour is the whole screen of the note, also under the title. See ADR 0042.
+        .background(note.shownPaper.fill.ignoresSafeArea())
         .overlay(alignment: .top) {
             if model.record(note.id)?.conflict == true {
                 ConflictBanner(noteID: note.id)
@@ -111,7 +114,16 @@ struct InkNoteView: View {
                     Button { turn(to: min(pages.count - 1, pageIndex + 1)) } label: { Image(systemName: "chevron.down") }
                         .disabled(pageIndex >= pages.count - 1)
                         .accessibilityLabel("Nächste Seite")
+                    Button { showsPages = true } label: { Image(systemName: "square.grid.2x2") }
+                        .accessibilityLabel("Seiten ordnen")
                 }
+            }
+            ToolbarItem(placement: .primaryAction) {
+                Button { showsPaper = true } label: { Image(systemName: "rectangle.split.3x3") }
+                    .accessibilityLabel("Papier")
+                    .popover(isPresented: $showsPaper) {
+                        PaperPicker(paper: note.shownPaper, patterns: true) { model.setPaper(noteID: note.id, paper: $0) }
+                    }
             }
             #if os(iOS)
             ToolbarItem(placement: .primaryAction) {
@@ -126,6 +138,21 @@ struct InkNoteView: View {
             #endif
         }
         .navigationTitle("")
+        .sheet(isPresented: $showsPages) {
+            PageOverview(noteID: note.id, current: pages.indices.contains(index) ? pages[index].id : nil) { pageID in
+                if let target = current.pages?.firstIndex(where: { $0.id == pageID }) { turn(to: target) }
+            }
+            .environment(model)
+        }
+        // Moving or deleting pages keeps the open page open, or the one that took its place.
+        .onChange(of: pages.map(\.id)) { old, new in
+            guard old.indices.contains(pageIndex) else { return }
+            if let moved = new.firstIndex(of: old[pageIndex]) {
+                if moved != pageIndex { turn(to: moved) }
+            } else {
+                turn(to: min(pageIndex, max(new.count - 1, 0)))
+            }
+        }
         #if os(iOS)
         .navigationBarTitleDisplayMode(.inline)
         .photosPicker(isPresented: $showsPhotos, selection: $photoItem, matching: .images)
@@ -233,6 +260,7 @@ struct InkNoteView: View {
                     pageID: page.id,
                     pageWidth: page.width,
                     pageHeight: page.height,
+                    paper: current.shownPaper.pattern,
                     scale: scale,
                     // An iPhone has no pencil: the finger always draws, two fingers scroll. See ADR 0026.
                     fingerDrawing: tools.fingerDraws || Device.isPhone,
@@ -315,6 +343,8 @@ struct InkPageCanvas: UIViewRepresentable {
     var pageID: UUID
     var pageWidth: Double
     var pageHeight: Double
+    /// Lines, grid or dots under everything, see ADR 0042. The colour is the view's background.
+    var paper: PaperPattern
     /// Screen points per page point. Strokes and elements stay in page coordinates, see ADR 0018.
     var scale: CGFloat
     var fingerDrawing: Bool
@@ -421,6 +451,8 @@ struct InkPageCanvas: UIViewRepresentable {
         private var pending: Data?
 
         /// Elements live under the ink, the overlay above it. Both use page coordinates, scaled.
+        /// The paper's pattern lies under the elements and covers only the visible rectangle.
+        private let paperView = PaperPatternView()
         private let elementLayer = PassthroughView()
         private let overlay = PassthroughView()
         private var elementViews: [UUID: ElementView] = [:]
@@ -459,6 +491,7 @@ struct InkPageCanvas: UIViewRepresentable {
             elementLayer.layer.anchorPoint = .zero
             overlay.layer.anchorPoint = .zero
             canvas.insertSubview(elementLayer, at: 0)
+            canvas.insertSubview(paperView, at: 0)
             canvas.addSubview(overlay)
             for layer in [preview, selectionOutline] {
                 layer.fillColor = UIColor(Ink.accent).withAlphaComponent(0.06).cgColor
@@ -495,7 +528,11 @@ struct InkPageCanvas: UIViewRepresentable {
                 view.contentScaleFactor = pixels
             }
             canvas.sendSubviewToBack(elementLayer)
+            canvas.sendSubviewToBack(paperView)
             canvas.bringSubviewToFront(overlay)
+            layoutPaper()
+            // SwiftUI can update before the canvas has its final size; place the pattern again once it has.
+            DispatchQueue.main.async { [weak self] in self?.layoutPaper() }
             preview.lineWidth = 1.5 / scale
             selectionOutline.lineWidth = 1.5 / scale
         }
@@ -555,7 +592,14 @@ struct InkPageCanvas: UIViewRepresentable {
             selectedStrokes = []
         }
 
+        /// The pattern follows the visible rectangle, in content points of the canvas.
+        func layoutPaper() {
+            guard let canvas else { return }
+            paperView.show(parent.paper, visible: canvas.bounds, pageWidth: parent.pageWidth, scale: parent.scale)
+        }
+
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
+            layoutPaper()
             let offset = scrollView.contentOffset
             if parent.editor.offset != offset { parent.editor.offset = offset }
         }
@@ -1168,6 +1212,7 @@ struct InkPageCanvas: View {
     var pageID: UUID
     var pageWidth: Double
     var pageHeight: Double
+    var paper: PaperPattern
     var scale: CGFloat
     var fingerDrawing: Bool
     var tools: InkToolState
@@ -1181,6 +1226,8 @@ struct InkPageCanvas: View {
         let size = CGSize(width: pageWidth, height: pageHeight)
         ScrollView(.vertical) {
             ZStack(alignment: .topLeading) {
+                PaperPatternCanvas(pattern: paper, pageWidth: pageWidth, scale: scale)
+                    .frame(width: pageWidth * scale, height: pageHeight * scale)
                 if let image = PageElementsImage.cgImage(elements: elements, size: size, scale: 2, load: loadBlob) {
                     Image(decorative: image, scale: 2)
                         .resizable()

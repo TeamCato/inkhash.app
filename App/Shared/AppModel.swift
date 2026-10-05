@@ -848,6 +848,24 @@ final class AppModel {
         }
     }
 
+    /// Colour and pattern of a note. See ADR 0042.
+    func setPaper(noteID: UUID, paper: Paper) {
+        change(noteID) { $0.setPaper(paper) }
+    }
+
+    func reorderPages(noteID: UUID, order: [UUID]) {
+        change(noteID) { $0.reorderPages(order) }
+    }
+
+    func movePage(noteID: UUID, pageID: UUID, by offset: Int) {
+        change(noteID) { $0.movePage(pageID, by: offset) }
+    }
+
+    /// Removes a page; the last page of a note stays. Its blob stays in the store like every blob.
+    func deletePage(noteID: UUID, pageID: UUID) {
+        change(noteID) { $0.removePage(pageID) }
+    }
+
     func drawingData(for blob: String) -> Data? {
         try? store.blob(blob)
     }

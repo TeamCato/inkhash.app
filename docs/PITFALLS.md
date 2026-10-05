@@ -309,3 +309,10 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Seiten in falscher Reihenfolge, gelöschte Seiten tauchen auf, Striche sind schwarz statt blau oder verschoben, eine Seite hat das falsche Papier.
 **Ursache.** Fünf Dinge, siehe ADR 0041. `index.notes.pb` ist nicht die Reihenfolge; die steht in den Schlüsseln der Ereignisse `#54`/`#55`, bytewise verglichen. Die Notizschicht hat die UUID der Seite plus eins mit Übertrag (`…000F` → `…0010`); ein Vergleich nur der letzten Ziffer findet diese Seiten nicht. Protobuf lässt Farbanteile weg, die null sind; der Standard ist 0, nicht 1. Ein Strich, der mit dem Lasso verschoben wurde, trägt den Versatz in `#6` und nicht in den Punkten. Ereignis `#3` bindet eine Seite an ein anderes Papier; das letzte gewinnt.
 **Wache.** `GoodNotesTests.testOrdersPagesByKeyDropsDeletedPagesAndScales` und `testPageUUIDCarries`. Breiten und Farben der PencilKit-Tinten sind gemessen und mit GoodNotes' eigenem PDF-Export verglichen (`InkImport.pkStroke`); dafür gibt es keinen Test, nur `make import-spike`.
+
+## P-052 · Papiermuster als eine große Ebene
+
+**Symptom.** Speicher läuft voll oder die App wird beendet, sobald eine lange Handnotiz Linien oder Punkte hat. Oder sie stürzt beim Zeichnen des Musters ab.
+**Ursache.** Eine Ebene über die ganze Seite hält ein Bitmap von Seitenhöhe mal Zoom mal Bildschirmskala, bei 10 000 Punkten mehrere hundert MB. `CATiledLayer` zeichnet in Hintergrund-Threads, und unter Swift 6 ist `draw(_:)` einer `UIView` an den Main Actor gebunden.
+**Wache.** `PaperPatternView` deckt nur `canvas.bounds` und wird in `scrollViewDidScroll` neu gesetzt (`Coordinator.layoutPaper`). Nach jedem Update setzt `layoutLayers` sie einen Takt später noch einmal: SwiftUI ruft `updateUIView` mitunter, bevor die Zeichenfläche ihre Größe hat, und das Muster blieb dann bis zum ersten Scrollen unsichtbar. Kein automatischer Test; im Gerät eine lange Seite mit Punkten scrollen.
+

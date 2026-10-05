@@ -12,6 +12,8 @@ Suche ist eine reine Funktion in `NoteSearch`. Die Bibliothek ruft sie über den
 
 Import sitzt in zwei Hälften. Im Kern liest `PDFInk` die Vektorpfade eines PDFs seitenweise als Polylinien, `GoodNotes` liest eine `.goodnotes`-Datei (ZIP über `ZipArchive`, Protobuf, LZ4 und TPL in `GoodNotesWire`) als Seiten mit Strichen, Bildern und importierten PDF-Seiten. `InkImport` in der App macht daraus `PKStroke`s, eine `PKDrawing` und `image`-Elemente als JPEG. `AppModel.importFile` erkennt die Art an den ersten Bytes und legt die Notizen an. `tools/PdfInkSpike.swift` ist dasselbe als Kommandozeile für echte Dateien (`make import-spike FILE=…`, PDF oder `.goodnotes`). Siehe ADR 0024 und 0041.
 
+Papier gehört zur Notiz (`Note.paper`, `Paper` im Kern). `PaperArt` in der App zeichnet Linien, Karos und Punkte in Seitenkoordinaten: auf dem iPad über `PaperPatternView`, die nur den sichtbaren Ausschnitt deckt und dem Scrollen folgt, auf dem Mac über `PaperPatternCanvas`. Die Farbe ist der Hintergrund der ganzen Notiz. `PageImage` rendert einen Ausschnitt einer Seite für Ausschnitte (ohne Papier) und für die Miniaturen in `PageOverview` (mit Papier). Seiten ordnet und löscht `Note.reorderPages`, `movePage` und `removePage`; Abschrift und Schlagwörter folgen. Siehe ADR 0042.
+
 Texterkennung sitzt in `HandwritingRecognizer`. Sie rendert die Zeichnung, liest sie mit Vision und gibt Wörter an `Hashtags` weiter. Das Ergebnis schreibt der Client auf die Seite, dann synchronisiert er es wie jeden anderen Feldwert.
 
 ## Verzeichnisse

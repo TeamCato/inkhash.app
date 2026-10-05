@@ -413,3 +413,43 @@ test("elements take part in the retry comparison", () => {
     assert.equal(store.cursor, 1);
   });
 });
+
+test("paper is checked, stored and part of the retry comparison", () => {
+  const root = mkdtempSync(join(tmpdir(), "inkhash-"));
+  try {
+    const store = new Store(root);
+    const noteId = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    const reason = (body: Record<string, unknown>) => {
+      try {
+        store.putNote(noteId, 0, body);
+      } catch (error) {
+        return error instanceof StoreError ? error.extra.reason : "other";
+      }
+      return "stored";
+    };
+    assert.equal(reason({ ...textNote(noteId), paper: { color: "blau" } }), "paper");
+    assert.equal(reason({ ...textNote(noteId), paper: "#FAF5E8" }), "paper");
+    assert.equal(reason({ ...textNote(noteId), paper: { color: "#FAF5E8", pattern: "lines" } }), "paper");
+    assert.equal(reason({ ...textNote(noteId), paper: { color: "#FAF5E8", pattern: "hexagons" } }), "paper");
+
+    // Standard paper: no key at all, also when the client sends null.
+    const [, plain] = store.putNote(noteId, 0, { ...textNote(noteId), paper: null });
+    assert.equal("paper" in plain, false);
+
+    const [, cream] = store.putNote(noteId, 1, { ...textNote(noteId), paper: { color: "#faf5e8" } });
+    assert.deepEqual(cream.paper, { color: "#FAF5E8", pattern: "blank" });
+    assert.deepEqual(store.getNote(noteId).paper, { color: "#FAF5E8", pattern: "blank" });
+
+    // A retry with the same paper is the stored note; another paper is a conflict.
+    const [status, again] = store.putNote(noteId, 1, { ...textNote(noteId), paper: { color: "#FAF5E8", pattern: "blank" } });
+    assert.equal(status, 200);
+    assert.equal(again.revision, 2);
+    assert.throws(() => store.putNote(noteId, 1, { ...textNote(noteId), paper: { color: "#EAF1FA" } }), Conflict);
+
+    const inkId = "11111111-2222-4333-8444-555555555555";
+    const [, lined] = store.putNote(inkId, 0, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines" } });
+    assert.deepEqual(lined.paper, { color: "#FDFDFC", pattern: "lines" });
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

@@ -111,6 +111,12 @@ export interface Element {
   link?: string;
 }
 
+/** Colour and pattern under the writing, for the whole note. See ADR 0042. */
+export interface Paper {
+  color: string;
+  pattern: "blank" | "grid" | "lines" | "dots";
+}
+
 export interface Note {
   schemaVersion: 1;
   id: string;
@@ -123,6 +129,8 @@ export interface Note {
   /** Folder path, segments joined by "/". Empty means no folder. */
   folder: string;
   favorite: boolean;
+  /** Absent means the standard paper. */
+  paper?: Paper;
   revision: number;
   updatedAt: string;
   deletedAt: string | null;
@@ -202,6 +210,7 @@ function contentKey(note: Note): string {
     note.pages,
     note.folder ?? "",
     note.favorite ?? false,
+    note.paper ?? null,
   ]);
 }
 
@@ -261,6 +270,16 @@ function link(value: unknown): string {
   if (typeof value !== "string" || value.length > MAX_LINK) throw badElement();
   if (!LINK_PREFIXES.some((prefix) => value.startsWith(prefix))) throw badElement();
   return value;
+}
+
+/** A text note has a colour only; its pattern is always blank. */
+function paperOf(value: unknown, kind: Note["kind"]): Paper {
+  const bad = () => new StoreError(400, "bad-request", { reason: "paper" });
+  if (!isRecord(value) || typeof value.color !== "string" || !COLOR_RE.test(value.color)) throw bad();
+  const pattern = value.pattern ?? "blank";
+  if (pattern !== "blank" && pattern !== "grid" && pattern !== "lines" && pattern !== "dots") throw bad();
+  if (kind === "text" && pattern !== "blank") throw bad();
+  return { color: value.color.toUpperCase(), pattern };
 }
 
 const UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -452,6 +471,7 @@ export class Store {
     if (!validFolder(folder)) throw new StoreError(400, "bad-request", { reason: "folder" });
     const favorite = "favorite" in body && body.favorite != null ? body.favorite : false;
     if (typeof favorite !== "boolean") throw new StoreError(400, "bad-request", { reason: "favorite" });
+    const paper = "paper" in body && body.paper != null ? paperOf(body.paper, kind) : undefined;
     if ("deletedAt" in body && body.deletedAt != null) {
       throw new StoreError(400, "bad-request", { reason: "use DELETE" });
     }
@@ -473,6 +493,7 @@ export class Store {
         pages: null,
         folder,
         favorite,
+        ...(paper ? { paper } : {}),
         revision: 0,
         updatedAt: "",
         deletedAt: null,
@@ -493,6 +514,7 @@ export class Store {
       pages: this.pages(pages),
       folder,
       favorite,
+      ...(paper ? { paper } : {}),
       revision: 0,
       updatedAt: "",
       deletedAt: null,

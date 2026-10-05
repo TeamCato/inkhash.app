@@ -41,45 +41,12 @@ enum ExcerptRenderer {
             return .placeholder("Bereich liegt außerhalb der Seite")
         }
         let rect = CGRect(x: clipped.x, y: clipped.y, width: clipped.width, height: clipped.height)
-        let pixelWidth = max(Int(rect.width * scale), 1)
-        let pixelHeight = max(Int(rect.height * scale), 1)
-        guard let context = CGContext(
-            data: nil, width: pixelWidth, height: pixelHeight, bitsPerComponent: 8, bytesPerRow: 0,
-            space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue
-        ) else { return .placeholder("Ausschnitt ließ sich nicht zeichnen") }
-
-        // Elements in page points, y down, shifted so the rectangle starts at the origin.
-        context.saveGState()
-        context.translateBy(x: 0, y: CGFloat(pixelHeight))
-        context.scaleBy(x: scale, y: -scale)
-        context.translateBy(x: -rect.minX, y: -rect.minY)
-        for element in page.elements.sorted(by: { $0.z < $1.z }) {
-            context.saveGState()
-            context.concatenate(ElementGeometry.transform(of: element))
-            ElementRenderer.draw(element, in: context, image: ElementContent.image(for: element, load: source.loadBlob))
-            context.restoreGState()
+        // Without the paper: an excerpt sits on the paper of the note that shows it. See ADR 0042.
+        guard let image = PageImage.render(page, rect: rect, scale: scale, paper: nil, load: source.loadBlob) else {
+            return .placeholder("Ausschnitt ließ sich nicht zeichnen")
         }
-        context.restoreGState()
-
-        // Ink on top, drawn upright in the unflipped bitmap.
-        if let data = source.loadBlob(page.blob), let drawing = try? PKDrawing(data: data),
-           let ink = cgImage(drawing.image(from: rect, scale: scale)) {
-            context.draw(ink, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
-        }
-        guard let image = context.makeImage() else { return .placeholder("Ausschnitt ließ sich nicht zeichnen") }
         return .image(image, size: rect.size)
     }
-
-    #if os(macOS)
-    private static func cgImage(_ image: NSImage) -> CGImage? {
-        var proposed = CGRect(origin: .zero, size: image.size)
-        return image.cgImage(forProposedRect: &proposed, context: nil, hints: nil)
-    }
-    #else
-    private static func cgImage(_ image: UIImage) -> CGImage? {
-        image.cgImage
-    }
-    #endif
 }
 
 /// One excerpt in the text: a single attachment character that fits itself to the text width. See ADR 0032.
