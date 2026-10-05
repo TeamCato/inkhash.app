@@ -183,7 +183,7 @@ struct SidebarView: View {
             Divider()
             Button("Ordner", systemImage: "folder.badge.plus") { ask(.create(parent: "")) }
             Divider()
-            Button("PDF importieren…", systemImage: "square.and.arrow.down") { model.importRequested = true }
+            Button("PDF oder GoodNotes importieren…", systemImage: "square.and.arrow.down") { model.importRequested = true }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 15, weight: .bold))
@@ -200,8 +200,8 @@ struct SidebarView: View {
         .accessibilityLabel("Neu")
         .padding(.trailing, 6)
         .padding(.bottom, 8)
-        .fileImporter(isPresented: $model.importRequested, allowedContentTypes: [.pdf]) { result in
-            if case .success(let url) = result { model.importPDF(at: url) }
+        .fileImporter(isPresented: $model.importRequested, allowedContentTypes: [.pdf, .goodnotes]) { result in
+            if case .success(let url) = result { model.importFile(at: url) }
         }
     }
 

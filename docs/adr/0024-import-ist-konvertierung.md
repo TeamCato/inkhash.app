@@ -1,6 +1,6 @@
 # 0024 Import ist Konvertierung, kein Hintergrund
 
-Status: angenommen, Spike. Fotos auf der Seite gibt es seit 0028. Die Nummer 0024 trägt auch „Links im Text“; beide gelten.
+Status: angenommen, Spike. Fotos auf der Seite gibt es seit 0028. Die Nummer 0024 trägt auch „Links im Text“; beide gelten. ADR 0041 hebt „Die Quelle ist der PDF-Export“ und „Keine `.goodnotes`-Datei lesen“ auf: Inkhash liest `.goodnotes` jetzt direkt.
 
 ## Entscheidung
 

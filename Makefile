@@ -62,10 +62,10 @@ icon:
 	.build/icon/render-icon App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 	.build/icon/render-icon --mac App/Resources/Assets.xcassets/AppIcon.appiconset
 
-# Spike for ADR 0024: PDF export (GoodNotes 6) to PKDrawing blobs and PNG previews.
-# make import-spike FILE=path/to/export.pdf  ->  .build/import-spike/<name>/
+# Spike for ADR 0024 and 0041: PDF export or .goodnotes notebook to PKDrawing blobs and PNG previews.
+# make import-spike FILE=path/to/export.pdf or notebook.goodnotes  ->  .build/import-spike/<name>/
 import-spike:
-	@test -n "$(FILE)" || { echo "FILE=export.pdf setzen."; exit 1; }
+	@test -n "$(FILE)" || { echo "FILE=export.pdf oder notebook.goodnotes setzen."; exit 1; }
 	mkdir -p .build/import-spike
 	# PencilKit writes preferences and traps without a bundle identifier; the plist rides inside the binary.
 	swiftc -parse-as-library -O tools/PdfInkSpike.swift App/Shared/InkImport.swift Packages/InkhashCore/Sources/InkhashCore/*.swift \

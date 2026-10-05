@@ -569,52 +569,72 @@ final class AppModel {
         }
     }
 
-    /// Set by the menu; the sidebar shows the file picker and clears it. See ADR 0024.
+    /// Set by the menu; the sidebar shows the file picker and clears it. See ADR 0024 and 0041.
     var importRequested = false
 
-    /// A PDF export becomes one ink note with a page per PDF page. The title is the file name and
-    /// counts as set. Recognition runs when the note is opened. See ADR 0024.
-    func importPDF(at url: URL, in folder: String? = nil) {
+    /// A PDF export or a GoodNotes notebook becomes ink notes, one page per page. Which one it is
+    /// comes from the bytes, not the file name. See ADR 0024 and 0041.
+    func importFile(at url: URL, in folder: String? = nil) {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        let name = url.deletingPathExtension().lastPathComponent
         do {
             let data = try Data(contentsOf: url)
-            let imported = try InkImport.pages(fromPDF: data)
-            var pages: [InkPage] = []
-            for page in imported {
-                let sha = try store.putBlob(page.data)
-                pages.append(InkPage(blob: sha, width: page.width, height: page.height))
-            }
-            guard !pages.isEmpty else {
-                status = "Das PDF hat keine Seiten."
-                return
-            }
-            // A note holds at most 100 pages on the server; a longer file becomes several notes.
-            let name = url.deletingPathExtension().lastPathComponent
-            let parts = stride(from: 0, to: pages.count, by: Limits.pages).map { Array(pages[$0..<min($0 + Limits.pages, pages.count)]) }
-            var firstID: UUID?
-            for (offset, part) in parts.enumerated() {
-                var note = placed(Note.newInk(page: part[0]), in: folder)
-                note.pages = part
-                let suffix = parts.count > 1 ? " (\(offset + 1))" : ""
-                note.title = name.clippedUTF16(Limits.title - suffix.utf16.count) + suffix
-                note.updatedAt = InkhashTime.now()
-                upsert(note, dirty: true, conflict: false)
-                if firstID == nil { firstID = note.id }
-            }
-            if let folder { reveal(folder) }
-            selectedID = firstID
-            if parts.count > 1 {
-                status = "\(pages.count) Seiten importiert, aufgeteilt auf \(parts.count) Notizen."
+            if data.starts(with: [0x50, 0x4B]) {
+                let notebook = try InkImport.notebook(fromGoodNotes: data)
+                addImported(notebook.pages, name: name, in: folder, skipped: notebook.skipped)
             } else {
-                status = pages.count == 1 ? "Eine Seite importiert." : "\(pages.count) Seiten importiert."
+                addImported(try InkImport.pages(fromPDF: data), name: name, in: folder, skipped: 0)
             }
-            scheduleSync()
-        } catch PDFInkError.notAPDF {
-            status = "Die Datei ist kein PDF."
+        } catch PDFInkError.notAPDF, GoodNotesError.notGoodNotes {
+            status = "Die Datei ist weder ein PDF noch ein GoodNotes-Notizbuch."
+        } catch PDFInkError.noPages, GoodNotesError.noPages {
+            status = "Die Datei hat keine Seiten."
         } catch {
             status = "Der Import ist fehlgeschlagen."
         }
+    }
+
+    /// The title is the file name and counts as set. Recognition runs when the note is opened.
+    private func addImported(_ imported: [InkImport.ImportedPage], name: String, in folder: String?, skipped: Int) {
+        var pages: [InkPage] = []
+        do {
+            for page in imported {
+                let sha = try store.putBlob(page.data)
+                var elements: [PageElement] = []
+                for var image in page.images {
+                    image.element.blob = try store.putBlob(image.jpeg)
+                    elements.append(image.element)
+                }
+                pages.append(InkPage(blob: sha, width: page.width, height: page.height, elements: elements))
+            }
+        } catch {
+            status = "Der Import ließ sich nicht sichern."
+            return
+        }
+        guard !pages.isEmpty else {
+            status = "Die Datei hat keine Seiten."
+            return
+        }
+        // A note holds at most 100 pages on the server; a longer file becomes several notes.
+        let parts = stride(from: 0, to: pages.count, by: Limits.pages).map { Array(pages[$0..<min($0 + Limits.pages, pages.count)]) }
+        var firstID: UUID?
+        for (offset, part) in parts.enumerated() {
+            var note = placed(Note.newInk(page: part[0]), in: folder)
+            note.pages = part
+            let suffix = parts.count > 1 ? " (\(offset + 1))" : ""
+            note.title = name.clippedUTF16(Limits.title - suffix.utf16.count) + suffix
+            note.updatedAt = InkhashTime.now()
+            upsert(note, dirty: true, conflict: false)
+            if firstID == nil { firstID = note.id }
+        }
+        if let folder { reveal(folder) }
+        selectedID = firstID
+        var message = pages.count == 1 ? "Eine Seite importiert" : "\(pages.count) Seiten importiert"
+        if parts.count > 1 { message += ", aufgeteilt auf \(parts.count) Notizen" }
+        if skipped > 0 { message += skipped == 1 ? ". Ein Element fehlt, meist ein Textfeld" : ". \(skipped) Elemente fehlen, meist Textfelder" }
+        status = message + "."
+        scheduleSync()
     }
 
     /// Opens every folder above `path` in the folder tree so the note inside is visible.

@@ -350,6 +350,7 @@ struct NoteHeader: View {
                 help: "Pfad ändern",
                 font: .system(size: 12),
                 color: Ink.muted,
+                literal: true,
                 suggestions: { PathSuggestions.for($0, folders: model.folders) }
             ) { model.setFolder(id: noteID, typed: $0) }
         }
@@ -367,6 +368,8 @@ struct InlineField: View {
     var help: String
     var font: Font
     var color: Color
+    /// Typed as is: no automatic capitals or corrections. Capitals only when typed by hand.
+    var literal = false
     /// Proposals for what is typed so far; picking one replaces the draft. Nil shows none.
     var suggestions: ((String) -> [String])? = nil
     var commit: (String) -> Void
@@ -382,6 +385,10 @@ struct InlineField: View {
                     .textFieldStyle(.plain)
                     .focused($focused)
                     .onSubmit(finish)
+                    #if os(iOS)
+                    .textInputAutocapitalization(literal ? .never : .sentences)
+                    .autocorrectionDisabled(literal)
+                    #endif
                     .onChange(of: focused) { _, isFocused in
                         // A tap on a proposal takes the focus for a moment; finish only if it stays away.
                         guard !isFocused else { return }

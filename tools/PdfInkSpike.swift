@@ -1,6 +1,8 @@
-// Spike for ADR 0024: converts a PDF export (GoodNotes 6) into PKDrawing blobs and PNG previews.
+// Spike for ADR 0024 and 0041: converts a PDF export or a .goodnotes notebook into PKDrawing
+// blobs and PNG previews.
 //
 //   make import-spike FILE=path/to/export.pdf
+//   make import-spike FILE=path/to/notebook.goodnotes
 //
 // Writes into .build/import-spike/<name>/: page-N.drawing (PKDrawing bytes, what a blob would be),
 // page-N.png (how PencilKit renders it), and a summary on stdout. Compiled with swiftc next to
@@ -23,6 +25,10 @@ struct PdfInkSpike {
         try FileManager.default.createDirectory(at: outDir, withIntermediateDirectories: true)
 
         let data = try Data(contentsOf: source)
+        if data.starts(with: [0x50, 0x4B]) {
+            try goodNotes(data, name: source.lastPathComponent, outDir: outDir)
+            return
+        }
         let raw = try PDFInk.pages(from: data)
         let pages = PDFInk.withoutRepeated(raw)
 
@@ -47,9 +53,38 @@ struct PdfInkSpike {
         print("Ergebnis in \(outDir.path)")
     }
 
-    private static func png(_ drawing: PKDrawing, width: Double, height: Double) throws -> Data {
+    private static func goodNotes(_ data: Data, name: String, outDir: URL) throws {
+        let notebook = try InkImport.notebook(fromGoodNotes: data)
+        print("\(name): \(notebook.pages.count) Seiten, Titel \(notebook.title ?? "–"), \(notebook.skipped) Elemente übersprungen")
+        for (index, page) in notebook.pages.enumerated() {
+            let number = index + 1
+            try page.data.write(to: outDir.appendingPathComponent("page-\(number).drawing"))
+            let drawing = try PKDrawing(data: page.data)
+            try png(drawing, width: page.width, height: page.height, images: page.images)
+                .write(to: outDir.appendingPathComponent("page-\(number).png"))
+            print("  Seite \(number): \(Int(page.width))×\(Int(page.height)), \(drawing.strokes.count) Striche, \(page.images.count) Bilder, \(page.data.count) Bytes PKDrawing")
+        }
+        print("Ergebnis in \(outDir.path)")
+    }
+
+    /// Images are drawn under the ink on white, like the page does it.
+    private static func png(_ drawing: PKDrawing, width: Double, height: Double, images: [(element: PageElement, jpeg: Data)] = []) throws -> Data {
         let rect = CGRect(x: 0, y: 0, width: width, height: height)
-        let image = drawing.image(from: rect, scale: 2)
+        let image = NSImage(size: rect.size, flipped: true) { _ in
+            NSColor.white.setFill()
+            rect.fill()
+            for item in images.sorted(by: { $0.element.z < $1.element.z }) {
+                guard let picture = NSImage(data: item.jpeg), let context = NSGraphicsContext.current?.cgContext else { continue }
+                let e = item.element
+                context.saveGState()
+                context.translateBy(x: e.x, y: e.y)
+                context.rotate(by: e.rotation)
+                picture.draw(in: CGRect(x: -e.width / 2, y: -e.height / 2, width: e.width, height: e.height), from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+                context.restoreGState()
+            }
+            drawing.image(from: rect, scale: 2).draw(in: rect)
+            return true
+        }
         guard let tiff = image.tiffRepresentation, let bitmap = NSBitmapImageRep(data: tiff),
               let png = bitmap.representation(using: .png, properties: [:]) else {
             throw NSError(domain: "PdfInkSpike", code: 1, userInfo: [NSLocalizedDescriptionKey: "PNG fehlgeschlagen"])

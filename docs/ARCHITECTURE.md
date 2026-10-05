@@ -4,13 +4,13 @@
 
 | Ort | Darf | Darf nicht |
 | --- | --- | --- |
-| `Packages/InkhashCore` | Modell, Markdown, Tags, Suche, Sync-Entscheidung, lokaler Speicher, Bibliothek und ihre Bindung, HTTP-Client, PDF-Pfade lesen (`PDFInk`, nur CoreGraphics) | SwiftUI, PencilKit, Vision |
+| `Packages/InkhashCore` | Modell, Markdown, Tags, Suche, Sync-Entscheidung, lokaler Speicher, Bibliothek und ihre Bindung, HTTP-Client, PDF-Pfade lesen (`PDFInk`, nur CoreGraphics), GoodNotes-Dateien lesen (`GoodNotes`, `ZipArchive`, CoreGraphics und Compression) | SwiftUI, PencilKit, Vision |
 | `App/` | Oberfläche, Zeichenfläche, Texterkennung, Keychain | Eine zweite Sync-Wahrheit |
 | `Server/` | Dateien, Revisionen, Auth | Markdown verstehen, Striche lesen, Tags berechnen, suchen |
 
 Suche ist eine reine Funktion in `NoteSearch`. Die Bibliothek ruft sie über den Cache auf. Es gibt keinen Such-Endpunkt.
 
-Import sitzt in zwei Hälften: `PDFInk` im Kern liest die Vektorpfade eines PDFs seitenweise als Polylinien, `InkImport` in der App macht daraus `PKStroke`s und eine `PKDrawing`. `AppModel.importPDF` legt die Notiz an. `tools/PdfInkSpike.swift` ist dasselbe als Kommandozeile für echte Exporte (`make import-spike`). Siehe ADR 0024.
+Import sitzt in zwei Hälften. Im Kern liest `PDFInk` die Vektorpfade eines PDFs seitenweise als Polylinien, `GoodNotes` liest eine `.goodnotes`-Datei (ZIP über `ZipArchive`, Protobuf, LZ4 und TPL in `GoodNotesWire`) als Seiten mit Strichen, Bildern und importierten PDF-Seiten. `InkImport` in der App macht daraus `PKStroke`s, eine `PKDrawing` und `image`-Elemente als JPEG. `AppModel.importFile` erkennt die Art an den ersten Bytes und legt die Notizen an. `tools/PdfInkSpike.swift` ist dasselbe als Kommandozeile für echte Dateien (`make import-spike FILE=…`, PDF oder `.goodnotes`). Siehe ADR 0024 und 0041.
 
 Texterkennung sitzt in `HandwritingRecognizer`. Sie rendert die Zeichnung, liest sie mit Vision und gibt Wörter an `Hashtags` weiter. Das Ergebnis schreibt der Client auf die Seite, dann synchronisiert er es wie jeden anderen Feldwert.
 

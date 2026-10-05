@@ -297,3 +297,15 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** ufw oder firewalld blockt 8787, trotzdem ist der Server aus dem Internet oder dem ganzen Netz erreichbar, über reines HTTP.
 **Ursache.** Docker schreibt eigene iptables-Regeln für veröffentlichte Ports, vor denen der Firewall.
 **Wache.** `deploy/docker/compose.yaml` bindet `${INKHASH_BIND:-127.0.0.1}`. Nur fürs Heimnetz `0.0.0.0` setzen, nie zusammen mit einer Portfreigabe im Router. Kein automatischer Test.
+
+## P-050 · PDF-Seite als Bild bleibt winzig
+
+**Symptom.** Eine importierte PDF-Seite erscheint als kleines Bild in der Mitte eines leeren Rechtecks.
+**Ursache.** `CGPDFPage.getDrawingTransform` verkleinert nur, es vergrößert nie. Wer eine Seite in mehr Pixel rendert, als sie Punkte hat, bekommt sie in Originalgröße, zentriert.
+**Wache.** `InkImport.fill(_:with:)` rechnet die Transformation selbst, inklusive `/Rotate`. Kein automatischer Test, die App hat für den Import keinen; mit `make import-spike FILE=…goodnotes` prüfen.
+
+## P-051 · GoodNotes-Datei: Fallen im Format
+
+**Symptom.** Seiten in falscher Reihenfolge, gelöschte Seiten tauchen auf, Striche sind schwarz statt blau oder verschoben, eine Seite hat das falsche Papier.
+**Ursache.** Fünf Dinge, siehe ADR 0041. `index.notes.pb` ist nicht die Reihenfolge; die steht in den Schlüsseln der Ereignisse `#54`/`#55`, bytewise verglichen. Die Notizschicht hat die UUID der Seite plus eins mit Übertrag (`…000F` → `…0010`); ein Vergleich nur der letzten Ziffer findet diese Seiten nicht. Protobuf lässt Farbanteile weg, die null sind; der Standard ist 0, nicht 1. Ein Strich, der mit dem Lasso verschoben wurde, trägt den Versatz in `#6` und nicht in den Punkten. Ereignis `#3` bindet eine Seite an ein anderes Papier; das letzte gewinnt.
+**Wache.** `GoodNotesTests.testOrdersPagesByKeyDropsDeletedPagesAndScales` und `testPageUUIDCarries`. Breiten und Farben der PencilKit-Tinten sind gemessen und mit GoodNotes' eigenem PDF-Export verglichen (`InkImport.pkStroke`); dafür gibt es keinen Test, nur `make import-spike`.

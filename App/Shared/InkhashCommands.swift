@@ -10,7 +10,7 @@ struct InkhashCommands: Commands {
             Button("Neue Stiftnotiz") { model.createInk(data: InkDrawing.empty()) }
                 .keyboardShortcut("n", modifiers: [.command, .shift])
             Divider()
-            Button("PDF importieren…") { model.importRequested = true }
+            Button("PDF oder GoodNotes importieren…") { model.importRequested = true }
                 .keyboardShortcut("i", modifiers: [.command, .shift])
         }
         CommandMenu("Schreiben") {

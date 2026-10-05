@@ -7,5 +7,26 @@
     <key>NSAllowsLocalNetworking</key>
     <true/>
   </dict>
+  <key>UTImportedTypeDeclarations</key>
+  <array>
+    <dict>
+      <key>UTTypeIdentifier</key>
+      <string>com.goodnotesapp.goodnotes.v5</string>
+      <key>UTTypeDescription</key>
+      <string>GoodNotes-Notizbuch</string>
+      <key>UTTypeConformsTo</key>
+      <array>
+        <string>public.zip-archive</string>
+        <string>public.data</string>
+      </array>
+      <key>UTTypeTagSpecification</key>
+      <dict>
+        <key>public.filename-extension</key>
+        <array>
+          <string>goodnotes</string>
+        </array>
+      </dict>
+    </dict>
+  </array>
 </dict>
 </plist>
