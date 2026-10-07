@@ -157,13 +157,13 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Ohne Anmeldung zeigt die App einen Fehler als Status, oder eine Funktion wartet auf den Server.
 **Ursache.** Code, der einen Server voraussetzt, etwa einen Abgleich nach jeder Änderung anstößt und dessen Fehlschlag meldet.
-**Wache.** `AppModel.isSyncEnabled`. Ohne Sitzung startet `scheduleSync` nichts, und der Status sagt „Nur auf diesem Gerät.“ `LibraryTests.testFreshLibraryWorksWithoutAccount`.
+**Wache.** `SyncCoordinator.isEnabled`. Ohne Sitzung startet `SyncCoordinator.schedule` nichts, und der Status sagt „Nur auf diesem Gerät.“ `LibraryTests.testFreshLibraryWorksWithoutAccount`.
 
 ## P-027 · Abgelaufene Sitzung sieht aus wie angemeldet
 
 **Symptom.** Nach 90 Tagen ohne Benutzung steht nur „Anmeldung abgelehnt.“ im Status. Die Einstellungen zeigen weiter „Angemeldet als …“, und jeder Abgleich scheitert still.
 **Ursache.** Ein 401 auf eine Anfrage mit Sitzung wurde wie jeder andere Fehler als Status gemeldet. Ein 401 beim Anmelden selbst heißt dagegen nur: falsches Passwort.
-**Wache.** `AppModel.expireSession(of:ifStill:)` läuft nur bei `sync` und `remoteWorkspaces`, nicht beim Anmelden. Die Sitzung gilt pro Server. Es vergleicht den Token vom Start der Anfrage mit dem aktuellen. Die Bibliothek bleibt gebunden, `ExpiredSessionBanner` bietet das Anmelden an. Kein automatischer Test, weil die App kein Testziel hat. Prüfen: Sitzungsdatei auf dem Server löschen, dann abgleichen.
+**Wache.** `ServerSessions.expire(_:ifStill:)` läuft nur bei `sync` und `remoteWorkspaces`, nicht beim Anmelden. Die Sitzung gilt pro Server. Es vergleicht den Token vom Start der Anfrage mit dem aktuellen. Die Bibliothek bleibt gebunden, `ExpiredSessionBanner` bietet das Anmelden an. Kein automatischer Test, weil die App kein Testziel hat. Prüfen: Sitzungsdatei auf dem Server löschen, dann abgleichen.
 
 ## P-028 · Block-Kürzel lassen das Zeichen stehen
 
@@ -271,7 +271,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Der Status zeigt bei jedem Abgleich „Der Server antwortete mit 400.“; Änderungen an anderen Notizen kommen nie auf den Server.
 **Ursache.** `Syncer.sync` fing beim Hochladen nur `409` ab. Jede Ablehnung (400 wegen einer Grenze, 413 wegen der Größe) brach den Lauf ab, vor den übrigen Notizen und vor dem zweiten Holen. Die Notiz blieb ungesendet und stand beim nächsten Mal wieder vorn.
-**Wache.** `Syncer.sync` sammelt 400 und 413 pro Notiz in `SyncReport.rejected` und macht weiter; `AppModel.syncStatus` nennt die Notiz. Die App hält die Grenzen aus API.md selbst ein (`Limits`). Test `SyncTests.testRejectedNoteDoesNotBlockOthers`.
+**Wache.** `Syncer.sync` sammelt 400 und 413 pro Notiz in `SyncReport.rejected` und macht weiter; `SyncCoordinator.describe` nennt die Notiz. Die App hält die Grenzen aus API.md selbst ein (`Limits`). Test `SyncTests.testRejectedNoteDoesNotBlockOthers`.
 
 ## P-046 · Mac-Icon ist nicht das Logo
 
@@ -284,7 +284,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** In einer Handschriftnotiz steht dauerhaft „lese Handschrift…“, auch ohne zu schreiben.
 **Ursache.** Das Laden einer Zeichnung in den Canvas löste `canvasViewDrawingDidChange` aus wie ein Strich: Die Seite wurde gespeichert und neu erkannt, die Erkennung änderte die Notiz, die Ansicht lud die Zeichnung erneut. Zusätzlich blieb die Anzeige stehen, wenn eine Erkennung für eine andere Seite die Markierung überschrieben hatte.
-**Wache.** `Coordinator.load` setzt `settingDrawing`. `onDrawing` erkennt nur, wenn `AppModel.updateDrawing` eine Änderung meldet. `readingPages` ist eine Menge, die die neueste Anfrage einer Seite in jedem Fall räumt. Kein automatischer Test; im Gerät prüfen.
+**Wache.** `Coordinator.load` setzt `settingDrawing`. `onDrawing` erkennt nur, wenn `NoteLibrary.updateDrawing` eine Änderung meldet. `readingPages` ist eine Menge, die die neueste Anfrage einer Seite in jedem Fall räumt. Kein automatischer Test; im Gerät prüfen.
 
 ## P-048 · Hinter dem Proxy sind alle ein Client
 
@@ -320,5 +320,5 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 ## P-053 · Eigener Push wird zum Konflikt
 
 **Symptom.** Wer zügig zeichnet oder tippt, bekommt auf einem einzigen Gerät „Konflikt mit dem Server“. Selten verschwindet auch eine Eingabe, die während des Abgleichs kam.
-**Ursache.** Drei Rennen gegen den eigenen Schreibvorgang. `scheduleSync` brach mit jeder Eingabe die laufende Task ab, auch mitten im PUT; der Server speicherte, das Gerät bekam die neue Revision nie. `Syncer` speicherte nach dem PUT die hochgeladene Fassung als sauber, auch wenn inzwischen eine neuere im Speicher lag. Und das AppModel bearbeitet seine `records`, die erst `reload` am Ende des Abgleichs nachlud; eine Eingabe dazwischen schrieb die alte Revision zurück.
-**Wache.** `scheduleSync` bricht nur das Warten ab; `sync` läuft danach noch einmal, statt einen Aufruf zu verwerfen. `Syncer` liest jede Notiz vor dem Push neu, setzt eine zwischendurch geänderte nach der Antwort auf die Revision des Servers und lässt sie dirty (`Writer.saveAfterPush`), und meldet jeden Speichervorgang sofort über `onSave`, womit `AppModel.syncSaved` die `records` nachführt. Tests `SyncTests.testEditDuringPushStaysDirtyOnTheServerRevision`, `testEditAfterOwnPushIsNoConflict`, `testEditDuringPushOfAnotherNoteGoesUpFresh`. Bleibt offen: Reißt die Verbindung mitten im PUT ab und wird danach weitergeschrieben, ist es weiter ein Konflikt.
+**Ursache.** Drei Rennen gegen den eigenen Schreibvorgang. `scheduleSync` (heute `SyncCoordinator.schedule`) brach mit jeder Eingabe die laufende Task ab, auch mitten im PUT; der Server speicherte, das Gerät bekam die neue Revision nie. `Syncer` speicherte nach dem PUT die hochgeladene Fassung als sauber, auch wenn inzwischen eine neuere im Speicher lag. Und das AppModel bearbeitet seine `records`, die erst `reload` am Ende des Abgleichs nachlud; eine Eingabe dazwischen schrieb die alte Revision zurück.
+**Wache.** `SyncCoordinator.schedule` bricht nur das Warten ab; `sync` läuft danach noch einmal, statt einen Aufruf zu verwerfen. `Syncer` liest jede Notiz vor dem Push neu, setzt eine zwischendurch geänderte nach der Antwort auf die Revision des Servers und lässt sie dirty (`Writer.saveAfterPush`), und meldet jeden Speichervorgang sofort über `onSave`, womit `NoteLibrary.synced` die `records` nachführt. Tests `SyncTests.testEditDuringPushStaysDirtyOnTheServerRevision`, `testEditAfterOwnPushIsNoConflict`, `testEditDuringPushOfAnotherNoteGoesUpFresh`. Bleibt offen: Reißt die Verbindung mitten im PUT ab und wird danach weitergeschrieben, ist es weiter ein Konflikt.

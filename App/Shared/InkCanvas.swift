@@ -34,7 +34,7 @@ struct InkNoteView: View {
 
     /// The note as the model has it now. The `note` handed in is a copy from the parent's last render
     /// and lags behind our own edits when only this view updates.
-    private var current: Note { model.record(note.id)?.note ?? note }
+    private var current: Note { model.library.record(note.id)?.note ?? note }
 
     var body: some View {
         let note = current
@@ -73,7 +73,7 @@ struct InkNoteView: View {
         // The paper's colour is the whole screen of the note, also under the title. See ADR 0042.
         .background(note.shownPaper.fill.ignoresSafeArea())
         .overlay(alignment: .top) {
-            if model.record(note.id)?.conflict == true {
+            if model.library.record(note.id)?.conflict == true {
                 ConflictBanner(noteID: note.id)
                     .frame(maxWidth: 520)
                     .padding(.top, 12)
@@ -122,13 +122,13 @@ struct InkNoteView: View {
                 Button { showsPaper = true } label: { Image(systemName: "rectangle.split.3x3") }
                     .accessibilityLabel("Papier")
                     .popover(isPresented: $showsPaper) {
-                        PaperPicker(paper: note.shownPaper, patterns: true) { model.setPaper(noteID: note.id, paper: $0) }
+                        PaperPicker(paper: note.shownPaper, patterns: true) { model.library.setPaper(noteID: note.id, paper: $0) }
                     }
             }
             #if os(iOS)
             ToolbarItem(placement: .primaryAction) {
                 Button {
-                    model.addPage(noteID: note.id, data: InkDrawing.empty())
+                    model.library.addPage(noteID: note.id, data: InkDrawing.empty())
                     turn(to: pages.count)
                 } label: {
                     Image(systemName: "plus.rectangle.portrait")
@@ -185,7 +185,7 @@ struct InkNoteView: View {
         #endif
         .onAppear {
             for page in pages {
-                let data = model.drawingData(for: page.blob) ?? Data()
+                let data = model.library.drawingData(for: page.blob) ?? Data()
                 guard page.transcript.isEmpty, !data.isEmpty, data != InkDrawing.empty() else { continue }
                 recognize(page: page, data: data)
             }
@@ -207,7 +207,7 @@ struct InkNoteView: View {
     }
 
     private func insertImage(_ data: Data) {
-        guard let stored = model.storeImage(data) else { return }
+        guard let stored = model.library.storeImage(data) else { return }
         tools.choose(.select)
         editor.insertImage(blob: stored.blob, size: stored.size)
     }
@@ -255,7 +255,7 @@ struct InkNoteView: View {
                 let page = pages[index]
                 let scale = max(0.01, geometry.size.width / page.width)
                 InkPageCanvas(
-                    drawingData: model.drawingData(for: page.blob) ?? InkDrawing.empty(),
+                    drawingData: model.library.drawingData(for: page.blob) ?? InkDrawing.empty(),
                     elements: page.elements,
                     pageID: page.id,
                     pageWidth: page.width,
@@ -266,17 +266,17 @@ struct InkNoteView: View {
                     fingerDrawing: tools.fingerDraws || Device.isPhone,
                     tools: tools,
                     editor: editor,
-                    loadBlob: { model.drawingData(for: $0) },
+                    loadBlob: { model.library.drawingData(for: $0) },
                     onDrawing: { pageID, data, height in
                         // The page comes from the canvas that drew it, never from what is shown now.
                         // Only a changed drawing is read again; otherwise reading and reloading feed each other. See P-047.
-                        guard model.updateDrawing(noteID: note.id, pageID: pageID, data: data, height: height) else { return }
-                        if let drawn = model.record(note.id)?.note.pages?.first(where: { $0.id == pageID }) {
+                        guard model.library.updateDrawing(noteID: note.id, pageID: pageID, data: data, height: height) else { return }
+                        if let drawn = model.library.record(note.id)?.note.pages?.first(where: { $0.id == pageID }) {
                             recognize(page: drawn, data: data)
                         }
                     },
                     onElements: { pageID, elements in
-                        model.updateElements(noteID: note.id, pageID: pageID, elements: elements)
+                        model.library.updateElements(noteID: note.id, pageID: pageID, elements: elements)
                     }
                 )
                 .id(page.id)
@@ -311,9 +311,9 @@ struct InkNoteView: View {
             let reading = await HandwritingRecognizer.recognize(drawing: drawing, width: width, height: height)
             guard recognitionGeneration[pageID] == generation else { return }
             if drawing.strokes.isEmpty {
-                model.applyReading(noteID: noteID, pageID: pageID, transcript: "", tags: [], pageHasInk: false)
+                model.library.applyReading(noteID: noteID, pageID: pageID, transcript: "", tags: [], pageHasInk: false)
             } else {
-                model.applyReading(noteID: noteID, pageID: pageID, transcript: reading.transcript, tags: reading.tags, pageHasInk: true)
+                model.library.applyReading(noteID: noteID, pageID: pageID, transcript: reading.transcript, tags: reading.tags, pageHasInk: true)
             }
         }
     }

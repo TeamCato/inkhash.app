@@ -12,7 +12,7 @@ struct SettingsView: View {
         NavigationStack {
             Form {
                 Section {
-                    ForEach(model.workspaces) { workspace in
+                    ForEach(model.registry.workspaces) { workspace in
                         NavigationLink {
                             WorkspaceEditor(workspace: workspace)
                         } label: {
@@ -30,9 +30,9 @@ struct SettingsView: View {
                         }
                         .contextMenu {
                             Button("Nach oben", systemImage: "arrow.up") { model.moveWorkspace(workspace.id, by: -1) }
-                                .disabled(workspace.id == model.workspaces.first?.id)
+                                .disabled(workspace.id == model.registry.workspaces.first?.id)
                             Button("Nach unten", systemImage: "arrow.down") { model.moveWorkspace(workspace.id, by: 1) }
-                                .disabled(workspace.id == model.workspaces.last?.id)
+                                .disabled(workspace.id == model.registry.workspaces.last?.id)
                         }
                     }
                     .onMove { model.moveWorkspaces(fromOffsets: $0, toOffset: $1) }
@@ -47,14 +47,14 @@ struct SettingsView: View {
                     Text("Jeder Workspace hat eigene Notizen, Ordner und Schlagwörter. Er bleibt auf diesem Gerät oder gleicht mit einem Workspace auf einem deiner Server ab. Die Reihenfolge änderst du durch Ziehen oder im Kontextmenü.")
                 }
                 Section {
-                    ForEach(model.servers) { server in
+                    ForEach(model.registry.servers) { server in
                         NavigationLink {
                             ServerDetailView(serverID: server.id)
                         } label: {
                             HStack {
                                 Label(ServerAddress.host(server.url), systemImage: "server.rack")
                                 Spacer()
-                                Text(model.isSignedIn(server.id) ? server.accountName : "abgemeldet")
+                                Text(model.sessions.isSignedIn(server.id) ? server.accountName : "abgemeldet")
                                     .font(.system(size: 12))
                                     .foregroundStyle(Ink.muted)
                             }
@@ -85,8 +85,8 @@ struct SettingsView: View {
     }
 
     private func target(of workspace: Workspace) -> String {
-        guard let server = model.server(of: workspace) else { return "Nur dieses Gerät" }
-        return model.isSignedIn(server.id) ? ServerAddress.host(server.url) : "\(ServerAddress.host(server.url)), ruht"
+        guard let server = model.registry.server(of: workspace) else { return "Nur dieses Gerät" }
+        return model.sessions.isSignedIn(server.id) ? ServerAddress.host(server.url) : "\(ServerAddress.host(server.url)), ruht"
     }
 }
 
@@ -158,7 +158,7 @@ struct WorkspaceEditor: View {
             Section {
                 Picker("Abgleich", selection: $serverChoice) {
                     Text("Nur dieses Gerät").tag(UUID?.none)
-                    ForEach(model.servers.filter { model.isSignedIn($0.id) }) { server in
+                    ForEach(signedInServers) { server in
                         Text("\(ServerAddress.host(server.url)) · \(server.accountName)").tag(UUID?.some(server.id))
                     }
                 }
@@ -180,7 +180,7 @@ struct WorkspaceEditor: View {
             } footer: {
                 Text(syncFooter)
             }
-            if let workspace, model.workspaces.count > 1 {
+            if let workspace, model.registry.workspaces.count > 1 {
                 Section {
                     Button("Vom Gerät entfernen", role: .destructive) { confirmRemoval = true }
                 } footer: {
@@ -189,7 +189,7 @@ struct WorkspaceEditor: View {
                         : "Die Notizen verschwinden von diesem Gerät. Auf dem Server bleiben sie.")
                 }
             }
-            if !model.status.isEmpty, model.status != AppModel.localOnly, model.status != "Abgeglichen." {
+            if !model.status.isEmpty, model.status != StatusLine.localOnly, model.status != "Abgeglichen." {
                 Text(model.status)
                     .font(.system(size: 12))
                     .foregroundStyle(Ink.muted)
@@ -244,7 +244,7 @@ struct WorkspaceEditor: View {
     /// The picture the workspace will show: a newly chosen one, or the one it has.
     private var preview: PlatformImage? {
         if imageChanged { return image.flatMap(PlatformImage.init(data:)) }
-        return workspace.flatMap(model.workspaceImage)
+        return workspace.flatMap { model.registry.image(of: $0) }
     }
 
     private var pictureRow: some View {
@@ -283,8 +283,12 @@ struct WorkspaceEditor: View {
         }
     }
 
+    private var signedInServers: [ServerEntry] {
+        model.registry.servers.filter { model.sessions.isSignedIn($0.id) }
+    }
+
     private var syncFooter: String {
-        if model.servers.isEmpty {
+        if model.registry.servers.isEmpty {
             return "Noch kein Server verbunden. Der Workspace bleibt auf diesem Gerät."
         }
         guard serverChoice != nil else { return "Notizen bleiben auf diesem Gerät." }
@@ -298,7 +302,7 @@ struct WorkspaceEditor: View {
 
     /// A server workspace another local workspace already syncs with. Two would mirror each other.
     private func isTaken(_ remote: RemoteWorkspace) -> Bool {
-        model.workspaces.contains { other in
+        model.registry.workspaces.contains { other in
             other.id != workspace?.id && other.link?.server == serverChoice && other.link?.remote == remote.id
         }
     }
@@ -320,7 +324,7 @@ struct WorkspaceEditor: View {
             return
         }
         loadingRemotes = true
-        remotes = await model.remoteWorkspaces(on: server)
+        remotes = await model.sessions.remoteWorkspaces(on: server)
         loadingRemotes = false
         if remoteChoice != Self.newRemote, !remotes.contains(where: { $0.id == remoteChoice }) {
             remoteChoice = Self.newRemote
@@ -361,8 +365,8 @@ struct ServerDetailView: View {
     @State private var adding = false
 
     var body: some View {
-        if let server = model.servers.first(where: { $0.id == serverID }) {
-            if model.isSignedIn(serverID) {
+        if let server = model.registry.servers.first(where: { $0.id == serverID }) {
+            if model.sessions.isSignedIn(serverID) {
                 signedIn(server)
             } else {
                 ServerConnectView(presetURL: server.url, presetName: server.accountName)
@@ -380,7 +384,7 @@ struct ServerDetailView: View {
                 LabeledContent("Account", value: server.accountName)
             }
             Section {
-                let linked = model.workspaces(on: serverID)
+                let linked = model.registry.workspaces(on: serverID)
                 if linked.isEmpty {
                     Text("Noch kein Workspace gleicht hiermit ab.")
                         .foregroundStyle(Ink.muted)
@@ -397,7 +401,7 @@ struct ServerDetailView: View {
             }
             onServer
             Section {
-                Button("Abmelden") { model.logout(serverID) }
+                Button("Abmelden") { model.sessions.logout(serverID) }
                 Button("Server entfernen", role: .destructive) { confirmRemoval = true }
             } footer: {
                 Text("Abmelden beendet nur den Abgleich, die Notizen bleiben hier. Weitere Accounts legt der Admin unter \(ServerAddress.admin(server.url)) an.")
@@ -420,7 +424,7 @@ struct ServerDetailView: View {
     /// Workspaces of the account that this device does not have yet. See ADR 0044.
     @ViewBuilder
     private var onServer: some View {
-        let missing = model.setup.unlinked(remotes, on: serverID)
+        let missing = model.registry.setup.unlinked(remotes, on: serverID)
         Section {
             if loadingRemotes {
                 ProgressView().controlSize(.small)
@@ -452,7 +456,7 @@ struct ServerDetailView: View {
 
     private func loadRemotes() async {
         loadingRemotes = true
-        remotes = await model.remoteWorkspaces(on: serverID)
+        remotes = await model.sessions.remoteWorkspaces(on: serverID)
         loadingRemotes = false
     }
 
@@ -500,8 +504,8 @@ struct ServerConnectView: View {
                         .keyboardType(.URL)
 #endif
                         .autocorrectionDisabled()
-                        .onChange(of: url) { _, value in model.addressChanged(value) }
-                        .onSubmit { model.addressChanged(url) }
+                        .onChange(of: url) { _, value in model.sessions.addressChanged(value) }
+                        .onSubmit { model.sessions.addressChanged(url) }
                     connectionIndicator
                 }
             } header: {
@@ -509,10 +513,10 @@ struct ServerConnectView: View {
             } footer: {
                 Text(connectionText)
             }
-            if case .reachable(let mode) = model.connection {
+            if case .reachable(let mode) = model.sessions.connection {
                 accountSection(mode)
             }
-            if !model.status.isEmpty, model.status != AppModel.localOnly, model.status != "Abgeglichen." {
+            if !model.status.isEmpty, model.status != StatusLine.localOnly, model.status != "Abgeglichen." {
                 Text(model.status)
                     .font(.system(size: 12))
                     .foregroundStyle(Ink.muted)
@@ -525,14 +529,14 @@ struct ServerConnectView: View {
             loaded = true
             url = presetURL
             name = presetName
-            model.connection = .unknown
-            if !url.isEmpty { model.addressChanged(url) }
+            model.sessions.connection = .unknown
+            if !url.isEmpty { model.sessions.addressChanged(url) }
         }
     }
 
     @ViewBuilder
     private var connectionIndicator: some View {
-        switch model.connection {
+        switch model.sessions.connection {
         case .checking:
             ProgressView().controlSize(.small)
         case .reachable:
@@ -545,7 +549,7 @@ struct ServerConnectView: View {
     }
 
     private var connectionText: String {
-        switch model.connection {
+        switch model.sessions.connection {
         case .unknown:
             "Die Adresse deines Servers, im lokalen Netz mit http."
         case .checking:

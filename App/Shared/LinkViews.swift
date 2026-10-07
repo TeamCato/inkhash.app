@@ -176,7 +176,7 @@ struct LinkTargetField: View {
     static func resolve(_ input: String, model: AppModel, excluding: UUID?) -> Resolution {
         let trimmed = input.trimmingCharacters(in: .whitespacesAndNewlines)
         if !LinkTarget.looksLikeAddress(trimmed) {
-            let matches = model.linkableNotes(matching: trimmed, excluding: excluding, limit: 2)
+            let matches = model.library.listing.linkable(matching: trimmed, excluding: excluding, limit: 2)
             if matches.count == 1, let only = matches.first { return .note(only) }
         }
         if let target = LinkTarget.normalize(trimmed) { return .address(target) }
@@ -184,7 +184,7 @@ struct LinkTargetField: View {
     }
 
     var body: some View {
-        let suggestions = LinkTarget.looksLikeAddress(draft) ? [] : model.linkableNotes(matching: draft, excluding: excluding, limit: 6)
+        let suggestions = LinkTarget.looksLikeAddress(draft) ? [] : model.library.listing.linkable(matching: draft, excluding: excluding, limit: 6)
         VStack(alignment: .leading, spacing: 6) {
             TextField("Notiz suchen oder Adresse", text: $draft)
                 .textFieldStyle(.roundedBorder)
@@ -299,7 +299,7 @@ struct OpenLinkChip: View {
 
     private var label: String {
         if let id = NoteLink.noteID(in: target) {
-            return model.record(id)?.note.displayTitle ?? "Notiz fehlt"
+            return model.library.record(id)?.note.displayTitle ?? "Notiz fehlt"
         }
         return Links.url(target)?.host() ?? target
     }

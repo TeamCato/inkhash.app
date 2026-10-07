@@ -32,11 +32,11 @@ struct ExcerptPicker: View {
                 case .list:
                     noteList
                 case let .page(id):
-                    if let note = model.record(id)?.note {
+                    if let note = model.library.record(id)?.note {
                         PageAreaPicker(note: note) { excerpt in insert(.page(excerpt), note.displayTitle) }
                     }
                 case let .text(id):
-                    if let note = model.record(id)?.note {
+                    if let note = model.library.record(id)?.note {
                         TextRangePicker(note: note) { excerpt in insert(.text(excerpt), label(for: excerpt, in: note)) }
                     }
                 case let .writing(id):
@@ -84,14 +84,14 @@ struct ExcerptPicker: View {
     private var title: String {
         switch step {
         case .list: "Ausschnitt einfügen"
-        case let .page(id): "Bereich wählen · \(model.record(id)?.note.displayTitle ?? "")"
-        case let .text(id): "Absätze wählen · \(model.record(id)?.note.displayTitle ?? "")"
-        case let .writing(id): model.record(id)?.note.kind == .ink ? "Neue Handschrift" : "Neue Textnotiz"
+        case let .page(id): "Bereich wählen · \(model.library.record(id)?.note.displayTitle ?? "")"
+        case let .text(id): "Absätze wählen · \(model.library.record(id)?.note.displayTitle ?? "")"
+        case let .writing(id): model.library.record(id)?.note.kind == .ink ? "Neue Handschrift" : "Neue Textnotiz"
         }
     }
 
     private var matches: [Note] {
-        let all = (model.notes(of: .ink) + model.notes(of: .text))
+        let all = (model.library.listing.notes(of: .ink) + model.library.listing.notes(of: .text))
             .filter { $0.id != parent.id }
             .sorted { $0.updatedAt > $1.updatedAt }
         let folded = Self.fold(query)
@@ -155,13 +155,13 @@ struct ExcerptPicker: View {
 
     /// `test / doc` makes new notes in `test / doc`, next to the note `doc` in `test`.
     private var childFolder: String {
-        model.childFolder(of: parent)
+        model.library.childFolder(of: parent)
     }
 
     private func create(_ kind: NoteKind) {
         let fresh: Note?
         switch kind {
-        case .ink: fresh = model.newInkNote(drawing: InkDrawing.empty())
+        case .ink: fresh = model.library.newInkNote(drawing: InkDrawing.empty())
         case .text: fresh = Note.newText()
         }
         guard let fresh else { return }
@@ -177,7 +177,7 @@ struct ExcerptPicker: View {
     }
 
     private func insertWritten(_ id: UUID) {
-        guard let note = model.record(id)?.note else { return }
+        guard let note = model.library.record(id)?.note else { return }
         switch note.kind {
         case .text:
             guard !(note.markdown ?? "").trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
@@ -186,7 +186,7 @@ struct ExcerptPicker: View {
             }
             insert(.text(TextExcerpt(noteID: id)), note.displayTitle)
         case .ink:
-            guard let page = note.pages?.first, let bounds = model.contentBounds(of: page) else {
+            guard let page = note.pages?.first, let bounds = model.library.contentBounds(of: page) else {
                 hint = "Noch nichts gezeichnet."
                 return
             }
@@ -218,7 +218,7 @@ private struct NoteEditorHost: View {
     var noteID: UUID
 
     var body: some View {
-        if let note = model.record(noteID)?.note {
+        if let note = model.library.record(noteID)?.note {
             switch note.kind {
             case .ink: InkNoteView(note: note)
             case .text: TextNoteView(note: note, model: model)

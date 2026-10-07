@@ -8,7 +8,7 @@ struct WorkspaceIcon: View {
     var size: CGFloat = 18
 
     var body: some View {
-        if let image = model.workspaceImage(workspace) {
+        if let image = model.registry.image(of: workspace) {
             WorkspacePicture(image: image, size: size)
         } else {
             Image(systemName: workspace.symbol)
@@ -37,7 +37,7 @@ struct WorkspaceMenuLabel: View {
     var workspace: Workspace
 
     var body: some View {
-        if let image = model.workspaceImage(workspace) {
+        if let image = model.registry.image(of: workspace) {
             Label {
                 Text(workspace.name)
             } icon: {

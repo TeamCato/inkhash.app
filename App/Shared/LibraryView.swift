@@ -45,7 +45,7 @@ struct RootView: View {
 
     /// Opening a note hides the sidebar where it floats; without a note to show it comes back.
     private func placeSidebar() {
-        let showsNote = model.selectedID.flatMap { model.record($0) }.map { $0.note.deletedAt == nil } ?? false
+        let showsNote = model.selectedID.flatMap { model.library.record($0) }.map { $0.note.deletedAt == nil } ?? false
         if !showsNote {
             columns = .all
         } else if sidebarFloats {
@@ -55,7 +55,7 @@ struct RootView: View {
 
     @ViewBuilder
     private var detail: some View {
-        if let id = model.selectedID, let record = model.record(id), record.note.deletedAt == nil {
+        if let id = model.selectedID, let record = model.library.record(id), record.note.deletedAt == nil {
             Group {
                 switch record.note.kind {
                 case .text:
@@ -65,7 +65,7 @@ struct RootView: View {
                 }
             }
             .id("\(record.id.uuidString)-\(model.editorEpoch)")
-        } else if let id = model.selectedID, let record = model.record(id) {
+        } else if let id = model.selectedID, let record = model.library.record(id) {
             TrashedNoteView(record: record)
         } else {
             VStack(spacing: 18) {
@@ -113,7 +113,7 @@ struct TrashedNoteView: View {
                 .inkSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
             }
             HStack {
-                Button("Wiederherstellen") { model.restore(id: record.id) }
+                Button("Wiederherstellen") { model.library.restore(id: record.id) }
                     .inkButton()
                 Button("Endgültig löschen", role: .destructive) { model.purge(id: record.id) }
                     .inkButton()
@@ -202,7 +202,7 @@ struct ExpiredSessionBanner: View {
             HStack {
                 Button("Anmelden") { showSettings = true }
                     .inkButton()
-                Button("Später") { model.dismissExpiredNotice(server.id) }
+                Button("Später") { model.sessions.dismissExpiredNotice(server.id) }
                     .inkButton()
             }
         }

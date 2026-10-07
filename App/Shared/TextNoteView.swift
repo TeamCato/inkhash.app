@@ -15,7 +15,7 @@ struct TextNoteView: View {
     }
 
     var body: some View {
-        let record = model.record(session.noteID)
+        let record = model.library.record(session.noteID)
         let state = session.state
         ScrollViewReader { proxy in
             ScrollView {
@@ -60,7 +60,7 @@ struct TextNoteView: View {
                     .accessibilityLabel("Papierfarbe")
                     .popover(isPresented: $showsPaper) {
                         PaperPicker(paper: record?.note.shownPaper ?? .standard, patterns: false) {
-                            model.setPaper(noteID: session.noteID, paper: $0)
+                            model.library.setPaper(noteID: session.noteID, paper: $0)
                         }
                     }
             }
@@ -346,7 +346,7 @@ struct NoteHeader: View {
     var noteID: UUID
 
     var body: some View {
-        let note = model.record(noteID)?.note
+        let note = model.library.record(noteID)?.note
         VStack(alignment: .leading, spacing: 3) {
             InlineField(
                 value: note.map { $0.hasAutomaticTitle ? "" : $0.title } ?? "",
@@ -355,7 +355,7 @@ struct NoteHeader: View {
                 help: "Titel ändern",
                 font: .system(size: 13, weight: .medium),
                 color: Ink.ink
-            ) { model.rename(id: noteID, title: $0) }
+            ) { model.library.rename(id: noteID, title: $0) }
             InlineField(
                 value: note.map { Folders.display($0.folder) } ?? "",
                 shown: note.map { $0.folder.isEmpty ? "" : Folders.display($0.folder) } ?? "",
@@ -364,8 +364,8 @@ struct NoteHeader: View {
                 font: .system(size: 12),
                 color: Ink.muted,
                 literal: true,
-                suggestions: { PathSuggestions.for($0, folders: model.folders) }
-            ) { model.setFolder(id: noteID, typed: $0) }
+                suggestions: { PathSuggestions.for($0, folders: model.library.listing.folders) }
+            ) { model.library.setFolder(id: noteID, typed: $0) }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
     }

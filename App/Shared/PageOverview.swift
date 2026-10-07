@@ -17,7 +17,7 @@ struct PageOverview: View {
     @State private var pendingDelete: UUID?
 
     var body: some View {
-        let note = model.record(noteID)?.note
+        let note = model.library.record(noteID)?.note
         let pages = note?.pages ?? []
         let byID = Dictionary(uniqueKeysWithValues: pages.map { ($0.id, $0) })
         let paper = note?.shownPaper ?? .standard
@@ -62,7 +62,7 @@ struct PageOverview: View {
             titleVisibility: .visible
         ) {
             Button("Seite löschen", role: .destructive) {
-                if let pageID = pendingDelete { model.deletePage(noteID: noteID, pageID: pageID) }
+                if let pageID = pendingDelete { model.library.deletePage(noteID: noteID, pageID: pageID) }
                 pendingDelete = nil
             }
         } message: {
@@ -94,11 +94,11 @@ struct PageOverview: View {
         }
         .onDrop(of: [UTType.text], delegate: PageDrop(target: page.id, order: $order, dragging: $dragging, commit: commit))
         .contextMenu {
-            Button { model.movePage(noteID: noteID, pageID: page.id, by: -1) } label: {
+            Button { model.library.movePage(noteID: noteID, pageID: page.id, by: -1) } label: {
                 Label("Nach vorn", systemImage: "arrow.left")
             }
             .disabled(number == 1)
-            Button { model.movePage(noteID: noteID, pageID: page.id, by: 1) } label: {
+            Button { model.library.movePage(noteID: noteID, pageID: page.id, by: 1) } label: {
                 Label("Nach hinten", systemImage: "arrow.right")
             }
             .disabled(number == count)
@@ -115,7 +115,7 @@ struct PageOverview: View {
 
     private func commit() {
         dragging = nil
-        model.reorderPages(noteID: noteID, order: order)
+        model.library.reorderPages(noteID: noteID, order: order)
     }
 }
 
@@ -167,7 +167,7 @@ struct PageThumbnail: View {
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
             .task(id: "\(page.id)-\(page.blob)-\(paper.color)-\(paper.pattern.rawValue)") {
                 let rect = CGRect(x: 0, y: 0, width: page.width, height: min(page.height, page.width * Self.aspect))
-                image = PageImage.render(page, rect: rect, scale: 380 / page.width, paper: paper) { model.drawingData(for: $0) }
+                image = PageImage.render(page, rect: rect, scale: 380 / page.width, paper: paper) { model.library.drawingData(for: $0) }
             }
     }
 }

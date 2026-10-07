@@ -31,8 +31,8 @@ final class TextSession {
     /// Excerpts draw pages of the current workspace only. See ADR 0032.
     var excerptSource: ExcerptSource {
         ExcerptSource(
-            note: { [model] id in model.record(id)?.note },
-            loadBlob: { [model] blob in model.drawingData(for: blob) }
+            note: { [model] id in model.library.record(id)?.note },
+            loadBlob: { [model] blob in model.library.drawingData(for: blob) }
         )
     }
 
@@ -52,7 +52,7 @@ final class TextSession {
     }
 
     func commit(_ blocks: [Block]) {
-        model.updateMarkdown(id: noteID, markdown: MarkdownCodec.serialize(blocks))
+        model.library.updateMarkdown(id: noteID, markdown: MarkdownCodec.serialize(blocks))
         version += 1
     }
 
@@ -70,7 +70,7 @@ final class TextSession {
     /// Notes for the `[[` menu: titles that contain the query, the current note left out. See ADR 0027.
     var noteSuggestions: [NoteRecord] {
         guard let query = state.noteQuery else { return [] }
-        return model.linkableNotes(matching: query, excluding: noteID)
+        return model.library.listing.linkable(matching: query, excluding: noteID)
     }
 
     func moveNoteLink(_ delta: Int) {

@@ -60,7 +60,7 @@ struct SidebarView: View {
             titleVisibility: .visible
         ) {
             Button("Ordner entfernen", role: .destructive) {
-                if let pendingRemoval { model.removeFolder(pendingRemoval) }
+                if let pendingRemoval { model.library.removeFolder(pendingRemoval) }
                 pendingRemoval = nil
             }
             Button("Abbrechen", role: .cancel) { pendingRemoval = nil }
@@ -138,7 +138,7 @@ struct SidebarView: View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 if model.suggestedTags.isEmpty {
-                    Text(model.tagCounts.isEmpty ? "Noch keine Schlagwörter." : "Kein Schlagwort beginnt so.")
+                    Text(model.library.listing.tagCounts.isEmpty ? "Noch keine Schlagwörter." : "Kein Schlagwort beginnt so.")
                         .font(.system(size: 11))
                         .foregroundStyle(Ink.muted)
                         .padding(.vertical, 5)
@@ -239,7 +239,7 @@ struct SidebarView: View {
     }
 
     fileprivate func expansion(_ key: String) -> Binding<Bool> {
-        Binding(get: { model.isExpanded(key) }, set: { model.setExpanded(key, $0) })
+        Binding(get: { model.library.isExpanded(key) }, set: { model.library.setExpanded(key, $0) })
     }
 
     fileprivate func folderLabel(_ node: NoteTree) -> some View {
@@ -317,8 +317,8 @@ struct SidebarView: View {
                         Button("Leeren") { confirmEmptyTrash = true }
                             .buttonStyle(.plain)
                             .font(.system(size: 12))
-                            .foregroundStyle(model.trashCount == 0 ? Ink.muted : Ink.accent)
-                            .disabled(model.trashCount == 0)
+                            .foregroundStyle(model.library.listing.trashCount == 0 ? Ink.muted : Ink.accent)
+                            .disabled(model.library.listing.trashCount == 0)
                     }
                 }
                 .padding(.horizontal, 18)
@@ -363,11 +363,11 @@ struct SidebarView: View {
     private func leadingSwipe(_ record: NoteRecord) -> some View {
         if record.note.deletedAt == nil {
             Button(record.note.favorite ? "Kein Favorit" : "Favorit", systemImage: record.note.favorite ? "star.slash" : "star") {
-                model.toggleFavorite(id: record.id)
+                model.library.toggleFavorite(id: record.id)
             }
             .tint(Ink.accent)
         } else {
-            Button("Zurück", systemImage: "arrow.uturn.backward") { model.restore(id: record.id) }
+            Button("Zurück", systemImage: "arrow.uturn.backward") { model.library.restore(id: record.id) }
                 .tint(Ink.accent)
         }
     }
@@ -376,12 +376,12 @@ struct SidebarView: View {
     private func menu(for record: NoteRecord) -> some View {
         if record.note.deletedAt == nil {
             Button(record.note.favorite ? "Aus Favoriten entfernen" : "Zu Favoriten", systemImage: record.note.favorite ? "star.slash" : "star") {
-                model.toggleFavorite(id: record.id)
+                model.library.toggleFavorite(id: record.id)
             }
             Divider()
             Button("In den Papierkorb", systemImage: "trash", role: .destructive) { pendingDelete = record.id }
         } else {
-            Button("Wiederherstellen", systemImage: "arrow.uturn.backward") { model.restore(id: record.id) }
+            Button("Wiederherstellen", systemImage: "arrow.uturn.backward") { model.library.restore(id: record.id) }
             Button("Endgültig löschen", systemImage: "trash.slash", role: .destructive) { model.purge(id: record.id) }
         }
     }
@@ -422,7 +422,7 @@ struct SidebarView: View {
                 .lineLimit(1)
             Spacer(minLength: 8)
             footerButton("star", .favorites, label: "Favoriten")
-            footerButton("trash", .trash, label: "Papierkorb", count: model.trashCount)
+            footerButton("trash", .trash, label: "Papierkorb", count: model.library.listing.trashCount)
             Button {
                 showSettings = true
             } label: {
@@ -442,7 +442,7 @@ struct SidebarView: View {
     }
 
     private var syncLabel: String {
-        guard let server = model.server(of: model.workspace) else { return AppModel.localOnly }
+        guard let server = model.registry.server(of: model.registry.current) else { return StatusLine.localOnly }
         return ServerAddress.host(server.url)
     }
 
@@ -479,9 +479,9 @@ struct SidebarView: View {
     private func commitFolder() {
         switch folderPrompt {
         case .create(let parent):
-            model.createFolder(named: folderName, in: parent)
+            model.library.createFolder(named: folderName, in: parent)
         case .rename(let path):
-            model.renameFolder(path, to: folderName)
+            model.library.renameFolder(path, to: folderName)
         case nil:
             break
         }
@@ -496,11 +496,11 @@ struct WorkspaceSwitcher: View {
 
     var body: some View {
         Menu {
-            ForEach(model.workspaces) { workspace in
+            ForEach(model.registry.workspaces) { workspace in
                 Button {
                     model.switchWorkspace(workspace.id)
                 } label: {
-                    if workspace.id == model.workspace.id {
+                    if workspace.id == model.registry.current.id {
                         Label(workspace.name, systemImage: "checkmark")
                     } else {
                         WorkspaceMenuLabel(workspace: workspace)
@@ -512,10 +512,10 @@ struct WorkspaceSwitcher: View {
             Button("Workspaces verwalten …", systemImage: "gearshape") { showSettings = true }
         } label: {
             HStack(spacing: 10) {
-                WorkspaceIcon(workspace: model.workspace, size: 20)
+                WorkspaceIcon(workspace: model.registry.current, size: 20)
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 20)
-                Text(model.workspace.name)
+                Text(model.registry.current.name)
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 4)
@@ -532,6 +532,6 @@ struct WorkspaceSwitcher: View {
         .menuStyle(.button)
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
-        .accessibilityLabel("Workspace: \(model.workspace.name)")
+        .accessibilityLabel("Workspace: \(model.registry.current.name)")
     }
 }
