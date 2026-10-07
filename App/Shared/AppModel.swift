@@ -8,19 +8,6 @@ import AppKit
 import UIKit
 #endif
 
-struct NoteRecord: Identifiable, Equatable {
-    var note: Note
-    var dirty: Bool
-    var conflict: Bool
-    var id: UUID { note.id }
-}
-
-struct ListedNote: Identifiable, Equatable {
-    var record: NoteRecord
-    var snippet: String?
-    var id: UUID { record.id }
-}
-
 enum EditorAction: Equatable {
     case toggleBold
     case toggleItalic
@@ -34,45 +21,13 @@ struct EditorImpulse: Equatable {
     var action: EditorAction
 }
 
-/// What the sidebar lists. The tree of the workspace, or one of the two flat lists. See ADR 0022.
-enum LibrarySection: Hashable {
-    case notes
-    case favorites
-    case trash
-
+extension LibrarySection {
     var title: String {
         switch self {
         case .notes: "Notizen"
         case .favorites: "Favoriten"
         case .trash: "Papierkorb"
         }
-    }
-}
-
-/// A folder with its subfolders and the notes lying directly in it.
-struct NoteTree: Identifiable {
-    var path: String
-    var folders: [NoteTree]
-    var notes: [NoteRecord]
-    var id: String { path }
-
-    var isEmpty: Bool { folders.isEmpty && notes.isEmpty }
-
-    /// Builds the tree over `notes`. `kept` adds folders that hold no note yet.
-    static func build(notes: [NoteRecord], kept: [String]) -> NoteTree {
-        let paths = Folders.tree(kept: kept, used: notes.map(\.note.folder))
-        var byFolder: [String: [NoteRecord]] = [:]
-        for record in notes {
-            byFolder[record.note.folder, default: []].append(record)
-        }
-        func node(_ path: String) -> NoteTree {
-            NoteTree(
-                path: path,
-                folders: paths.filter { $0 != path && Folders.parent(of: $0) == path }.map(node),
-                notes: (byFolder[path] ?? []).sorted { $0.note.updatedAt > $1.note.updatedAt }
-            )
-        }
-        return node("")
     }
 }
 
@@ -89,12 +44,6 @@ enum WorkspaceTarget: Hashable {
     case local
     /// `remote` nil creates a new workspace on that server.
     case server(UUID, remote: String?)
-}
-
-struct TagCount: Identifiable, Equatable {
-    var tag: String
-    var count: Int
-    var id: String { tag }
 }
 
 @MainActor
@@ -392,53 +341,16 @@ final class AppModel {
 
     // MARK: Lists
 
-    var listed: [ListedNote] {
-        let pool: [NoteRecord]
-        switch section {
-        case .notes: pool = records.filter { $0.note.deletedAt == nil }
-        case .favorites: pool = records.filter { $0.note.deletedAt == nil && $0.note.favorite }
-        case .trash: pool = records.filter { $0.note.deletedAt != nil }
-        }
-        let sorted = pool.sorted { $0.note.updatedAt > $1.note.updatedAt }
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return sorted.map { ListedNote(record: $0, snippet: nil) }
-        }
-        let hits = NoteSearch.search(trimmed, in: sorted.map(\.note.searchDocument))
-        let byID = Dictionary(uniqueKeysWithValues: sorted.map { ($0.id, $0) })
-        return hits.compactMap { hit in
-            byID[hit.id].map { ListedNote(record: $0, snippet: hit.snippet) }
-        }
-    }
+    /// What the sidebar and link menus read from the current workspace.
+    var listing: NoteListing { NoteListing(records: records, keptFolders: keptFolders) }
 
-    private var livingRecords: [NoteRecord] {
-        records.filter { $0.note.deletedAt == nil }
-    }
+    var listed: [ListedNote] { listing.listed(section, query: query) }
 
-    /// A query starting with "#" filters the tree by tag instead of searching the text.
-    var tagFilter: String? {
-        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard trimmed.hasPrefix("#") else { return nil }
-        return trimmed.dropFirst().lowercased().trimmingCharacters(in: .whitespaces)
-    }
+    var tagFilter: String? { NoteListing.tagFilter(query) }
 
-    /// Tags offered while someone types a "#" filter: those starting with it, most used first.
-    var suggestedTags: [TagCount] {
-        guard let filter = tagFilter else { return [] }
-        return tagCounts.filter { filter.isEmpty || $0.tag.hasPrefix(filter) }
-    }
+    var suggestedTags: [TagCount] { listing.suggestedTags(query: query) }
 
-    /// The folder tree of the workspace. With a tag filter only the notes carrying a tag that starts
-    /// with it, and only the folders they lie in; without one every folder, empty ones included.
-    var folderTree: NoteTree {
-        guard let filter = tagFilter else {
-            return NoteTree.build(notes: livingRecords, kept: keptFolders)
-        }
-        let matching = livingRecords.filter { record in
-            record.note.tags.contains { filter.isEmpty || $0.hasPrefix(filter) }
-        }
-        return NoteTree.build(notes: matching, kept: [])
-    }
+    var folderTree: NoteTree { listing.folderTree(query: query) }
 
     func isExpanded(_ key: String) -> Bool {
         !sidebar.collapsed.contains(key)
@@ -455,22 +367,7 @@ final class AppModel {
         saveSidebar()
     }
 
-    private var living: [Note] {
-        records.map(\.note).filter { $0.deletedAt == nil }
-    }
-
-    var tags: [String] {
-        Hashtags.unique(living.flatMap(\.tags))
-    }
-
-    var tagCounts: [TagCount] {
-        var counts: [String: Int] = [:]
-        for note in living {
-            for tag in Set(note.tags) { counts[tag, default: 0] += 1 }
-        }
-        return tags.map { TagCount(tag: $0, count: counts[$0] ?? 0) }
-            .sorted { $0.count != $1.count ? $0.count > $1.count : $0.tag < $1.tag }
-    }
+    var tagCounts: [TagCount] { listing.tagCounts }
 
     private func saveSidebar() {
         do {
@@ -480,13 +377,9 @@ final class AppModel {
         }
     }
 
-    var folders: [String] {
-        Folders.tree(kept: keptFolders, used: living.map(\.folder))
-    }
+    var folders: [String] { listing.folders }
 
-    var trashCount: Int {
-        records.filter { $0.note.deletedAt != nil }.count
-    }
+    var trashCount: Int { listing.trashCount }
 
     func record(_ id: UUID) -> NoteRecord? {
         records.first { $0.id == id }
@@ -507,15 +400,8 @@ final class AppModel {
 
     // MARK: Links
 
-    /// Notes a link can point to: not in the trash, title containing the query, newest first. See ADR 0027.
     func linkableNotes(matching query: String, excluding id: UUID? = nil, limit: Int = 8) -> [NoteRecord] {
-        let folded = Self.fold(query)
-        return records
-            .filter { $0.note.deletedAt == nil && $0.id != id }
-            .filter { folded.isEmpty || Self.fold($0.note.displayTitle).contains(folded) }
-            .sorted { $0.note.updatedAt > $1.note.updatedAt }
-            .prefix(limit)
-            .map { $0 }
+        listing.linkable(matching: query, excluding: id, limit: limit)
     }
 
     /// Follows a link from text or a page: a note link or excerpt opens the note, anything else the system.
@@ -537,10 +423,6 @@ final class AppModel {
         #else
         UIApplication.shared.open(url)
         #endif
-    }
-
-    private static func fold(_ text: String) -> String {
-        text.folding(options: [.caseInsensitive, .diacriticInsensitive], locale: Locale(identifier: "de_DE"))
     }
 
     // MARK: Notes
@@ -620,10 +502,7 @@ final class AppModel {
         return Note.newInk(page: InkPage(blob: sha))
     }
 
-    /// The living notes of the workspace of one kind, newest first.
-    func notes(of kind: NoteKind) -> [Note] {
-        living.filter { $0.kind == kind }.sorted { $0.updatedAt > $1.updatedAt }
-    }
+    func notes(of kind: NoteKind) -> [Note] { listing.notes(of: kind) }
 
     func createInk(data: Data, in folder: String? = nil) {
         do {
