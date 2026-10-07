@@ -126,7 +126,7 @@ sudo restic -r /mnt/backup/inkhash backup /var/lib/inkhash
 
 Wiederherstellen: Dienst stoppen, Verzeichnis ersetzen, Rechte prüfen (`inkhash` bzw. UID 1000, Modus `0700`), starten. Geräte gleichen danach alles einmal ab und laden fehlende Notizen wieder hoch.
 
-**Gelöschten Workspace zurückholen.** Ein in der App gelöschter Workspace liegt unter `spaces/<account-id>/deleted/<workspace-id>-<zeit>` (ADR 0045). Ordner zurück nach `spaces/<account-id>/workspaces/<workspace-id>` verschieben und in `spaces/<account-id>/workspaces.json` einen Eintrag `{ "id": "<workspace-id>", "name": "…" }` ergänzen. Ohne Neustart sichtbar. Sind sie sicher nicht mehr nötig, lassen sich die Ordner unter `deleted/` löschen.
+**Gelöschten Workspace zurückholen.** Ein in der App gelöschter Workspace liegt unter `spaces/<account-id>/deleted/<workspace-id>-<zeit>` (ADR 0045). Ordner zurück nach `spaces/<account-id>/workspaces/<workspace-id>` verschieben und in `spaces/<account-id>/workspaces.json` einen Eintrag `{ "id": "<workspace-id>", "name": "…" }` ergänzen. Ohne Neustart sichtbar. Für `main` (`deleted/main-<zeit>`): `notes`, `blobs` und `changes.jsonl` zurück nach `spaces/<account-id>/` verschieben, in `spaces/<account-id>/main.json` das Feld `deletedAt` entfernen und den Server neu starten. Sind sie sicher nicht mehr nötig, lassen sich die Ordner unter `deleted/` löschen.
 
 ## Gerät verloren, Passwort vergessen
 

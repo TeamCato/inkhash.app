@@ -411,7 +411,8 @@ export class Accounts {
    */
   workspaces(accountId: string): WorkspaceList {
     const order = this.readOrder(accountId);
-    const list = [this.mainWorkspace(accountId), ...this.readWorkspaces(accountId).map(toWorkspace)];
+    const main = this.mainDeleted(accountId) ? [] : [this.mainWorkspace(accountId)];
+    const list = [...main, ...this.readWorkspaces(accountId).map(toWorkspace)];
     if (!order) return { workspaces: list, ordered: false };
     const rank = new Map(order.map((id, index) => [id, index]));
     // Stable: workspaces missing from the stored order keep their default place after the ordered ones.
@@ -425,8 +426,8 @@ export class Accounts {
   createWorkspace(accountId: string, body: unknown): Workspace {
     const name = workspaceName(isRecord(body) ? body.name : undefined);
     const list = this.readWorkspaces(accountId);
-    // `main` counts too: at most 50 workspaces in all.
-    if (list.length + 1 >= MAX_WORKSPACES) throw new StoreError(400, "bad-request", { reason: "too many workspaces" });
+    // `main` counts too, while it exists: at most 50 workspaces in all.
+    if (list.length + (this.mainDeleted(accountId) ? 0 : 1) >= MAX_WORKSPACES) throw new StoreError(400, "bad-request", { reason: "too many workspaces" });
     const entry = { id: randomUUID(), name };
     mkdirSync(join(this.spaceOf(accountId), "workspaces", entry.id), { recursive: true, mode: DIR_MODE });
     this.writeWorkspaces(accountId, [...list, entry]);
@@ -511,34 +512,49 @@ export class Accounts {
   }
 
   /**
-   * Deletes a workspace of the account. Its folder moves to `deleted/<id>-<time>` in the account,
-   * so an admin can bring it back by hand; nothing is erased. `main` stays: it is the account's
-   * own space and what clients from before workspaces sync with. See ADR 0045.
+   * Deletes a workspace of the account; one always stays. Nothing is erased: the workspace's
+   * files move to `deleted/<id>-<time>` in the account, so an admin can bring them back by hand.
+   * `main` keeps its files in the account folder itself; a deleted `main` is marked in
+   * `main.json`, and its routes, prefixed or not, answer 404 from then on. See ADR 0045.
    */
   deleteWorkspace(accountId: string, workspaceId: string): void {
-    if (workspaceId === MAIN_WORKSPACE) throw new StoreError(400, "bad-request", { reason: "main" });
-    const id = canonicalId(workspaceId);
-    const list = this.readWorkspaces(accountId);
-    if (!list.some((workspace) => workspace.id === id)) throw new StoreError(404, "not-found");
+    const isMain = workspaceId === MAIN_WORKSPACE;
+    const id = isMain ? MAIN_WORKSPACE : canonicalId(workspaceId);
+    const remaining = this.workspaces(accountId).workspaces;
+    if (!remaining.some((workspace) => workspace.id === id)) throw new StoreError(404, "not-found");
+    if (remaining.length <= 1) throw new StoreError(400, "bad-request", { reason: "last workspace" });
     const space = this.spaceOf(accountId);
-    // Out of the list first: once it is gone there, no request reaches the folder anymore.
-    this.writeWorkspaces(accountId, list.filter((workspace) => workspace.id !== id));
+    const deleted = join(space, "deleted");
+    const target = join(deleted, `${id}-${nowStamp().replace(/[:]/g, "-")}`);
+    mkdirSync(deleted, { recursive: true, mode: DIR_MODE });
+    // Marked gone first: from then on no request reaches the files anymore.
+    if (isMain) {
+      const look = this.readMainLook(accountId);
+      atomicWrite(join(space, "main.json"), Buffer.from(JSON.stringify({ ...look, deletedAt: nowStamp() }, null, 2)));
+      this.stores.delete(canonicalId(accountId));
+      mkdirSync(target, { recursive: true, mode: DIR_MODE });
+      for (const name of ["notes", "blobs", "changes.jsonl"]) {
+        const path = join(space, name);
+        if (existsSync(path)) renameSync(path, join(target, name));
+      }
+    } else {
+      this.writeWorkspaces(accountId, this.readWorkspaces(accountId).filter((workspace) => workspace.id !== id));
+      this.stores.delete(`${canonicalId(accountId)}/${id}`);
+      const folder = join(space, "workspaces", id);
+      if (existsSync(folder)) renameSync(folder, target);
+    }
     const order = this.readOrder(accountId);
     if (order) {
       atomicWrite(join(space, "order.json"), Buffer.from(JSON.stringify(order.filter((entry) => entry !== id), null, 2)));
-    }
-    this.stores.delete(`${canonicalId(accountId)}/${id}`);
-    const folder = join(space, "workspaces", id);
-    if (existsSync(folder)) {
-      const deleted = join(space, "deleted");
-      mkdirSync(deleted, { recursive: true, mode: DIR_MODE });
-      renameSync(folder, join(deleted, `${id}-${nowStamp().replace(/[:]/g, "-")}`));
     }
   }
 
   /** The store of one workspace. Unknown workspaces are 404, never created on the fly. */
   workspaceStore(accountId: string, workspaceId: string): Store {
-    if (workspaceId === MAIN_WORKSPACE) return this.storeFor(accountId);
+    if (workspaceId === MAIN_WORKSPACE) {
+      if (this.mainDeleted(accountId)) throw new StoreError(404, "not-found", { reason: "unknown workspace" });
+      return this.storeFor(accountId);
+    }
     const id = canonicalId(workspaceId);
     if (!this.readWorkspaces(accountId).some((workspace) => workspace.id === id)) {
       throw new StoreError(404, "not-found", { reason: "unknown workspace" });
@@ -569,6 +585,14 @@ export class Accounts {
     if (!existsSync(path)) return {};
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
     return isRecord(parsed) ? lookOf(parsed) : {};
+  }
+
+  /** A deleted `main` is marked in `main.json`; its files lie under `deleted/`. */
+  private mainDeleted(accountId: string): boolean {
+    const path = join(this.spaceOf(accountId), "main.json");
+    if (!existsSync(path)) return false;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return isRecord(parsed) && typeof parsed.deletedAt === "string";
   }
 
   private mainWorkspace(accountId: string): Workspace {

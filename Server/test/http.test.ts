@@ -565,15 +565,46 @@ test("a deleted workspace is gone for the account but kept on disk", async () =>
     assert.equal((await request(port, "GET", `/v1/workspaces/${a}/changes`, undefined, ada.token)).status, 404);
     assert.equal((await request(port, "DELETE", `/v1/workspaces/${a}`, undefined, ada.token)).status, 404);
 
-    const main = await request(port, "DELETE", "/v1/workspaces/main", undefined, ada.token);
-    assert.equal(main.status, 400);
-    assert.equal((JSON.parse(main.raw.toString("utf8")) as { reason: string }).reason, "main");
-
     const spaces = join(root, "spaces", ada.account.id);
     const kept = readdirSync(join(spaces, "deleted"));
     assert.equal(kept.length, 1);
     assert.ok(kept[0]?.startsWith(`${a}-`));
     assert.ok(readdirSync(join(spaces, "deleted", kept[0] ?? "", "notes")).length > 0);
+  });
+});
+
+test("main can be deleted too, as long as one workspace stays", async () => {
+  await withServer(async (port, root) => {
+    const ada = await openAccount(port);
+    const noteId = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    assert.equal((await request(port, "PUT", `/v1/notes/${noteId}`, { baseRevision: 0, note: textNote(noteId) }, ada.token)).status, 201);
+
+    const alone = await request(port, "DELETE", "/v1/workspaces/main", undefined, ada.token);
+    assert.equal(alone.status, 400);
+    assert.equal((JSON.parse(alone.raw.toString("utf8")) as { reason: string }).reason, "last workspace");
+
+    const created = await request(port, "POST", "/v1/workspaces", { name: "Arbeit" }, ada.token);
+    const work = (JSON.parse(created.raw.toString("utf8")) as { id: string }).id;
+    assert.equal((await request(port, "DELETE", "/v1/workspaces/main", undefined, ada.token)).status, 204);
+
+    const listed = JSON.parse((await request(port, "GET", "/v1/workspaces", undefined, ada.token)).raw.toString("utf8")) as {
+      workspaces: { id: string }[];
+    };
+    assert.deepEqual(listed.workspaces.map((workspace) => workspace.id), [work]);
+    for (const path of ["/v1/changes", `/v1/notes/${noteId}`, "/v1/workspaces/main/changes"]) {
+      assert.equal((await request(port, "GET", path, undefined, ada.token)).status, 404, path);
+    }
+    assert.equal((await request(port, "PATCH", "/v1/workspaces/main", { symbol: "house" }, ada.token)).status, 404);
+    assert.equal((await request(port, "DELETE", `/v1/workspaces/${work}`, undefined, ada.token)).status, 400);
+
+    const kept = readdirSync(join(root, "spaces", ada.account.id, "deleted"));
+    assert.equal(kept.length, 1);
+    assert.ok(kept[0]?.startsWith("main-"));
+    assert.deepEqual(readdirSync(join(root, "spaces", ada.account.id, "deleted", kept[0] ?? "", "notes")), [`${noteId}.json`]);
+
+    // A restart opens every store again; main stays deleted.
+    const again = new Accounts(root, 1_000, "test-token");
+    assert.deepEqual(again.workspaces(ada.account.id).workspaces.map((workspace) => workspace.id), [work]);
   });
 });
 

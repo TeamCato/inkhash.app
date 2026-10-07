@@ -12,6 +12,8 @@ struct ServerDetailView: View {
     @State private var loadingRemotes = true
     @State private var adding = false
     @State private var deletion: Deletion?
+    /// What the last action on the server's workspaces came to. The status line lies behind this sheet.
+    @State private var notice: String?
 
     /// A server workspace about to be deleted, with what the warning says about it.
     private struct Deletion: Identifiable {
@@ -39,6 +41,12 @@ struct ServerDetailView: View {
             Section {
                 LabeledContent("Adresse", value: server.url)
                 LabeledContent("Account", value: server.accountName)
+            }
+            if !loadingRemotes, !keepsLooks {
+                Section {
+                    Label("Dieser Server ist älter als Version 0.2.0. Bild, Symbol und Reihenfolge bleiben auf jedem Gerät für sich, und Workspaces lassen sich nicht löschen. Bitte den Server aktualisieren.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(.orange)
+                }
             }
             onServer
             Section {
@@ -107,6 +115,11 @@ struct ServerDetailView: View {
                         .disabled(adding)
                 }
             }
+            if let notice {
+                Text(notice)
+                    .font(.system(size: 12))
+                    .foregroundStyle(Ink.muted)
+            }
         } header: {
             Text("Workspaces auf dem Server")
         } footer: {
@@ -114,42 +127,56 @@ struct ServerDetailView: View {
                 if !missing.isEmpty {
                     Text("Ein hinzugefügter Workspace gleicht gleich ab, mit seinen Notizen, seinem Aussehen und seinem Platz in der Reihenfolge.")
                 }
-                Text("Löschen auf dem Server über das Kontextmenü eines Workspace. Den ersten Workspace des Accounts gibt es immer.")
-                if !keepsLooks {
-                    Text("Dieser Server ist älter als Version 0.2.0. Bild, Symbol und Reihenfolge bleiben deshalb auf jedem Gerät für sich.")
-                }
+                Text("Löschen auf dem Server über „…“ neben einem Workspace. Einer muss bleiben.")
             }
         }
     }
 
     private func row(_ remote: RemoteWorkspace) -> some View {
         let here = model.registry.workspaces(on: serverID).filter { $0.link?.remote == remote.id }
-        return HStack {
+        let isLast = remotes.count <= 1
+        return HStack(spacing: 10) {
             if let local = here.first {
                 Label {
                     Text(local.name)
                 } icon: {
                     WorkspaceIcon(workspace: local)
                 }
-                Spacer()
+            } else {
+                Label {
+                    Text(remote.name)
+                } icon: {
+                    Image(systemName: remote.symbol ?? "tray")
+                }
+            }
+            Spacer()
+            if here.isEmpty {
+                Button("Hinzufügen") { add([remote]) }
+                    .disabled(adding)
+            } else {
                 Text("Auf diesem Gerät")
                     .font(.system(size: 12))
                     .foregroundStyle(Ink.muted)
-            } else {
-                Label(remote.name, systemImage: remote.symbol ?? "tray")
-                Spacer()
-                Button("Hinzufügen") { add([remote]) }
-                    .disabled(adding)
             }
-        }
-        .contextMenu {
-            if remote.id != APIClient.mainWorkspace {
-                Button("Auf dem Server löschen…", systemImage: "trash", role: .destructive) { askToDelete(remote, here: here) }
+            // Visible on purpose: a context menu is easy to miss, and on the Mac a row with a
+            // button does not reliably show one.
+            Menu {
+                Button("Auf dem Server löschen…", systemImage: "trash", role: .destructive) {
+                    askToDelete(remote, here: here)
+                }
+                .disabled(isLast || !keepsLooks)
+            } label: {
+                Image(systemName: "ellipsis.circle")
+                    .foregroundStyle(Ink.muted)
             }
+            .menuStyle(.borderlessButton)
+            .menuIndicator(.hidden)
+            .fixedSize()
+            .accessibilityLabel("Mehr zu „\(remote.name)“")
         }
         #if os(iOS)
         .swipeActions {
-            if remote.id != APIClient.mainWorkspace {
+            if !isLast && keepsLooks {
                 Button("Löschen", systemImage: "trash", role: .destructive) { askToDelete(remote, here: here) }
             }
         }
@@ -173,8 +200,11 @@ struct ServerDetailView: View {
 
     private func delete(_ remote: RemoteWorkspace) {
         Task {
-            if await model.deleteOnServer(remote, on: serverID) {
-                remotes.removeAll { $0.id == remote.id }
+            if let problem = await model.deleteOnServer(remote, on: serverID) {
+                notice = problem
+            } else {
+                notice = "„\(remote.name)“ ist auf dem Server gelöscht."
+                await loadRemotes()
             }
         }
     }

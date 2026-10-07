@@ -317,31 +317,31 @@ final class AppModel {
         return try? await client.noteCount(workspace: remote.id)
     }
 
-    /// Deletes a workspace on the server, for every device. Workspaces here that synced with it
-    /// keep their notes and stay on this device only. True if it is gone. See ADR 0045.
-    @discardableResult
-    func deleteOnServer(_ remote: RemoteWorkspace, on server: UUID) async -> Bool {
-        guard remote.id != APIClient.mainWorkspace, let client = sessions.client(for: server) else { return false }
+    /// Deletes a workspace on the server, for every device; one always stays. Workspaces here that
+    /// synced with it keep their notes and stay on this device only. Nil if it is gone, else why
+    /// not. See ADR 0045.
+    func deleteOnServer(_ remote: RemoteWorkspace, on server: UUID) async -> String? {
+        guard let client = sessions.client(for: server) else { return "Nicht angemeldet." }
         do {
             try await client.deleteWorkspace(id: remote.id)
         } catch APIError.notFound {
             // Already gone, e.g. deleted on another device.
         } catch APIError.badStatus(405, _) {
-            status = "Dieser Server kann noch keine Workspaces löschen. Er braucht Version 0.3.0."
-            return false
+            return "Dieser Server kann noch keine Workspaces löschen. Er braucht Version 0.3.0 oder neuer."
+        } catch let APIError.badStatus(400, body) where body.contains("last workspace") {
+            return "Ein Workspace muss auf dem Server bleiben."
         } catch APIError.unauthorized {
             sessions.expire(server, ifStill: client.token)
-            return false
+            return "Die Anmeldung ist abgelaufen."
         } catch {
-            status = StatusLine.describe(error)
-            return false
+            return StatusLine.describe(error)
         }
         for workspace in registry.workspaces(on: server) where workspace.link?.remote == remote.id {
             registry.setLink(workspace.id, to: nil)
         }
         status = "„\(remote.name)“ ist auf dem Server gelöscht."
         if registry.current.link == nil { status = syncer.statusAtRest }
-        return true
+        return nil
     }
 
     private func link(for target: WorkspaceTarget, name: String) async throws -> WorkspaceLink? {
