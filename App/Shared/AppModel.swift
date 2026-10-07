@@ -129,6 +129,7 @@ final class AppModel {
     private var impulseToken = 0
     private var syncTask: Task<Void, Never>?
     private var isSyncing = false
+    private var syncAgain = false
 
     init() {
         let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
@@ -1117,21 +1118,34 @@ final class AppModel {
 
     // MARK: Sync
 
+    /// Waits for a pause in editing, then syncs. A new edit only restarts the wait: cancelling
+    /// a running sync would drop a request the server may already have stored. See PITFALLS P-053.
     func scheduleSync() {
         guard isSyncEnabled else { return }
         syncTask?.cancel()
         syncTask = Task {
             try? await Task.sleep(nanoseconds: 800_000_000)
             guard !Task.isCancelled else { return }
-            await sync()
+            Task { await self.sync() }
         }
     }
 
     /// Syncs every workspace that is linked to a signed-in server. The current one reports its status.
+    /// A call during a running sync makes it go round once more instead of being dropped.
     func sync() async {
-        guard !isSyncing else { return }
+        guard !isSyncing else {
+            syncAgain = true
+            return
+        }
         isSyncing = true
         defer { isSyncing = false }
+        repeat {
+            syncAgain = false
+            await syncOnce()
+        } while syncAgain
+    }
+
+    private func syncOnce() async {
         for workspace in setup.workspaces {
             guard let link = workspace.link, let entry = setup.server(link.server),
                   let client = client(for: link.server, workspace: link.remote) else { continue }
@@ -1140,7 +1154,9 @@ final class AppModel {
             do {
                 // Binding is idempotent. A different account or workspace on the server starts over.
                 try Library.bind(workspaceStore, to: Workspaces.bindingKey(accountID: entry.accountID, remote: link.remote))
-                let report = try await Syncer.sync(store: workspaceStore, transport: client)
+                let report = try await Syncer.sync(store: workspaceStore, transport: client) { [weak self] note, meta in
+                    self?.syncSaved(note, meta: meta, in: workspace.id)
+                }
                 if isCurrent {
                     status = syncStatus(report)
                 }
@@ -1180,6 +1196,18 @@ final class AppModel {
 
     private func index(of id: UUID) -> Int? {
         records.firstIndex { $0.id == id }
+    }
+
+    /// Edits start from `records`, so they must see every revision the sync writes at once.
+    /// Waiting for `reload` would let the next edit write the old revision back. See PITFALLS P-053.
+    private func syncSaved(_ note: Note, meta: LocalMeta, in workspace: UUID) {
+        guard workspace == setup.current else { return }
+        let record = NoteRecord(note: note, dirty: meta.dirty, conflict: meta.conflict)
+        if let index = index(of: note.id) {
+            records[index] = record
+        } else {
+            records.append(record)
+        }
     }
 
     private func syncStatus(_ report: SyncReport) -> String {

@@ -125,22 +125,34 @@ public enum APIError: Error, Equatable {
 public enum Syncer {
     /// Pulls first, then pushes dirty notes that are not in conflict.
     /// Ink blobs are uploaded before the note that references them.
-    public static func sync(store: LocalStore, transport: any NoteTransport) async throws -> SyncReport {
+    ///
+    /// The device keeps editing while this waits for the server. Every write here therefore starts
+    /// from what the store holds at that moment, and `onSave` hears of it right away, so a copy of
+    /// the notes elsewhere never writes an old revision back. See PITFALLS P-053.
+    public static func sync(
+        store: LocalStore,
+        transport: any NoteTransport,
+        onSave: @escaping @MainActor (Note, LocalMeta) -> Void = { _, _ in }
+    ) async throws -> SyncReport {
+        let writer = Writer(store: store, onSave: onSave)
         var report = SyncReport(pushed: 0, pulled: 0, conflicts: 0)
-        try await pull(into: &report, store: store, transport: transport)
-        let records = try store.list()
-        for (note, meta) in records where meta.dirty && !meta.conflict {
+        try await pull(into: &report, writer: writer, transport: transport)
+        let dirty = try store.list().filter { $0.meta.dirty && !$0.meta.conflict }.map(\.note.id)
+        for id in dirty {
+            // Read again: an earlier push in this loop may have taken long enough for an edit.
+            guard let note = try store.note(id: id) else { continue }
+            let meta = try store.meta(for: id)
+            guard meta.dirty, !meta.conflict else { continue }
             do {
-                if let saved = try await push(note, store: store, transport: transport) {
-                    try store.save(note: saved, meta: .clean)
-                    try store.clearConflict(id: saved.id)
+                if let saved = try await push(note, writer: writer, transport: transport) {
+                    try writer.saveAfterPush(saved, pushed: note)
                     report.pushed += 1
                 }
             } catch let APIError.conflict(server) {
                 // Someone wrote between pull and push, or the note already exists in a newly bound account.
                 try await ensureBlobs(of: server, store: store, transport: transport)
                 try store.saveConflict(server)
-                try store.save(note: note, meta: LocalMeta(dirty: true, conflict: true))
+                try writer.save(try store.note(id: id) ?? note, meta: LocalMeta(dirty: true, conflict: true))
                 report.conflicts += 1
             } catch let APIError.badStatus(code, _) where code == 400 || code == 413 {
                 // One note the server refuses must not hold back the others. See PITFALLS P-045.
@@ -148,23 +160,49 @@ public enum Syncer {
             }
         }
         // The push is itself a change. A second pull advances the cursor past it.
-        try await pull(into: &report, store: store, transport: transport)
+        try await pull(into: &report, writer: writer, transport: transport)
         return report
     }
 
-    private static func pull(into report: inout SyncReport, store: LocalStore, transport: any NoteTransport) async throws {
+    /// Every write of a sync goes through here, so the caller hears of it at once.
+    @MainActor
+    struct Writer {
+        let store: LocalStore
+        let onSave: @MainActor (Note, LocalMeta) -> Void
+
+        func save(_ note: Note, meta: LocalMeta) throws {
+            try store.save(note: note, meta: meta)
+            if !meta.conflict { try store.clearConflict(id: note.id) }
+            onSave(note, meta)
+        }
+
+        /// The server took `pushed` as `saved`. An edit made meanwhile stays dirty, now on top of
+        /// the server's revision, instead of being overwritten or becoming a conflict with itself.
+        func saveAfterPush(_ saved: Note, pushed: Note) throws {
+            if let current = try store.note(id: saved.id), current != pushed {
+                var rebased = current
+                rebased.revision = saved.revision
+                try save(rebased, meta: LocalMeta(dirty: true, conflict: false))
+            } else {
+                try save(saved, meta: .clean)
+            }
+        }
+    }
+
+    private static func pull(into report: inout SyncReport, writer: Writer, transport: any NoteTransport) async throws {
         var page: ChangePage
         repeat {
-            let before = try store.cursor()
+            let before = try writer.store.cursor()
             page = try await transport.changes(after: before)
             // A page that claims more but does not move the cursor would loop forever.
             if page.hasMore && page.cursor <= before { throw APIError.invalidResponse }
-            try await apply(page, into: &report, store: store, transport: transport)
-            try store.setCursor(page.cursor)
+            try await apply(page, into: &report, writer: writer, transport: transport)
+            try writer.store.setCursor(page.cursor)
         } while page.hasMore
     }
 
-    private static func apply(_ page: ChangePage, into report: inout SyncReport, store: LocalStore, transport: any NoteTransport) async throws {
+    private static func apply(_ page: ChangePage, into report: inout SyncReport, writer: Writer, transport: any NoteTransport) async throws {
+        let store = writer.store
         var seen = Set<UUID>()
         for change in page.changes where seen.insert(change.noteId).inserted {
             let server = try await transport.fetchNote(id: change.noteId)
@@ -175,35 +213,36 @@ public enum Syncer {
                 case .unchanged, .pushLocal:
                     break
                 case .takeServer:
-                    try store.save(note: server, meta: .clean)
-                    try store.clearConflict(id: server.id)
+                    try writer.save(server, meta: .clean)
                     report.pulled += 1
                 case .conflict:
                     try store.saveConflict(server)
-                    try store.save(note: local, meta: LocalMeta(dirty: true, conflict: true))
+                    try writer.save(local, meta: LocalMeta(dirty: true, conflict: true))
                     report.conflicts += 1
                 }
             } else {
-                try store.save(note: server, meta: .clean)
+                try writer.save(server, meta: .clean)
                 report.pulled += 1
             }
         }
     }
 
-    private static func push(_ note: Note, store: LocalStore, transport: any NoteTransport) async throws -> Note? {
+    private static func push(_ note: Note, writer: Writer, transport: any NoteTransport) async throws -> Note? {
+        let store = writer.store
         if note.deletedAt != nil {
             if note.revision == 0 {
                 // Never reached the server. It stays in the trash on this device only.
-                try store.save(note: note, meta: .clean)
+                try writer.save(note, meta: .clean)
                 return nil
             }
             do {
                 return try await transport.deleteNote(id: note.id, baseRevision: note.revision)
             } catch APIError.notFound {
-                // The server never had it, e.g. after a restore. It stays in the local trash.
-                var local = note
+                // The server never had it, e.g. after a restore. It stays in the local trash,
+                // unless it was restored meanwhile; then it goes up as a new note next time.
+                var local = try store.note(id: note.id) ?? note
                 local.revision = 0
-                try store.save(note: local, meta: .clean)
+                try writer.save(local, meta: local == note.withRevision(0) ? .clean : LocalMeta(dirty: true, conflict: false))
                 return nil
             }
         }
@@ -232,5 +271,13 @@ public enum Syncer {
                 try store.putBlob(data, expected: name)
             }
         }
+    }
+}
+
+private extension Note {
+    func withRevision(_ revision: Int) -> Note {
+        var copy = self
+        copy.revision = revision
+        return copy
     }
 }

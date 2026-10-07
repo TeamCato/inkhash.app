@@ -237,6 +237,76 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(try store.meta(for: refused.id).dirty, true, "tried again next time")
     }
 
+    func testEditDuringPushStaysDirtyOnTheServerRevision() async throws {
+        let store = try freshStore()
+        let app = AppCopy(store: store)
+        var note = Note.newText(now: "2026-09-30T06:00:00Z")
+        note.applyMarkdown("eins\n")
+        app.save(note)
+        let transport = FakeTransport()
+        transport.afterPut = { app.edit(note.id, markdown: "eins zwei\n") }
+
+        let report = try await Syncer.sync(store: store, transport: transport, onSave: app.synced)
+        XCTAssertEqual(report.conflicts, 0)
+        let kept = try XCTUnwrap(store.note(id: note.id))
+        XCTAssertEqual(kept.markdown, "eins zwei\n")
+        XCTAssertEqual(kept.revision, 1)
+        XCTAssertEqual(try store.meta(for: note.id), LocalMeta(dirty: true, conflict: false))
+        XCTAssertEqual(app.notes[note.id], kept)
+
+        transport.afterPut = nil
+        let again = try await Syncer.sync(store: store, transport: transport, onSave: app.synced)
+        XCTAssertEqual(again.conflicts, 0)
+        XCTAssertEqual(transport.notes[note.id]?.markdown, "eins zwei\n")
+        XCTAssertEqual(transport.notes[note.id]?.revision, 2)
+        XCTAssertEqual(try store.meta(for: note.id), .clean)
+    }
+
+    func testEditAfterOwnPushIsNoConflict() async throws {
+        let store = try freshStore()
+        let app = AppCopy(store: store)
+        var note = Note.newText(now: "2026-09-30T06:00:00Z")
+        note.applyMarkdown("eins\n")
+        app.save(note)
+        let transport = FakeTransport()
+        // The second pull runs after the push; an edit then starts from the copy the app holds.
+        transport.onChanges[2] = { app.edit(note.id, markdown: "eins zwei\n") }
+
+        let report = try await Syncer.sync(store: store, transport: transport, onSave: app.synced)
+        XCTAssertEqual(report.conflicts, 0)
+        XCTAssertEqual(try store.note(id: note.id)?.revision, 1)
+        XCTAssertEqual(try store.meta(for: note.id), LocalMeta(dirty: true, conflict: false))
+
+        let again = try await Syncer.sync(store: store, transport: transport, onSave: app.synced)
+        XCTAssertEqual(again.conflicts, 0)
+        XCTAssertEqual(transport.notes[note.id]?.markdown, "eins zwei\n")
+    }
+
+    func testEditDuringPushOfAnotherNoteGoesUpFresh() async throws {
+        let store = try freshStore()
+        let app = AppCopy(store: store)
+        var first = Note.newText(now: "2026-09-30T06:00:00Z")
+        first.applyMarkdown("a\n")
+        var second = Note.newText(now: "2026-09-30T06:00:00Z")
+        second.applyMarkdown("b\n")
+        app.save(first)
+        app.save(second)
+        let transport = FakeTransport()
+        var waiting: UUID?
+        transport.afterPut = {
+            // After the first push, edit the note still waiting for its turn.
+            guard waiting == nil else { return }
+            waiting = [first.id, second.id].first { transport.notes[$0] == nil }
+            if let waiting { app.edit(waiting, markdown: "neu\n") }
+        }
+
+        let report = try await Syncer.sync(store: store, transport: transport, onSave: app.synced)
+        XCTAssertEqual(report.conflicts, 0)
+        let edited = try XCTUnwrap(waiting)
+        XCTAssertEqual(transport.notes[edited]?.markdown, "neu\n")
+        XCTAssertEqual(try store.meta(for: edited), .clean)
+    }
+
     private func freshStore() throws -> LocalStore {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString)
         return try LocalStore(root: root)
@@ -251,6 +321,11 @@ final class FakeTransport: NoteTransport, @unchecked Sendable {
     var events: [String] = []
     var pageSize = Int.max
     var refuse: Set<UUID> = []
+    /// Runs after the server stored a note, before the device hears back.
+    var afterPut: (@MainActor () -> Void)?
+    /// Runs on the n-th call of `changes`, counted from 1.
+    var onChanges: [Int: @MainActor () -> Void] = [:]
+    private var changeCalls = 0
 
     func seed(_ note: Note, cursor: Int) {
         notes[note.id] = note
@@ -259,6 +334,8 @@ final class FakeTransport: NoteTransport, @unchecked Sendable {
     }
 
     func changes(after cursor: Int) async throws -> ChangePage {
+        changeCalls += 1
+        if let hook = onChanges[changeCalls] { await hook() }
         var latest: [UUID: ChangeEntry] = [:]
         for entry in log where entry.cursor > cursor { latest[entry.noteId] = entry }
         let pending = latest.values.sorted { $0.cursor < $1.cursor }
@@ -281,6 +358,7 @@ final class FakeTransport: NoteTransport, @unchecked Sendable {
             saved.revision = existing.revision + 1
             notes[note.id] = saved
             append(saved)
+            if let afterPut { await afterPut() }
             return saved
         }
         guard baseRevision == 0 else { throw APIError.notFound }
@@ -288,6 +366,7 @@ final class FakeTransport: NoteTransport, @unchecked Sendable {
         saved.revision = 1
         notes[note.id] = saved
         append(saved)
+        if let afterPut { await afterPut() }
         return saved
     }
 
@@ -314,5 +393,32 @@ final class FakeTransport: NoteTransport, @unchecked Sendable {
     private func append(_ note: Note) {
         cursor += 1
         log.append(ChangeEntry(cursor: cursor, noteId: note.id, revision: note.revision, deleted: note.deletedAt != nil))
+    }
+}
+
+/// The notes as the app holds them in memory: edits start from here, not from the store,
+/// and `synced` is how the sync keeps it current.
+@MainActor
+private final class AppCopy {
+    let store: LocalStore
+    var notes: [UUID: Note] = [:]
+
+    init(store: LocalStore) {
+        self.store = store
+    }
+
+    func save(_ note: Note) {
+        notes[note.id] = note
+        try? store.save(note: note, meta: LocalMeta(dirty: true, conflict: false))
+    }
+
+    func edit(_ id: UUID, markdown: String) {
+        guard var note = notes[id] else { return }
+        note.applyMarkdown(markdown)
+        save(note)
+    }
+
+    func synced(_ note: Note, _ meta: LocalMeta) {
+        notes[note.id] = note
     }
 }
