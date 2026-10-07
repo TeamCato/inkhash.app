@@ -8,6 +8,8 @@ public enum RegistrationMode: String, Codable, Sendable {
 public struct ServerHealth: Codable, Equatable, Sendable {
     public var ok: Bool
     public var registration: RegistrationMode
+    /// The server's release, e.g. `0.4.0`. Nil for servers that do not tell yet.
+    public var version: String?
 }
 
 public struct ServerAccount: Codable, Equatable, Sendable {

@@ -196,7 +196,7 @@ const ROUTES: Route[] = [
     method: "GET",
     pattern: /^\/v1\/health$/,
     access: "open",
-    handle: (ctx) => json(200, { ok: true, registration: ctx.accounts.registration() }),
+    handle: (ctx) => json(200, { ok: true, registration: ctx.accounts.registration(), version: serverVersion() }),
   },
   {
     method: "POST",
@@ -208,13 +208,29 @@ const ROUTES: Route[] = [
     method: "GET",
     pattern: /^\/v1\/accounts$/,
     access: "session",
-    handle: (ctx) => json(200, { accounts: ctx.accounts.listAccounts(accountOf(ctx)) }),
+    handle: (ctx) => json(200, { accounts: ctx.accounts.listAccounts(accountOf(ctx)), me: accountOf(ctx) }),
   },
   {
     method: "POST",
     pattern: /^\/v1\/accounts$/,
     access: "session",
     handle: async (ctx) => json(201, await ctx.accounts.createAccount(accountOf(ctx), await readJson(ctx))),
+  },
+  {
+    method: "PATCH",
+    pattern: /^\/v1\/accounts\/([^/]+)$/,
+    access: "session",
+    handle: async (ctx) =>
+      json(200, await ctx.accounts.updateAccount(accountOf(ctx), ctx.params[0] ?? "", await readJson(ctx), ctx.token)),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/v1\/accounts\/([^/]+)$/,
+    access: "session",
+    handle: (ctx) => {
+      ctx.accounts.deleteAccount(accountOf(ctx), ctx.params[0] ?? "");
+      return { status: 204 };
+    },
   },
   {
     method: "POST",
@@ -461,14 +477,18 @@ export function adminAddress(host: string, port: number): string {
   return `http://${host.includes(":") ? `[${host}]` : host}:${port}/admin`;
 }
 
-/** From `package.json` next to `dist/`. Releases set it, see ADR 0039. */
-function version(): string {
+let cachedVersion: string | undefined;
+
+/** From `package.json` next to `dist/`. Releases set it, see ADR 0039. Read once. */
+export function serverVersion(): string {
+  if (cachedVersion !== undefined) return cachedVersion;
   try {
     const parsed = JSON.parse(readFileSync(new URL("../package.json", import.meta.url), "utf8")) as { version?: unknown };
-    return typeof parsed.version === "string" ? parsed.version : "dev";
+    cachedVersion = typeof parsed.version === "string" ? parsed.version : "dev";
   } catch {
-    return "dev";
+    cachedVersion = "dev";
   }
+  return cachedVersion;
 }
 
 /** The data directory is not writable, usually a Docker volume that belongs to root. See P-023. */
@@ -516,7 +536,7 @@ export function main(): void {
   process.once("SIGINT", () => stop("SIGINT"));
 
   server.listen(port, host, () => {
-    process.stderr.write(`inkhash ${version()} ${host}:${port}\n`);
+    process.stderr.write(`inkhash ${serverVersion()} ${host}:${port}\n`);
     if (proxies) process.stderr.write(`trusted proxies: ${process.env.INKHASH_TRUSTED_PROXIES}\n`);
     // The one token that is logged on purpose: it only creates the admin and dies with that. See ADR 0021.
     const setupToken = accounts.setupToken;

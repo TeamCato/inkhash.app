@@ -128,9 +128,11 @@ Wiederherstellen: Dienst stoppen, Verzeichnis ersetzen, Rechte prüfen (`inkhash
 
 **Gelöschten Workspace zurückholen.** Ein in der App gelöschter Workspace liegt unter `spaces/<account-id>/deleted/<workspace-id>-<zeit>` (ADR 0045). Ordner zurück nach `spaces/<account-id>/workspaces/<workspace-id>` verschieben und in `spaces/<account-id>/workspaces.json` einen Eintrag `{ "id": "<workspace-id>", "name": "…" }` ergänzen. Ohne Neustart sichtbar. Für `main` (`deleted/main-<zeit>`): `notes`, `blobs` und `changes.jsonl` zurück nach `spaces/<account-id>/` verschieben, in `spaces/<account-id>/main.json` das Feld `deletedAt` entfernen und den Server neu starten. Sind sie sicher nicht mehr nötig, lassen sich die Ordner unter `deleted/` löschen.
 
+**Gelöschten Account zurückholen.** Ein auf `/admin` gelöschter Account liegt unter `deleted-accounts/<account-id>-<zeit>` im Datenverzeichnis (ADR 0046). `identity.json` von dort nach `identities/<name>.json` legen (der Name darf inzwischen nicht neu vergeben sein), den übrigen Ordner nach `spaces/<account-id>` verschieben und den Server neu starten.
+
 ## Gerät verloren, Passwort vergessen
 
-Dafür gibt es noch keinen Befehl. Bis dahin von Hand im Datenverzeichnis. Die Befehle unten sind für Linux; unter Docker statt `sudo -u inkhash` ein `docker compose exec inkhash` davor und `/data` statt `/var/lib/inkhash`.
+Ein Admin setzt auf `/admin` unter „Bearbeiten“ ein neues Passwort; das beendet auch alle Sitzungen des Accounts, etwa die eines verlorenen Geräts (ADR 0046). Nur wer das Passwort des letzten Admins vergessen hat, braucht das Datenverzeichnis. Die Befehle unten sind für Linux; unter Docker statt `sudo -u inkhash` ein `docker compose exec inkhash` davor und `/data` statt `/var/lib/inkhash`.
 
 **Alle Sitzungen eines Accounts beenden.** Die Account-ID steht in `identities/<name>.json`. Wirkt sofort, ohne Neustart.
 

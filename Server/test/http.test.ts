@@ -107,9 +107,12 @@ test("health is open and notes need a session", async () => {
   await withServer(async (port) => {
     const { status, raw } = await request(port, "GET", "/v1/health", undefined, null);
     assert.equal(status, 200);
-    const health = JSON.parse(raw.toString("utf8")) as { ok: boolean; registration: string };
+    const health = JSON.parse(raw.toString("utf8")) as { ok: boolean; registration: string; version: string };
     assert.equal(health.ok, true);
     assert.equal(health.registration, "setup");
+    // The version comes from package.json, which releases set; here it is the checkout's.
+    const packaged = JSON.parse(readFileSync(new URL("../../package.json", import.meta.url), "utf8")) as { version: string };
+    assert.equal(health.version, packaged.version);
     const denied = await request(port, "GET", "/v1/changes?after=0", undefined, "test-token");
     assert.equal(denied.status, 401);
   });
@@ -605,6 +608,74 @@ test("main can be deleted too, as long as one workspace stays", async () => {
     // A restart opens every store again; main stays deleted.
     const again = new Accounts(root, 1_000, "test-token");
     assert.deepEqual(again.workspaces(ada.account.id).workspaces.map((workspace) => workspace.id), [work]);
+  });
+});
+
+test("the admin renames, promotes, sets passwords and deletes accounts; the last admin stays", async () => {
+  await withServer(async (port, root) => {
+    const ada = await openAccount(port);
+    const bea = await addAccount(port, ada.token, "bea");
+    const listed = JSON.parse((await request(port, "GET", "/v1/accounts", undefined, ada.token)).raw.toString("utf8")) as {
+      me: string;
+    };
+    assert.equal(listed.me, ada.account.id);
+
+    // Only the admin may.
+    assert.equal((await request(port, "PATCH", `/v1/accounts/${ada.account.id}`, { admin: false }, bea.token)).status, 403);
+    assert.equal((await request(port, "DELETE", `/v1/accounts/${ada.account.id}`, undefined, bea.token)).status, 403);
+
+    // The last admin keeps the role and the account.
+    const demote = await request(port, "PATCH", `/v1/accounts/${ada.account.id}`, { admin: false }, ada.token);
+    assert.equal(demote.status, 400);
+    assert.equal((JSON.parse(demote.raw.toString("utf8")) as { reason: string }).reason, "last admin");
+    assert.equal((await request(port, "DELETE", `/v1/accounts/${ada.account.id}`, undefined, ada.token)).status, 400);
+
+    // Rename: the old name is free, the session goes on, the new name signs in.
+    const renamed = await request(port, "PATCH", `/v1/accounts/${bea.account.id}`, { name: "Beatrix" }, ada.token);
+    assert.equal(renamed.status, 200);
+    assert.equal((JSON.parse(renamed.raw.toString("utf8")) as { name: string }).name, "beatrix");
+    assert.equal((await request(port, "GET", "/v1/workspaces", undefined, bea.token)).status, 200);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "bea", password: "secretsecret" }, null)).status, 401);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "beatrix", password: "secretsecret" }, null)).status, 200);
+    await addAccount(port, ada.token, "cem");
+    const cem = JSON.parse((await request(port, "GET", "/v1/accounts", undefined, ada.token)).raw.toString("utf8")) as {
+      accounts: { id: string; name: string }[];
+    };
+    const cemId = cem.accounts.find((account) => account.name === "cem")?.id ?? "";
+    assert.equal((await request(port, "PATCH", `/v1/accounts/${cemId}`, { name: "beatrix" }, ada.token)).status, 409);
+
+    // A new password ends the account's sessions.
+    const reset = await request(port, "PATCH", `/v1/accounts/${bea.account.id}`, { password: "neuesneues" }, ada.token);
+    assert.equal(reset.status, 200);
+    assert.equal((await request(port, "GET", "/v1/workspaces", undefined, bea.token)).status, 401);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "beatrix", password: "neuesneues" }, null)).status, 200);
+
+    // Its own new password keeps the admin's session.
+    assert.equal((await request(port, "PATCH", `/v1/accounts/${ada.account.id}`, { password: "adminadmin" }, ada.token)).status, 200);
+    assert.equal((await request(port, "GET", "/v1/accounts", undefined, ada.token)).status, 200);
+
+    // A second admin, then the first one may go, even by itself.
+    const promoted = await request(port, "PATCH", `/v1/accounts/${bea.account.id}`, { admin: true }, ada.token);
+    assert.equal((JSON.parse(promoted.raw.toString("utf8")) as { admin: boolean }).admin, true);
+    const again = await request(port, "POST", "/v1/session", { name: "beatrix", password: "neuesneues" }, null);
+    const beaToken = (JSON.parse(again.raw.toString("utf8")) as Opened).token;
+    const noteId = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    await request(port, "PUT", `/v1/notes/${noteId}`, { baseRevision: 0, note: textNote(noteId) }, ada.token);
+    assert.equal((await request(port, "DELETE", `/v1/accounts/${ada.account.id}`, undefined, ada.token)).status, 204);
+    assert.equal((await request(port, "GET", "/v1/workspaces", undefined, ada.token)).status, 401);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "ada", password: "adminadmin" }, null)).status, 401);
+    const left = JSON.parse((await request(port, "GET", "/v1/accounts", undefined, beaToken)).raw.toString("utf8")) as {
+      accounts: { name: string }[];
+    };
+    assert.deepEqual(left.accounts.map((account) => account.name), ["beatrix", "cem"]);
+
+    // Kept on disk, with its identity, for the admin to bring back by hand.
+    const kept = readdirSync(join(root, "deleted-accounts"));
+    assert.equal(kept.length, 1);
+    const folder = join(root, "deleted-accounts", kept[0] ?? "");
+    assert.equal((JSON.parse(readFileSync(join(folder, "identity.json"), "utf8")) as { name: string }).name, "ada");
+    assert.deepEqual(readdirSync(join(folder, "notes")), [`${noteId}.json`]);
+    assert.equal((await request(port, "DELETE", `/v1/accounts/${ada.account.id}`, undefined, beaToken)).status, 404);
   });
 });
 

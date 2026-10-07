@@ -26,4 +26,4 @@ Die Seite im Browser statt in der App, weil Verwaltung selten ist und die App da
 
 ## Nicht
 
-Kein Passwort ändern, kein Account löschen, kein zweiter Admin, keine Rechte darüber hinaus. Wer das Admin-Passwort vergisst, braucht Zugriff auf das Datenverzeichnis. Die Seite rendert keine Notizen; der Server bleibt bei Speichern, Ausliefern und Abgleichen.
+Kein Passwort ändern, kein Account löschen, kein zweiter Admin, keine Rechte darüber hinaus (geändert durch 0046). Wer das Admin-Passwort vergisst, braucht Zugriff auf das Datenverzeichnis. Die Seite rendert keine Notizen; der Server bleibt bei Speichern, Ausliefern und Abgleichen.

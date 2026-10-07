@@ -9,6 +9,7 @@ struct ServerDetailView: View {
     @State private var remotes: [RemoteWorkspace] = []
     /// False for servers before 0.2.0: looks and order stay on each device (ADR 0043).
     @State private var keepsLooks = true
+    @State private var version: String?
     @State private var loadingRemotes = true
     @State private var adding = false
     @State private var deletion: Deletion?
@@ -41,6 +42,7 @@ struct ServerDetailView: View {
             Section {
                 LabeledContent("Adresse", value: server.url)
                 LabeledContent("Account", value: server.accountName)
+                LabeledContent("Server-Version", value: loadingRemotes ? "…" : version ?? "unbekannt, älter als 0.5.0")
             }
             if !loadingRemotes, !keepsLooks {
                 Section {
@@ -185,6 +187,7 @@ struct ServerDetailView: View {
 
     private func loadRemotes() async {
         loadingRemotes = true
+        version = await model.sessions.version(of: serverID)
         let list = await model.sessions.remoteWorkspaceList(on: serverID)
         remotes = list?.workspaces ?? []
         keepsLooks = list?.keepsLooks ?? true

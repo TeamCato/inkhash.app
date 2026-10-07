@@ -129,6 +129,12 @@ final class ServerSessions {
         }
     }
 
+    /// The server's release, as `/v1/health` tells it. Nil if it does not say or cannot be reached.
+    func version(of server: UUID) async -> String? {
+        guard let entry = registry.server(server), let url = URL(string: entry.url) else { return nil }
+        return try? await APIClient(baseURL: url, token: "").health().version
+    }
+
     /// Checks the address as it is typed, after a short pause.
     func addressChanged(_ text: String) {
         probeTask?.cancel()

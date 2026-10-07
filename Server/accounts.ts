@@ -327,6 +327,68 @@ export class Accounts {
       .sort((left, right) => left.name.localeCompare(right.name));
   }
 
+  /**
+   * The admin changes an account: `name`, `password`, `admin`, whichever the body has. A new
+   * password ends the account's sessions except the one asking. The last admin stays admin.
+   * See ADR 0046.
+   */
+  async updateAccount(adminId: string, accountId: string, body: unknown, token: string): Promise<AccountSummary> {
+    this.requireAdmin(adminId);
+    if (!isRecord(body)) throw new StoreError(400, "bad-request");
+    let identity = this.identityById(accountId);
+    const name = body.name === undefined ? undefined : normalizeName(body.name);
+    const password = body.password === undefined ? undefined : passwordOf(body.password);
+    if (body.admin !== undefined && typeof body.admin !== "boolean") throw new StoreError(400, "bad-request", { reason: "admin" });
+    const admin = body.admin as boolean | undefined;
+    if (name === undefined && password === undefined && admin === undefined) throw new StoreError(400, "bad-request");
+    if (name !== undefined && name !== identity.name && existsSync(join(this.identities, `${name}.json`))) {
+      throw new StoreError(409, "name-taken");
+    }
+    if (admin === false && identity.admin === true && this.adminCount() <= 1) {
+      throw new StoreError(400, "bad-request", { reason: "last admin" });
+    }
+    const passwordHash = password === undefined ? undefined : await this.hashPassword(password);
+    // Read again: the hash took a while, and another change may have landed meanwhile.
+    identity = this.identityById(accountId);
+    const updated: Identity = { ...identity };
+    if (passwordHash !== undefined) updated.passwordHash = passwordHash;
+    if (admin === true) updated.admin = true;
+    if (admin === false) delete updated.admin;
+    if (name !== undefined && name !== identity.name) {
+      if (existsSync(join(this.identities, `${name}.json`))) throw new StoreError(409, "name-taken");
+      updated.name = name;
+      atomicWrite(join(this.identities, `${name}.json`), Buffer.from(JSON.stringify(updated)));
+      rmSync(join(this.identities, `${identity.name}.json`), { force: true });
+    } else {
+      atomicWrite(join(this.identities, `${identity.name}.json`), Buffer.from(JSON.stringify(updated)));
+    }
+    if (passwordHash !== undefined) this.endSessions(identity.id, token);
+    return summary(updated);
+  }
+
+  /**
+   * The admin deletes an account; the last admin stays. Its sessions end at once. Nothing is
+   * erased: its notes and identity move to `deleted-accounts/<id>-<time>`. See ADR 0046.
+   */
+  deleteAccount(adminId: string, accountId: string): void {
+    this.requireAdmin(adminId);
+    const identity = this.identityById(accountId);
+    if (identity.admin === true && this.adminCount() <= 1) throw new StoreError(400, "bad-request", { reason: "last admin" });
+    // The identity goes first: from then on nobody signs in as it, and its sessions find no account.
+    rmSync(join(this.identities, `${identity.name}.json`), { force: true });
+    this.endSessions(identity.id);
+    for (const key of [...this.stores.keys()]) {
+      if (key === identity.id || key.startsWith(`${identity.id}/`)) this.stores.delete(key);
+    }
+    const deleted = join(this.root, "deleted-accounts");
+    const target = join(deleted, `${identity.id}-${stamp().replace(/[:]/g, "-")}`);
+    mkdirSync(deleted, { recursive: true, mode: DIR_MODE });
+    const space = join(this.spaces, identity.id);
+    if (existsSync(space)) renameSync(space, target);
+    else mkdirSync(target, { mode: DIR_MODE });
+    atomicWrite(join(target, "identity.json"), Buffer.from(JSON.stringify(identity)));
+  }
+
   async login(body: unknown, client: string): Promise<Opened> {
     const key = clientKey(client);
     if (this.clients.blocked(key)) throw slowDown();
@@ -662,6 +724,27 @@ export class Accounts {
       right.createdAt < left.createdAt || (right.createdAt === left.createdAt && right.name < left.name) ? right : left,
     );
     atomicWrite(join(this.identities, `${oldest.name}.json`), Buffer.from(JSON.stringify({ ...oldest, admin: true })));
+  }
+
+  private identityById(accountId: string): Identity {
+    const id = typeof accountId === "string" ? accountId.toLowerCase() : "";
+    const identity = this.allIdentities().find((candidate) => candidate.id === id);
+    if (!identity) throw new StoreError(404, "not-found");
+    return identity;
+  }
+
+  private adminCount(): number {
+    return this.allIdentities().filter((identity) => identity.admin === true).length;
+  }
+
+  /** Ends every session of an account, except the one with `keep` as its token. */
+  private endSessions(accountId: string, keep?: string): void {
+    const kept = keep ? `${tokenHash(keep)}.json` : null;
+    for (const name of readdirSync(this.sessions)) {
+      if (!name.endsWith(".json") || name === kept) continue;
+      const path = join(this.sessions, name);
+      if (this.readSession(path)?.accountId === accountId) rmSync(path, { force: true });
+    }
   }
 
   private requireAdmin(accountId: string): void {

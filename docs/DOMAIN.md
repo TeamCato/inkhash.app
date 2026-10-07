@@ -36,6 +36,6 @@ Diese Wörter heißen im Code so.
 | gebunden | Account und Server-Workspace, mit denen die Bibliothek zuletzt abgeglichen hat. Ein Wechsel setzt alle Revisionen auf 0. |
 | Sitzung | Zufalls-Token nach dem Anmelden. Liegt in der Keychain, nicht das Setup-Token. |
 | Setup-Token | Zufallswert, den der Server ohne Accounts beim Start ins Log schreibt. Legt nur den Admin an, dann ungültig. |
-| Admin | Der erste Account. Legt auf `/admin` weitere Accounts an, sonst ein Account wie jeder andere (ADR 0021). |
+| Admin | Darf auf `/admin` Accounts anlegen, umbenennen, Passwörter setzen, zu Admins machen und löschen, sonst ein Account wie jeder andere. Der erste Account ist Admin, der letzte bleibt es (ADR 0021, 0046). |
 
 `# Titel` ist eine Überschrift. `#titel` ist ein Tag. In Handschrift-Abschriften ist `# titel` ebenfalls ein Tag.
