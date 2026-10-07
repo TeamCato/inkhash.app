@@ -356,6 +356,9 @@ struct ServerDetailView: View {
     @Environment(\.dismiss) private var dismiss
     var serverID: UUID
     @State private var confirmRemoval = false
+    @State private var remotes: [RemoteWorkspace] = []
+    @State private var loadingRemotes = true
+    @State private var adding = false
 
     var body: some View {
         if let server = model.servers.first(where: { $0.id == serverID }) {
@@ -392,6 +395,7 @@ struct ServerDetailView: View {
             } header: {
                 Text("Workspaces")
             }
+            onServer
             Section {
                 Button("Abmelden") { model.logout(serverID) }
                 Button("Server entfernen", role: .destructive) { confirmRemoval = true }
@@ -410,6 +414,54 @@ struct ServerDetailView: View {
         } message: {
             Text("Workspaces, die damit abgleichen, bleiben auf diesem Gerät und hören auf abzugleichen.")
         }
+        .task(id: serverID) { await loadRemotes() }
+    }
+
+    /// Workspaces of the account that this device does not have yet. See ADR 0044.
+    @ViewBuilder
+    private var onServer: some View {
+        let missing = model.setup.unlinked(remotes, on: serverID)
+        Section {
+            if loadingRemotes {
+                ProgressView().controlSize(.small)
+            } else if missing.isEmpty {
+                Text("Alle Workspaces des Accounts sind auf diesem Gerät.")
+                    .foregroundStyle(Ink.muted)
+            } else {
+                ForEach(missing) { remote in
+                    HStack {
+                        Label(remote.name, systemImage: remote.symbol ?? "tray")
+                        Spacer()
+                        Button("Hinzufügen") { add([remote]) }
+                            .disabled(adding)
+                    }
+                }
+                if missing.count > 1 {
+                    Button("Alle hinzufügen") { add(missing) }
+                        .disabled(adding)
+                }
+            }
+        } header: {
+            Text("Auf dem Server")
+        } footer: {
+            if !missing.isEmpty {
+                Text("Ein hinzugefügter Workspace gleicht gleich ab, mit seinen Notizen, seinem Aussehen und seinem Platz in der Reihenfolge.")
+            }
+        }
+    }
+
+    private func loadRemotes() async {
+        loadingRemotes = true
+        remotes = await model.remoteWorkspaces(on: serverID)
+        loadingRemotes = false
+    }
+
+    private func add(_ chosen: [RemoteWorkspace]) {
+        adding = true
+        Task {
+            await model.addFromServer(chosen, on: serverID)
+            adding = false
+        }
     }
 }
 
@@ -425,8 +477,18 @@ struct ServerConnectView: View {
     @State private var password = ""
     @State private var busy = false
     @State private var loaded = false
+    /// A new server after signing in: its page follows here, with the workspaces to take over.
+    @State private var joined: UUID?
 
     var body: some View {
+        if let joined {
+            ServerDetailView(serverID: joined)
+        } else {
+            form
+        }
+    }
+
+    private var form: some View {
         Form {
             Section {
                 HStack {
@@ -532,12 +594,12 @@ struct ServerConnectView: View {
     private func submit() {
         busy = true
         Task {
-            let ok = await model.signIn(url: url, name: name, password: password)
+            let server = await model.signIn(url: url, name: name, password: password)
             busy = false
-            if ok {
+            if let server {
                 password = ""
-                // A known server shows its signed-in page in place; a new one goes back to the list.
-                if presetURL.isEmpty { dismiss() }
+                // A known server shows its signed-in page in place; a new one shows it here.
+                if presetURL.isEmpty { joined = server }
             }
         }
     }

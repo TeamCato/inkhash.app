@@ -1030,27 +1030,40 @@ final class AppModel {
 
     /// Signs in to the server at `url`. A known address reuses its entry, so workspaces linked
     /// to it continue. Accounts are created on the server's admin page, not here (ADR 0021).
-    func signIn(url raw: String, name: String, password: String) async -> Bool {
+    /// Returns the server's id, or nil when it failed; `status` says why.
+    func signIn(url raw: String, name: String, password: String) async -> UUID? {
         guard let url = Self.validAddress(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
             status = "Die Adresse braucht http oder https und einen Host."
-            return false
+            return nil
         }
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard password.count >= 8 else {
             status = "Das Passwort braucht mindestens 8 Zeichen."
-            return false
+            return nil
         }
         let client = APIClient(baseURL: url, token: "")
         do {
             let session = try await client.openSession(name: trimmed, password: password)
-            try accept(session, url: url.absoluteString)
+            let server = try accept(session, url: url.absoluteString)
             status = "Angemeldet."
             await sync()
-            return true
+            return server
         } catch {
             status = describe(error)
-            return false
+            return nil
         }
+    }
+
+    /// Takes server workspaces onto this device, linked and synced right away. See ADR 0044.
+    func addFromServer(_ remotes: [RemoteWorkspace], on server: UUID) async {
+        let added = setup.addLinked(remotes, on: server) { [self] id in
+            let library = store(for: id)
+            return ((try? library.list().isEmpty) ?? false) && library.keptFolders().isEmpty
+        }
+        guard !added.isEmpty else { return }
+        persistSetup()
+        status = added.count == 1 ? "Workspace hinzugefügt." : "\(added.count) Workspaces hinzugefügt."
+        await sync()
     }
 
     /// Ends the session. Linked workspaces keep their notes and their binding; syncing pauses.
@@ -1162,7 +1175,8 @@ final class AppModel {
         return APIClient(baseURL: url, token: token, workspace: remote)
     }
 
-    private func accept(_ session: ServerSession, url: String) throws {
+    @discardableResult
+    private func accept(_ session: ServerSession, url: String) throws -> UUID {
         guard let id = Self.safeAccountID(session.account.id) else { throw APIError.invalidResponse }
         let serverID: UUID
         if let index = setup.servers.firstIndex(where: { $0.url == url }) {
@@ -1178,6 +1192,7 @@ final class AppModel {
         tokens[serverID] = session.token
         dismissExpiredNotice(serverID)
         persistSetup()
+        return serverID
     }
 
     private static func safeAccountID(_ raw: String) -> String? {

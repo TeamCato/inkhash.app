@@ -121,6 +121,40 @@ public struct DeviceSetup: Codable, Equatable, Sendable {
         workspaces.insert(workspace, at: target)
     }
 
+    /// Server workspaces of `server` that no workspace here syncs with yet.
+    public func unlinked(_ remotes: [RemoteWorkspace], on server: UUID) -> [RemoteWorkspace] {
+        remotes.filter { remote in
+            !workspaces.contains { $0.link?.server == server && $0.link?.remote == remote.id }
+        }
+    }
+
+    /// Adds a workspace here for each server workspace, linked to it, with its name and symbol.
+    /// On a fresh device the one empty local workspace takes the first, instead of staying behind
+    /// as an empty extra. `isEmpty` says whether a workspace has no notes. Returns the ids used.
+    /// See ADR 0044.
+    @discardableResult
+    public mutating func addLinked(
+        _ remotes: [RemoteWorkspace], on server: UUID, isEmpty: (UUID) -> Bool
+    ) -> [UUID] {
+        var added: [UUID] = []
+        for remote in unlinked(remotes, on: server) {
+            let link = WorkspaceLink(server: server, remote: remote.id)
+            if added.isEmpty, workspaces.count == 1, workspaces[0].link == nil, isEmpty(workspaces[0].id) {
+                workspaces[0].name = remote.name
+                workspaces[0].symbol = remote.symbol ?? workspaces[0].symbol
+                workspaces[0].icon = nil
+                workspaces[0].link = link
+                workspaces[0].lookPending = false
+                added.append(workspaces[0].id)
+                continue
+            }
+            let workspace = Workspace(name: remote.name, symbol: remote.symbol ?? "tray", link: link)
+            workspaces.append(workspace)
+            added.append(workspace.id)
+        }
+        return added
+    }
+
     /// Marks the order as changed for every server that has workspaces here.
     public mutating func markOrderChanged() {
         for workspace in workspaces {

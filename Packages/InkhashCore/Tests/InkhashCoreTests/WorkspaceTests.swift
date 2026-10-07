@@ -283,6 +283,38 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(moved.workspaces.map(\.id), [a.id, c.id, b.id])
     }
 
+    func testFreshDeviceTakesServerWorkspacesIntoItsEmptyOne() {
+        let server = UUID()
+        let privat = Workspace(name: "Privat", symbol: "house")
+        var setup = DeviceSetup(servers: [], workspaces: [privat], current: privat.id)
+        let remotes = [
+            RemoteWorkspace(id: "main", name: "Zuhause", symbol: "leaf"),
+            RemoteWorkspace(id: "w1", name: "Arbeit"),
+        ]
+        XCTAssertEqual(setup.unlinked(remotes, on: server).map(\.id), ["main", "w1"])
+
+        let added = setup.addLinked(remotes, on: server) { _ in true }
+        XCTAssertEqual(added.first, privat.id)
+        XCTAssertEqual(setup.workspaces.map(\.name), ["Zuhause", "Arbeit"])
+        XCTAssertEqual(setup.workspaces.map(\.symbol), ["leaf", "tray"])
+        XCTAssertEqual(setup.workspaces.map { $0.link?.remote }, ["main", "w1"])
+        XCTAssertTrue(setup.workspaces.allSatisfy { !$0.lookPending })
+        XCTAssertTrue(setup.unlinked(remotes, on: server).isEmpty)
+
+        XCTAssertEqual(setup.addLinked(remotes, on: server) { _ in true }, [])
+        XCTAssertEqual(setup.workspaces.count, 2)
+    }
+
+    func testWorkspaceWithNotesStaysWhenAddingFromServer() {
+        let server = UUID()
+        let privat = Workspace(name: "Privat")
+        var setup = DeviceSetup(servers: [], workspaces: [privat], current: privat.id)
+        setup.addLinked([RemoteWorkspace(id: "main", name: "Privat")], on: server) { _ in false }
+        XCTAssertEqual(setup.workspaces.count, 2)
+        XCTAssertNil(setup.workspaces[0].link)
+        XCTAssertEqual(setup.workspaces[1].link, WorkspaceLink(server: server, remote: "main"))
+    }
+
     func testSetupWithoutPendingFieldsDecodes() throws {
         let id = "11111111-2222-4333-8444-555555555555"
         let json = """
