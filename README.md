@@ -1,5 +1,7 @@
 # inkhash
 
+> **In Entwicklung.** inkhash ist noch nicht fertig. Speicherformat, API und Oberfläche können sich ändern, und es gibt noch keine App im App Store. Wer den Server schon betreibt, sichert seine Daten (siehe `docs/DEPLOY.md`).
+
 Notizen für iPad, iPhone und Mac. Handschrift auf dem iPad, Text auf beiden, Ablage auf dem eigenen Server. Die Bibliothek durchsucht Text und Handschrift, ohne auf den exakten Wortlaut zu bestehen, und erkennt Schlagwörter.
 
 Die App braucht keinen Server, alles bleibt auf dem Gerät. Ein selbst betriebener Server gleicht optional Geräte ab (`docs/adr/0017-lokal-zuerst.md`).

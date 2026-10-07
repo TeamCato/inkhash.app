@@ -14,4 +14,4 @@ Lokal ansehen:
 python3 -m http.server 8790 --directory Website
 ```
 
-Offen: App-Store-Links für iPad und Mac (stehen als „bald im App Store“ ohne Ziel), GitHub-Repo ist noch privat.
+Offen: App-Store-Links für iPad und Mac (stehen als „bald im App Store“ ohne Ziel).

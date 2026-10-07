@@ -5,7 +5,7 @@ Der Server ist optional. Er gleicht Geräte ab und speichert Notizen in einem Ve
 - Paket: [GitHub Releases](https://github.com/teamCato/inkhash.app/releases), `inkhash-server-X.Y.Z.tar.gz`
 - Image: `ghcr.io/teamcato/inkhash-server:X.Y.Z` für amd64 und arm64
 
-Diese Anleitung richtet den Server im Heimnetz ein. Danach erreichen iPad, iPhone und Mac ihn unter `http://<lan-adresse>:8787`, zum Beispiel `http://192.168.1.20:8787`. Der Server spricht nur HTTP. Zugriff von außen ist nicht Teil dieser Anleitung. Wer einen eigenen Reverse-Proxy davor setzt, trägt ihn in `INKHASH_TRUSTED_PROXIES` ein; unter Docker ist der Host (`172.31.87.1`) schon eingetragen.
+Diese Anleitung richtet den Server im Heimnetz ein. Danach erreichen iPad, iPhone und Mac ihn unter `http://<lan-adresse>:8787`, zum Beispiel `http://192.168.1.20:8787`. Der Server spricht nur HTTP. Zugriff von außen ist nicht Teil dieser Anleitung. Wer einen eigenen Reverse-Proxy davor setzt, liest [Hinter einem eigenen Reverse-Proxy](#hinter-einem-eigenen-reverse-proxy).
 
 ## Linux mit systemd
 
@@ -98,6 +98,20 @@ Für reines HTTP nur eine IP-Adresse oder einen Namen auf `.local` verwenden. An
 
 Im Heimnetz gehen Token und Passwort unverschlüsselt über das Netz. Wer dem eigenen WLAN nicht traut, richtet den Admin über einen SSH-Tunnel ein (`ssh -L 8787:127.0.0.1:8787 server`, dann `http://127.0.0.1:8787/admin`).
 
+## Hinter einem eigenen Reverse-Proxy
+
+Der Server sieht hinter einem Proxy nur dessen Adresse. Dann teilen sich alle Clients einen Zähler für Fehlversuche, und 30 falsche Anmeldungen von irgendwem sperren 15 Minuten lang alle. Damit der Server die echte Adresse aus `X-Forwarded-For` nimmt, muss der Proxy in `INKHASH_TRUSTED_PROXIES` stehen: Adressen oder Netze, durch Komma getrennt, z. B. `127.0.0.1,::1` oder `172.31.87.0/24`. Der Proxy muss `X-Forwarded-For` setzen.
+
+| Wo der Proxy läuft | Linux (`/etc/inkhash/env`) | Docker (`.env`) |
+| --- | --- | --- |
+| auf demselben Rechner | `127.0.0.1,::1` | `172.31.87.1`, der Standard |
+| als Container im Netz `inkhash` der Compose-Datei | – | seine Adresse dort, oder `172.31.87.0/24` |
+| auf einem anderen Rechner | seine LAN-Adresse | seine LAN-Adresse |
+
+Welche Adresse wirklich ankommt, sagt der Server selbst: Schickt ein nicht eingetragener Absender `X-Forwarded-For`, steht einmal im Log `<adresse> sends X-Forwarded-For but is not in INKHASH_TRUSTED_PROXIES`. Diese Adresse eintragen und neu starten (`sudo systemctl restart inkhash` bzw. `docker compose up -d`). Probe: Eine falsche Anmeldung über den Proxy zeigt danach `auth failed /v1/session 401 from <client-adresse>` und nicht die Adresse des Proxys.
+
+Nur Proxys eintragen, die man selbst betreibt. Wer in der Liste steht, darf dem Server jede Client-Adresse nennen.
+
 ## Was der Betreiber sieht
 
 Notizen liegen unverschlüsselt im Datenverzeichnis. Wer Zugriff auf die Maschine hat, kann sie lesen. Der Admin vergibt die Startpasswörter, und es gibt noch keinen Weg, das eigene Passwort zu ändern. Wer Accounts für andere anlegt, sollte ihnen das sagen.
@@ -146,4 +160,4 @@ Das Passwort steht danach in der Shell-History; `history -d` oder ein führendes
 | `INKHASH_HOST` | `127.0.0.1`, im Image `0.0.0.0` | Adresse, auf der der Server lauscht |
 | `INKHASH_PORT` | `8787` | Port |
 | `INKHASH_DATA` | `/data`, unter systemd `/var/lib/inkhash` | Datenverzeichnis |
-| `INKHASH_TRUSTED_PROXIES` | leer | Nur hinter einem Proxy nötig |
+| `INKHASH_TRUSTED_PROXIES` | leer, unter Docker `172.31.87.1` | Proxys, deren `X-Forwarded-For` gilt. Siehe [Hinter einem eigenen Reverse-Proxy](#hinter-einem-eigenen-reverse-proxy) |

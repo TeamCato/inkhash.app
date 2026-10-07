@@ -15,8 +15,8 @@ services:
     volumes:
       - ./data:/data
     environment:
-      # .1 is a reverse proxy on the host, if there is one. See ADR 0038.
-      INKHASH_TRUSTED_PROXIES: "172.31.87.1"
+      # Set in .env; the default trusts a reverse proxy on the host. See env.example and ADR 0038.
+      INKHASH_TRUSTED_PROXIES: ${INKHASH_TRUSTED_PROXIES:-172.31.87.1}
     read_only: true
     cap_drop: [ALL]
     security_opt: ["no-new-privileges:true"]
