@@ -196,7 +196,7 @@ struct ExpiredSessionBanner: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("Die Anmeldung bei \(AppModel.host(server.url)) ist abgelaufen. Die Notizen bleiben auf diesem Gerät, abgeglichen wird erst nach dem Anmelden.")
+            Text("Die Anmeldung bei \(ServerAddress.host(server.url)) ist abgelaufen. Die Notizen bleiben auf diesem Gerät, abgeglichen wird erst nach dem Anmelden.")
                 .font(.system(size: 13))
                 .fixedSize(horizontal: false, vertical: true)
             HStack {

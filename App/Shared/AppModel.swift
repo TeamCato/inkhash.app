@@ -141,7 +141,7 @@ final class AppModel {
         let legacy = LegacySignIn(
             url: defaults.string(forKey: "inkhash.baseURL") ?? "",
             accountName: defaults.string(forKey: "inkhash.accountName") ?? "",
-            accountID: Self.safeAccountID(defaults.string(forKey: "inkhash.accountID") ?? "") ?? ""
+            accountID: ServerAddress.accountID(defaults.string(forKey: "inkhash.accountID") ?? "") ?? ""
         )
         do {
             let opened = try Workspaces.open(base: base, legacy: legacy)
@@ -227,7 +227,7 @@ final class AppModel {
 
     private var statusAtRest: String {
         guard let link = workspace.link, let server = setup.server(link.server) else { return Self.localOnly }
-        return isSignedIn(server.id) ? "" : "Abgleich mit \(Self.host(server.url)) ruht."
+        return isSignedIn(server.id) ? "" : "Abgleich mit \(ServerAddress.host(server.url)) ruht."
     }
 
     func createWorkspace(name: String, symbol: String, image: Data?, target: WorkspaceTarget) async {
@@ -1032,7 +1032,7 @@ final class AppModel {
     /// to it continue. Accounts are created on the server's admin page, not here (ADR 0021).
     /// Returns the server's id, or nil when it failed; `status` says why.
     func signIn(url raw: String, name: String, password: String) async -> UUID? {
-        guard let url = Self.validAddress(raw.trimmingCharacters(in: .whitespacesAndNewlines)) else {
+        guard let url = ServerAddress.valid(raw) else {
             status = "Die Adresse braucht http oder https und einen Host."
             return nil
         }
@@ -1129,7 +1129,7 @@ final class AppModel {
     func addressChanged(_ text: String) {
         probeTask?.cancel()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = Self.validAddress(trimmed) else {
+        guard let url = ServerAddress.valid(trimmed) else {
             connection = trimmed.isEmpty ? .unknown : .failed("Die Adresse braucht http oder https und einen Host.")
             return
         }
@@ -1148,26 +1148,6 @@ final class AppModel {
         }
     }
 
-    static func validAddress(_ text: String) -> URL? {
-        guard let parsed = URL(string: text),
-              let scheme = parsed.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              parsed.host != nil else { return nil }
-        return parsed
-    }
-
-    /// The server's admin page, where accounts are created. See ADR 0021.
-    static func adminAddress(_ url: String) -> String {
-        let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
-        let base = trimmed.hasSuffix("/") ? String(trimmed.dropLast()) : trimmed
-        return "\(base)/admin"
-    }
-
-    static func host(_ url: String) -> String {
-        guard let parsed = URL(string: url), let host = parsed.host else { return url }
-        return parsed.port.map { "\(host):\($0)" } ?? host
-    }
-
     private func client(for server: UUID, workspace remote: String = APIClient.mainWorkspace) -> APIClient? {
         guard isSignedIn(server), let entry = setup.server(server), let url = URL(string: entry.url), let token = tokens[server] else {
             return nil
@@ -1177,7 +1157,7 @@ final class AppModel {
 
     @discardableResult
     private func accept(_ session: ServerSession, url: String) throws -> UUID {
-        guard let id = Self.safeAccountID(session.account.id) else { throw APIError.invalidResponse }
+        guard let id = ServerAddress.accountID(session.account.id) else { throw APIError.invalidResponse }
         let serverID: UUID
         if let index = setup.servers.firstIndex(where: { $0.url == url }) {
             serverID = setup.servers[index].id
@@ -1193,11 +1173,6 @@ final class AppModel {
         dismissExpiredNotice(serverID)
         persistSetup()
         return serverID
-    }
-
-    private static func safeAccountID(_ raw: String) -> String? {
-        guard let id = UUID(uuidString: raw) else { return nil }
-        return id.uuidString.lowercased()
     }
 
     // MARK: Sync

@@ -443,7 +443,7 @@ struct SidebarView: View {
 
     private var syncLabel: String {
         guard let server = model.server(of: model.workspace) else { return AppModel.localOnly }
-        return AppModel.host(server.url)
+        return ServerAddress.host(server.url)
     }
 
     // MARK: Folder prompt

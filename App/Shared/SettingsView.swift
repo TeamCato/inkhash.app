@@ -52,7 +52,7 @@ struct SettingsView: View {
                             ServerDetailView(serverID: server.id)
                         } label: {
                             HStack {
-                                Label(AppModel.host(server.url), systemImage: "server.rack")
+                                Label(ServerAddress.host(server.url), systemImage: "server.rack")
                                 Spacer()
                                 Text(model.isSignedIn(server.id) ? server.accountName : "abgemeldet")
                                     .font(.system(size: 12))
@@ -86,7 +86,7 @@ struct SettingsView: View {
 
     private func target(of workspace: Workspace) -> String {
         guard let server = model.server(of: workspace) else { return "Nur dieses Gerät" }
-        return model.isSignedIn(server.id) ? AppModel.host(server.url) : "\(AppModel.host(server.url)), ruht"
+        return model.isSignedIn(server.id) ? ServerAddress.host(server.url) : "\(ServerAddress.host(server.url)), ruht"
     }
 }
 
@@ -159,7 +159,7 @@ struct WorkspaceEditor: View {
                 Picker("Abgleich", selection: $serverChoice) {
                     Text("Nur dieses Gerät").tag(UUID?.none)
                     ForEach(model.servers.filter { model.isSignedIn($0.id) }) { server in
-                        Text("\(AppModel.host(server.url)) · \(server.accountName)").tag(UUID?.some(server.id))
+                        Text("\(ServerAddress.host(server.url)) · \(server.accountName)").tag(UUID?.some(server.id))
                     }
                 }
                 if serverChoice != nil {
@@ -400,11 +400,11 @@ struct ServerDetailView: View {
                 Button("Abmelden") { model.logout(serverID) }
                 Button("Server entfernen", role: .destructive) { confirmRemoval = true }
             } footer: {
-                Text("Abmelden beendet nur den Abgleich, die Notizen bleiben hier. Weitere Accounts legt der Admin unter \(AppModel.adminAddress(server.url)) an.")
+                Text("Abmelden beendet nur den Abgleich, die Notizen bleiben hier. Weitere Accounts legt der Admin unter \(ServerAddress.admin(server.url)) an.")
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(AppModel.host(server.url))
+        .navigationTitle(ServerAddress.host(server.url))
         .confirmationDialog("Server entfernen?", isPresented: $confirmRemoval, titleVisibility: .visible) {
             Button("Entfernen", role: .destructive) {
                 model.removeServer(serverID)
@@ -519,7 +519,7 @@ struct ServerConnectView: View {
             }
         }
         .formStyle(.grouped)
-        .navigationTitle(presetURL.isEmpty ? "Server verbinden" : AppModel.host(presetURL))
+        .navigationTitle(presetURL.isEmpty ? "Server verbinden" : ServerAddress.host(presetURL))
         .onAppear {
             guard !loaded else { return }
             loaded = true
@@ -564,7 +564,7 @@ struct ServerConnectView: View {
         switch mode {
         case .setup:
             Section {
-                Text("Öffne \(AppModel.adminAddress(url)) im Browser. Mit dem Setup-Token aus dem Log des Servers legst du dort den Admin an. Mit dem meldest du dich danach hier an.")
+                Text("Öffne \(ServerAddress.admin(url)) im Browser. Mit dem Setup-Token aus dem Log des Servers legst du dort den Admin an. Mit dem meldest du dich danach hier an.")
                     .textSelection(.enabled)
             } header: {
                 Text("Einrichten")
@@ -578,7 +578,7 @@ struct ServerConnectView: View {
             } header: {
                 Text("Anmelden")
             } footer: {
-                Text("Accounts legt der Admin unter \(AppModel.adminAddress(url)) an. Welche Workspaces damit abgleichen, wählst du danach pro Workspace.")
+                Text("Accounts legt der Admin unter \(ServerAddress.admin(url)) an. Welche Workspaces damit abgleichen, wählst du danach pro Workspace.")
             }
         }
     }
