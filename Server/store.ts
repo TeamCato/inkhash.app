@@ -440,6 +440,10 @@ export class Store {
     atomicWrite(path, data);
   }
 
+  hasBlob(digest: string): boolean {
+    return SHA_RE.test(digest) && existsSync(join(this.blobs, digest));
+  }
+
   getBlob(digest: string): Buffer {
     if (!SHA_RE.test(digest)) throw new StoreError(400, "bad-request", { reason: "invalid blob" });
     const path = join(this.blobs, digest);

@@ -1,5 +1,7 @@
 import InkhashCore
+import PhotosUI
 import SwiftUI
+import UniformTypeIdentifiers
 
 /// Workspaces and servers. Servers are connected once; each workspace picks one of them, or none.
 struct SettingsView: View {
@@ -15,14 +17,25 @@ struct SettingsView: View {
                             WorkspaceEditor(workspace: workspace)
                         } label: {
                             HStack {
-                                Label(workspace.name, systemImage: workspace.symbol)
+                                Label {
+                                    Text(workspace.name)
+                                } icon: {
+                                    WorkspaceIcon(workspace: workspace)
+                                }
                                 Spacer()
                                 Text(target(of: workspace))
                                     .font(.system(size: 12))
                                     .foregroundStyle(Ink.muted)
                             }
                         }
+                        .contextMenu {
+                            Button("Nach oben", systemImage: "arrow.up") { model.moveWorkspace(workspace.id, by: -1) }
+                                .disabled(workspace.id == model.workspaces.first?.id)
+                            Button("Nach unten", systemImage: "arrow.down") { model.moveWorkspace(workspace.id, by: 1) }
+                                .disabled(workspace.id == model.workspaces.last?.id)
+                        }
                     }
+                    .onMove { model.moveWorkspaces(fromOffsets: $0, toOffset: $1) }
                     NavigationLink {
                         WorkspaceEditor(workspace: nil)
                     } label: {
@@ -31,7 +44,7 @@ struct SettingsView: View {
                 } header: {
                     Text("Workspaces")
                 } footer: {
-                    Text("Jeder Workspace hat eigene Notizen, Ordner und Schlagwörter. Er bleibt auf diesem Gerät oder gleicht mit einem Workspace auf einem deiner Server ab.")
+                    Text("Jeder Workspace hat eigene Notizen, Ordner und Schlagwörter. Er bleibt auf diesem Gerät oder gleicht mit einem Workspace auf einem deiner Server ab. Die Reihenfolge änderst du durch Ziehen oder im Kontextmenü.")
                 }
                 Section {
                     ForEach(model.servers) { server in
@@ -79,7 +92,7 @@ struct SettingsView: View {
 
 // MARK: Workspace
 
-/// Creates a workspace (`workspace` nil) or edits one: name, symbol and where it syncs.
+/// Creates a workspace (`workspace` nil) or edits one: name, symbol or picture, and where it syncs.
 struct WorkspaceEditor: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -87,6 +100,13 @@ struct WorkspaceEditor: View {
 
     @State private var name = ""
     @State private var symbol = "tray"
+    /// A newly chosen picture, already normalized. Only counts when `imageChanged`.
+    @State private var image: Data?
+    @State private var imageChanged = false
+    @State private var imageError = ""
+    @State private var photoItem: PhotosPickerItem?
+    @State private var showsPhotos = false
+    @State private var showsFiles = false
     @State private var serverChoice: UUID?
     @State private var remoteChoice = WorkspaceEditor.newRemote
     @State private var remotes: [RemoteWorkspace] = []
@@ -100,29 +120,40 @@ struct WorkspaceEditor: View {
 
     var body: some View {
         Form {
-            Section("Name") {
-                TextField("z. B. Arbeit", text: $name)
+            Section {
+                TextField("Name", text: $name, prompt: Text("z. B. Arbeit"))
+                    .labelsHidden()
                     .autocorrectionDisabled()
                 LazyVGrid(columns: Array(repeating: GridItem(.flexible(), spacing: 8), count: 6), spacing: 8) {
                     ForEach(Self.symbols, id: \.self) { item in
+                        let chosen = preview == nil && symbol == item
                         Button {
                             symbol = item
+                            if preview != nil {
+                                image = nil
+                                imageChanged = true
+                            }
                         } label: {
                             Image(systemName: item)
                                 .font(.system(size: 15))
                                 .frame(maxWidth: .infinity, minHeight: 34)
                                 .background(
                                     RoundedRectangle(cornerRadius: 8, style: .continuous)
-                                        .fill(symbol == item ? Ink.accent.opacity(0.16) : Color.clear)
+                                        .fill(chosen ? Ink.accent.opacity(0.16) : Color.clear)
                                 )
-                                .foregroundStyle(symbol == item ? Ink.accent : Ink.muted)
+                                .foregroundStyle(chosen ? Ink.accent : Ink.muted)
                         }
                         .buttonStyle(.plain)
                         .accessibilityLabel(item)
-                        .accessibilityAddTraits(symbol == item ? .isSelected : [])
+                        .accessibilityAddTraits(chosen ? .isSelected : [])
                     }
                 }
                 .padding(.vertical, 4)
+                pictureRow
+            } header: {
+                Text("Name")
+            } footer: {
+                if !imageError.isEmpty { Text(imageError) }
             }
             Section {
                 Picker("Abgleich", selection: $serverChoice) {
@@ -186,6 +217,70 @@ struct WorkspaceEditor: View {
         }
         .onAppear(perform: load)
         .onChange(of: serverChoice) { _, _ in Task { await loadRemotes() } }
+        .photosPicker(isPresented: $showsPhotos, selection: $photoItem, matching: .images)
+        .onChange(of: photoItem) { _, item in
+            guard let item else { return }
+            Task {
+                if let data = try? await item.loadTransferable(type: Data.self) {
+                    await adopt(data)
+                } else {
+                    imageError = "Das Foto ließ sich nicht laden."
+                }
+                photoItem = nil
+            }
+        }
+        .fileImporter(isPresented: $showsFiles, allowedContentTypes: [.image]) { result in
+            guard case .success(let url) = result else { return }
+            let scoped = url.startAccessingSecurityScopedResource()
+            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+            guard let data = try? Data(contentsOf: url) else {
+                imageError = "Die Datei ließ sich nicht öffnen."
+                return
+            }
+            Task { await adopt(data) }
+        }
+    }
+
+    /// The picture the workspace will show: a newly chosen one, or the one it has.
+    private var preview: PlatformImage? {
+        if imageChanged { return image.flatMap(PlatformImage.init(data:)) }
+        return workspace.flatMap(model.workspaceImage)
+    }
+
+    private var pictureRow: some View {
+        HStack(spacing: 12) {
+            if let preview {
+                WorkspacePicture(image: preview, size: 34)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 34 * 0.25, style: .continuous)
+                            .strokeBorder(Ink.accent, lineWidth: 2)
+                    )
+                    .accessibilityLabel("Eigenes Bild")
+            }
+            Menu(preview == nil ? "Eigenes Bild …" : "Anderes Bild …") {
+                Button("Aus Fotos", systemImage: "photo.on.rectangle") { showsPhotos = true }
+                Button("Aus Dateien", systemImage: "folder") { showsFiles = true }
+            }
+            .fixedSize()
+            if preview != nil {
+                Spacer()
+                Button("Entfernen", role: .destructive) {
+                    image = nil
+                    imageChanged = true
+                }
+            }
+        }
+    }
+
+    private func adopt(_ data: Data) async {
+        do {
+            let png = try await Task.detached { try WorkspaceImage.normalize(data) }.value
+            image = png
+            imageChanged = true
+            imageError = ""
+        } catch {
+            imageError = "Das Bild ließ sich nicht lesen."
+        }
     }
 
     private var syncFooter: String {
@@ -242,10 +337,11 @@ struct WorkspaceEditor: View {
         Task {
             if let workspace {
                 model.updateWorkspace(workspace.id, name: name, symbol: symbol)
+                if imageChanged { model.setWorkspaceImage(workspace.id, png: image) }
                 let current = workspace.link.map { WorkspaceTarget.server($0.server, remote: $0.remote) } ?? .local
                 if target != current { await model.relink(workspace.id, to: target) }
             } else {
-                await model.createWorkspace(name: name, symbol: symbol, target: target)
+                await model.createWorkspace(name: name, symbol: symbol, image: imageChanged ? image : nil, target: target)
             }
             busy = false
             dismiss()
@@ -287,7 +383,11 @@ struct ServerDetailView: View {
                         .foregroundStyle(Ink.muted)
                 }
                 ForEach(linked) { workspace in
-                    Label(workspace.name, systemImage: workspace.symbol)
+                    Label {
+                        Text(workspace.name)
+                    } icon: {
+                        WorkspaceIcon(workspace: workspace)
+                    }
                 }
             } header: {
                 Text("Workspaces")
@@ -330,7 +430,8 @@ struct ServerConnectView: View {
         Form {
             Section {
                 HStack {
-                    TextField("http://192.168.1.10:8787", text: $url)
+                    TextField("Adresse", text: $url, prompt: Text(verbatim: "http://192.168.1.10:8787"))
+                        .labelsHidden()
                         .textContentType(.URL)
 #if os(iOS)
                         .textInputAutocapitalization(.never)

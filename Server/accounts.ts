@@ -6,7 +6,7 @@ import { isIPv6 } from "node:net";
 import { join } from "node:path";
 import { promisify } from "node:util";
 
-import { DIR_MODE, Store, StoreError, atomicWrite, canonicalId } from "./store.js";
+import { DIR_MODE, Store, StoreError, atomicWrite, canonicalId, nowStamp } from "./store.js";
 
 const pbkdf2Async = promisify(pbkdf2);
 
@@ -31,10 +31,35 @@ const DEFAULT_MAIN_NAME = "Privat";
 const MAX_WORKSPACES = 50;
 const MAX_WORKSPACE_NAME = 40;
 
+/** How a workspace looks in the apps, the same on every device. See ADR 0043. */
 export interface Workspace {
   id: string;
   name: string;
+  /** SF Symbol name. Null until a device sets the look. */
+  symbol: string | null;
+  /** sha256 of a PNG in the workspace's own blobs, shown instead of the symbol. */
+  icon: string | null;
+  /** Last change of name, symbol or icon. Null while no device has set them. */
+  updatedAt: string | null;
 }
+
+export interface WorkspaceList {
+  workspaces: Workspace[];
+  /** Whether the account has stored an order. Until then `main` comes first, the rest by creation. */
+  ordered: boolean;
+}
+
+/** What `workspaces.json` and `main.json` hold besides the id. */
+interface Look {
+  name?: string;
+  symbol?: string;
+  icon?: string;
+  updatedAt?: string;
+}
+
+const SYMBOL_RE = /^[a-z0-9]+(\.[a-z0-9]+)*$/;
+const MAX_SYMBOL = 64;
+const SHA_RE = /^[0-9a-f]{64}$/;
 
 function workspaceName(value: unknown): string {
   if (typeof value !== "string") throw new StoreError(400, "bad-request", { reason: "name" });
@@ -43,6 +68,29 @@ function workspaceName(value: unknown): string {
     throw new StoreError(400, "bad-request", { reason: "name" });
   }
   return name;
+}
+
+interface StoredWorkspace extends Look {
+  id: string;
+  name: string;
+}
+
+function lookOf(item: Record<string, unknown>): Look {
+  const look: Look = {};
+  if (typeof item.symbol === "string") look.symbol = item.symbol;
+  if (typeof item.icon === "string") look.icon = item.icon;
+  if (typeof item.updatedAt === "string") look.updatedAt = item.updatedAt;
+  return look;
+}
+
+function toWorkspace(stored: StoredWorkspace): Workspace {
+  return {
+    id: stored.id,
+    name: stored.name,
+    symbol: stored.symbol ?? null,
+    icon: stored.icon ?? null,
+    updatedAt: stored.updatedAt ?? null,
+  };
 }
 
 interface Identity {
@@ -359,9 +407,19 @@ export class Accounts {
   /**
    * Workspaces of an account. `main` is the account's own space and always there; it is what
    * clients from before workspaces sync with. Others live under `workspaces/<id>`. See ADR 0020.
+   * The list follows the account's order, see ADR 0043.
    */
-  workspaces(accountId: string): Workspace[] {
-    return [{ id: MAIN_WORKSPACE, name: this.mainName(accountId) }, ...this.readWorkspaces(accountId)];
+  workspaces(accountId: string): WorkspaceList {
+    const order = this.readOrder(accountId);
+    const list = [this.mainWorkspace(accountId), ...this.readWorkspaces(accountId).map(toWorkspace)];
+    if (!order) return { workspaces: list, ordered: false };
+    const rank = new Map(order.map((id, index) => [id, index]));
+    // Stable: workspaces missing from the stored order keep their default place after the ordered ones.
+    const sorted = list
+      .map((workspace, index) => ({ workspace, key: rank.get(workspace.id) ?? order.length + index }))
+      .sort((a, b) => a.key - b.key)
+      .map((entry) => entry.workspace);
+    return { workspaces: sorted, ordered: true };
   }
 
   createWorkspace(accountId: string, body: unknown): Workspace {
@@ -369,25 +427,87 @@ export class Accounts {
     const list = this.readWorkspaces(accountId);
     // `main` counts too: at most 50 workspaces in all.
     if (list.length + 1 >= MAX_WORKSPACES) throw new StoreError(400, "bad-request", { reason: "too many workspaces" });
-    const workspace = { id: randomUUID(), name };
-    mkdirSync(join(this.spaceOf(accountId), "workspaces", workspace.id), { recursive: true, mode: DIR_MODE });
-    this.writeWorkspaces(accountId, [...list, workspace]);
-    return workspace;
+    const entry = { id: randomUUID(), name };
+    mkdirSync(join(this.spaceOf(accountId), "workspaces", entry.id), { recursive: true, mode: DIR_MODE });
+    this.writeWorkspaces(accountId, [...list, entry]);
+    return toWorkspace(entry);
   }
 
-  renameWorkspace(accountId: string, workspaceId: string, body: unknown): Workspace {
-    const name = workspaceName(isRecord(body) ? body.name : undefined);
+  /**
+   * Changes name, symbol or icon, whichever the body has. The icon must already lie in the
+   * workspace's blobs; `null` removes it. Any change stamps `updatedAt`. See ADR 0043.
+   */
+  updateWorkspace(accountId: string, workspaceId: string, body: unknown): Workspace {
+    if (!isRecord(body)) throw new StoreError(400, "bad-request", { reason: "body" });
+    const change: Look = {};
+    let removesIcon = false;
+    if (body.name !== undefined) change.name = workspaceName(body.name);
+    if (body.symbol !== undefined) {
+      const symbol = body.symbol;
+      if (typeof symbol !== "string" || symbol.length > MAX_SYMBOL || !SYMBOL_RE.test(symbol)) {
+        throw new StoreError(400, "bad-request", { reason: "symbol" });
+      }
+      change.symbol = symbol;
+    }
+    if (body.icon === null) {
+      removesIcon = true;
+    } else if (body.icon !== undefined) {
+      if (typeof body.icon !== "string" || !SHA_RE.test(body.icon)) {
+        throw new StoreError(400, "bad-request", { reason: "icon" });
+      }
+      change.icon = body.icon;
+    }
+    if (change.name === undefined && change.symbol === undefined && change.icon === undefined && !removesIcon) {
+      throw new StoreError(400, "bad-request", { reason: "body" });
+    }
+    // Also answers 404 for an unknown workspace, before the icon check.
+    const store = this.workspaceStore(accountId, workspaceId);
+    if (change.icon !== undefined && !store.hasBlob(change.icon)) {
+      throw new StoreError(400, "bad-request", { reason: "icon" });
+    }
+    const apply = (look: Look): Look => {
+      const next: Look = { ...look, ...change, updatedAt: nowStamp() };
+      if (removesIcon) delete next.icon;
+      return next;
+    };
+
     if (workspaceId === MAIN_WORKSPACE) {
-      atomicWrite(join(this.spaceOf(accountId), "name.txt"), Buffer.from(name));
-      return { id: MAIN_WORKSPACE, name };
+      const look = apply(this.readMainLook(accountId));
+      if (change.name !== undefined) atomicWrite(join(this.spaceOf(accountId), "name.txt"), Buffer.from(change.name));
+      const { name: _name, ...rest } = look;
+      atomicWrite(join(this.spaceOf(accountId), "main.json"), Buffer.from(JSON.stringify(rest, null, 2)));
+      return this.mainWorkspace(accountId);
     }
     const id = canonicalId(workspaceId);
     const list = this.readWorkspaces(accountId);
     const index = list.findIndex((workspace) => workspace.id === id);
     if (index < 0) throw new StoreError(404, "not-found");
-    list[index] = { id, name };
+    const updated = { ...apply(list[index] ?? { id }), id } as StoredWorkspace;
+    list[index] = updated;
     this.writeWorkspaces(accountId, list);
-    return list[index];
+    return toWorkspace(updated);
+  }
+
+  /**
+   * Reorders the workspaces in `ids` among the places they hold now. Workspaces not named keep
+   * their place, so a device that knows only some of them moves only those. See ADR 0043.
+   */
+  orderWorkspaces(accountId: string, body: unknown): WorkspaceList {
+    const raw = isRecord(body) ? body.ids : undefined;
+    if (!Array.isArray(raw) || raw.length > MAX_WORKSPACES) throw new StoreError(400, "bad-request", { reason: "order" });
+    const current = this.workspaces(accountId).workspaces.map((workspace) => workspace.id);
+    const ids = raw.map((value) => {
+      if (typeof value !== "string") throw new StoreError(400, "bad-request", { reason: "order" });
+      return value === MAIN_WORKSPACE ? value : value.toLowerCase();
+    });
+    if (new Set(ids).size !== ids.length || ids.some((id) => !current.includes(id))) {
+      throw new StoreError(400, "bad-request", { reason: "order" });
+    }
+    const named = new Set(ids);
+    let next = 0;
+    const order = current.map((id) => (named.has(id) ? (ids[next++] ?? id) : id));
+    atomicWrite(join(this.spaceOf(accountId), "order.json"), Buffer.from(JSON.stringify(order, null, 2)));
+    return this.workspaces(accountId);
   }
 
   /** The store of one workspace. Unknown workspaces are 404, never created on the fly. */
@@ -418,18 +538,38 @@ export class Accounts {
     return name || DEFAULT_MAIN_NAME;
   }
 
-  private readWorkspaces(accountId: string): Workspace[] {
+  private readMainLook(accountId: string): Look {
+    const path = join(this.spaceOf(accountId), "main.json");
+    if (!existsSync(path)) return {};
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    return isRecord(parsed) ? lookOf(parsed) : {};
+  }
+
+  private mainWorkspace(accountId: string): Workspace {
+    return toWorkspace({ ...this.readMainLook(accountId), id: MAIN_WORKSPACE, name: this.mainName(accountId) });
+  }
+
+  private readWorkspaces(accountId: string): StoredWorkspace[] {
     const path = join(this.spaceOf(accountId), "workspaces.json");
     if (!existsSync(path)) return [];
     const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
     if (!Array.isArray(parsed)) throw new Error(`${path}: not a list`);
-    return parsed.filter(
-      (item): item is Workspace => isRecord(item) && typeof item.id === "string" && typeof item.name === "string",
-    );
+    return parsed
+      .filter((item) => isRecord(item) && typeof item.id === "string" && typeof item.name === "string")
+      .map((item) => ({ ...lookOf(item as Record<string, unknown>), id: String(item.id), name: String(item.name) }));
   }
 
-  private writeWorkspaces(accountId: string, list: Workspace[]): void {
+  private writeWorkspaces(accountId: string, list: StoredWorkspace[]): void {
     atomicWrite(join(this.spaceOf(accountId), "workspaces.json"), Buffer.from(JSON.stringify(list, null, 2)));
+  }
+
+  /** The stored order of workspace ids, or null while the account has none. */
+  private readOrder(accountId: string): string[] | null {
+    const path = join(this.spaceOf(accountId), "order.json");
+    if (!existsSync(path)) return null;
+    const parsed = JSON.parse(readFileSync(path, "utf8")) as unknown;
+    if (!Array.isArray(parsed)) throw new Error(`${path}: not a list`);
+    return parsed.filter((item): item is string => typeof item === "string");
   }
 
   /** Removes sessions past their idle limit. */

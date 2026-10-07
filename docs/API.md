@@ -19,15 +19,20 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | GET | `/v1/accounts` | nur Admin: `{ "accounts": [{ "id", "name", "admin", "createdAt" }] }`, nach Name |
 | POST | `/v1/accounts` | nur Admin: `{ "name", "password" }` → 201 `{ "id", "name", "admin": false, "createdAt" }`. Keine Sitzung für den neuen Account |
 | GET | `/admin` | Verwaltungsseite, HTML. Skript unter `/admin/client.js` |
-| GET | `/v1/workspaces` | `{ "workspaces": [{ "id", "name" }] }`, `main` immer zuerst |
-| POST | `/v1/workspaces` | `{ "name" }` → 201 `{ "id", "name" }`. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main` |
-| PATCH | `/v1/workspaces/{id}` | `{ "name" }` → `{ "id", "name" }` |
+| GET | `/v1/workspaces` | `{ "workspaces": [Workspace], "ordered" }` in der Reihenfolge des Accounts |
+| POST | `/v1/workspaces` | `{ "name" }` → 201 Workspace. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main` |
+| PATCH | `/v1/workspaces/{id}` | `{ "name"?, "symbol"?, "icon"? }` → Workspace |
+| PUT | `/v1/workspace-order` | `{ "ids": [...] }` → wie `GET /v1/workspaces` |
 | GET | `/v1/changes?after=<cursor>&limit=<n>` | `{ "cursor", "hasMore", "changes": [{ "cursor", "noteId", "revision", "deleted" }] }` |
 | GET | `/v1/notes/{id}` | die Notiz, auch wenn sie gelöscht ist |
 | PUT | `/v1/notes/{id}` | Body `{ "baseRevision", "note" }`. 201 beim Anlegen, 200 beim Aktualisieren, 409 bei Konflikt, 404 bei unbekannter Notiz mit `baseRevision` > 0 |
 | DELETE | `/v1/notes/{id}?baseRevision=<n>` | Grabstein. Der Inhalt bleibt erhalten |
 | PUT | `/v1/blobs/{sha256}` | Rohbytes. 400, wenn der Hash nicht passt. 204, wenn er liegt |
 | GET | `/v1/blobs/{sha256}` | Rohbytes |
+
+Ein Workspace ist `{ "id", "name", "symbol", "icon", "updatedAt" }`. `symbol` ist der Name eines SF Symbols (`[a-z0-9]` in Teilen mit `.`, höchstens 64 Zeichen), `icon` der sha256 eines Blobs im selben Workspace, `updatedAt` die letzte Änderung über `PATCH`. Alle drei sind `null`, solange kein Gerät das Aussehen gesetzt hat. `PATCH` ändert nur die genannten Felder, mindestens eines; `"icon": null` entfernt das Bild. Ein `icon`, das nicht als Blob im Workspace liegt, ist 400 mit `reason: "icon"`, ein ungültiges Symbol 400 mit `reason: "symbol"`. Siehe ADR 0043.
+
+`ordered` ist falsch, solange der Account keine Reihenfolge gespeichert hat; dann kommt `main` zuerst, die übrigen in der Reihenfolge des Anlegens. `PUT /v1/workspace-order` ordnet die genannten Workspaces unter den Plätzen, die sie schon haben; nicht genannte bleiben stehen. Ein neuer Workspace kommt ans Ende. Unbekannte oder doppelte IDs sind 400 mit `reason: "order"`.
 
 Die Routen für Änderungen, Notizen und Blobs gelten für den Workspace `main`. Dieselben Routen unter `/v1/workspaces/{ws}/` gelten für den Workspace `ws`, jeder mit eigenem Cursor. Ein unbekannter Workspace ist 404. Server ohne Workspaces antworten auf `GET /v1/workspaces` mit 404; die App kennt dort nur `main`. Siehe ADR 0020.
 

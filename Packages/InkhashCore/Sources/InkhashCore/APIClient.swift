@@ -23,10 +23,47 @@ public struct ServerSession: Codable, Equatable, Sendable {
 public struct RemoteWorkspace: Codable, Equatable, Sendable, Identifiable {
     public var id: String
     public var name: String
+    /// SF Symbol name. Nil until a device has set the look, and on servers before ADR 0043.
+    public var symbol: String?
+    /// sha256 of the picture in the workspace's blobs.
+    public var icon: String?
+    /// Last change of the look. Nil while no device has set it.
+    public var updatedAt: String?
 
-    public init(id: String, name: String) {
+    public init(id: String, name: String, symbol: String? = nil, icon: String? = nil, updatedAt: String? = nil) {
         self.id = id
         self.name = name
+        self.symbol = symbol
+        self.icon = icon
+        self.updatedAt = updatedAt
+    }
+}
+
+/// The account's workspaces in its order. See ADR 0043.
+public struct RemoteWorkspaceList: Codable, Equatable, Sendable {
+    public var workspaces: [RemoteWorkspace]
+    /// Whether the account has stored an order. Nil on servers that keep neither order nor look.
+    public var ordered: Bool?
+
+    public init(workspaces: [RemoteWorkspace], ordered: Bool?) {
+        self.workspaces = workspaces
+        self.ordered = ordered
+    }
+
+    /// Servers from before ADR 0043 know only names; their workspaces have no look to sync.
+    public var keepsLooks: Bool { ordered != nil }
+}
+
+/// What a device sends when its look of a workspace changed.
+public struct WorkspaceLook: Equatable, Sendable {
+    public var name: String
+    public var symbol: String
+    public var icon: String?
+
+    public init(name: String, symbol: String, icon: String?) {
+        self.name = name
+        self.symbol = symbol
+        self.icon = icon
     }
 }
 
@@ -54,12 +91,15 @@ public struct APIClient: NoteTransport, Sendable {
 
     /// Servers before workspaces answer 404; they only have `main`.
     public func workspaces() async throws -> [RemoteWorkspace] {
-        struct Envelope: Decodable { var workspaces: [RemoteWorkspace] }
+        try await workspaceList().workspaces
+    }
+
+    public func workspaceList() async throws -> RemoteWorkspaceList {
         do {
             let data = try await send(url: try endpoint("/v1/workspaces"), method: "GET", body: nil, contentType: nil)
-            return try InkhashJSON.decode(Envelope.self, from: data).workspaces
+            return try InkhashJSON.decode(RemoteWorkspaceList.self, from: data)
         } catch APIError.notFound {
-            return [RemoteWorkspace(id: Self.mainWorkspace, name: "Privat")]
+            return RemoteWorkspaceList(workspaces: [RemoteWorkspace(id: Self.mainWorkspace, name: "Privat")], ordered: nil)
         }
     }
 
@@ -73,14 +113,27 @@ public struct APIClient: NoteTransport, Sendable {
         return try InkhashJSON.decode(RemoteWorkspace.self, from: data)
     }
 
-    public func renameWorkspace(id: String, name: String) async throws -> RemoteWorkspace {
+    public func updateWorkspace(id: String, look: WorkspaceLook) async throws -> RemoteWorkspace {
+        // `icon` goes out as null to remove a picture, so it is written by hand.
+        var body: [String: Any] = ["name": look.name, "symbol": look.symbol]
+        body["icon"] = look.icon ?? NSNull()
         let data = try await send(
             url: try endpoint("/v1/workspaces/\(id)"),
             method: "PATCH",
-            body: try InkhashJSON.encode(["name": name]),
+            body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]),
             contentType: "application/json"
         )
         return try InkhashJSON.decode(RemoteWorkspace.self, from: data)
+    }
+
+    public func orderWorkspaces(ids: [String]) async throws -> RemoteWorkspaceList {
+        let data = try await send(
+            url: try endpoint("/v1/workspace-order"),
+            method: "PUT",
+            body: try InkhashJSON.encode(["ids": ids]),
+            contentType: "application/json"
+        )
+        return try InkhashJSON.decode(RemoteWorkspaceList.self, from: data)
     }
 
     public func changes(after cursor: Int) async throws -> ChangePage {

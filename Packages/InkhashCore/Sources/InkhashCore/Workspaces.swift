@@ -35,13 +35,36 @@ public struct Workspace: Codable, Equatable, Sendable, Identifiable {
     public var name: String
     /// SF Symbol name.
     public var symbol: String
+    /// sha256 of an own picture, lying in `icons/<sha>.png`. Shown instead of `symbol`. See ADR 0043.
+    public var icon: String?
     public var link: WorkspaceLink?
+    /// Name, symbol or picture changed here and the server has not taken it yet.
+    public var lookPending: Bool
 
-    public init(id: UUID = UUID(), name: String, symbol: String = "tray", link: WorkspaceLink? = nil) {
+    public init(
+        id: UUID = UUID(), name: String, symbol: String = "tray", icon: String? = nil,
+        link: WorkspaceLink? = nil, lookPending: Bool = false
+    ) {
         self.id = id
         self.name = name
         self.symbol = symbol
+        self.icon = icon
         self.link = link
+        self.lookPending = lookPending
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, name, symbol, icon, link, lookPending
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(UUID.self, forKey: .id)
+        name = try container.decode(String.self, forKey: .name)
+        symbol = try container.decodeIfPresent(String.self, forKey: .symbol) ?? "tray"
+        icon = try container.decodeIfPresent(String.self, forKey: .icon)
+        link = try container.decodeIfPresent(WorkspaceLink.self, forKey: .link)
+        lookPending = try container.decodeIfPresent(Bool.self, forKey: .lookPending) ?? false
     }
 }
 
@@ -50,16 +73,78 @@ public struct DeviceSetup: Codable, Equatable, Sendable {
     public var servers: [ServerEntry]
     public var workspaces: [Workspace]
     public var current: UUID
+    /// Servers whose order of workspaces changed here and that have not taken it yet. See ADR 0043.
+    public var orderPending: [UUID]
 
-    public init(servers: [ServerEntry], workspaces: [Workspace], current: UUID) {
+    public init(servers: [ServerEntry], workspaces: [Workspace], current: UUID, orderPending: [UUID] = []) {
         self.servers = servers
         self.workspaces = workspaces
         self.current = current
+        self.orderPending = orderPending
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case servers, workspaces, current, orderPending
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        servers = try container.decode([ServerEntry].self, forKey: .servers)
+        workspaces = try container.decode([Workspace].self, forKey: .workspaces)
+        current = try container.decode(UUID.self, forKey: .current)
+        orderPending = try container.decodeIfPresent([UUID].self, forKey: .orderPending) ?? []
     }
 
     public func server(_ id: UUID?) -> ServerEntry? {
         guard let id else { return nil }
         return servers.first { $0.id == id }
+    }
+
+    /// Moves the workspaces at `offsets` in front of the one at `destination`, like `List.onMove`.
+    /// The order is the order of the switcher. See ADR 0043.
+    public mutating func moveWorkspaces(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        let valid = offsets.filter { workspaces.indices.contains($0) }
+        guard !valid.isEmpty else { return }
+        let moving = valid.map { workspaces[$0] }
+        let before = valid.filter { $0 < destination }.count
+        for index in valid.reversed() { workspaces.remove(at: index) }
+        let target = min(max(destination - before, 0), workspaces.count)
+        workspaces.insert(contentsOf: moving, at: target)
+    }
+
+    /// Moves one workspace a number of places up (negative) or down, stopping at the ends.
+    public mutating func moveWorkspace(_ id: UUID, by step: Int) {
+        guard let index = workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let target = min(max(index + step, 0), workspaces.count - 1)
+        guard target != index else { return }
+        let workspace = workspaces.remove(at: index)
+        workspaces.insert(workspace, at: target)
+    }
+
+    /// Marks the order as changed for every server that has workspaces here.
+    public mutating func markOrderChanged() {
+        for workspace in workspaces {
+            if let server = workspace.link?.server, !orderPending.contains(server) { orderPending.append(server) }
+        }
+    }
+
+    /// Takes what a sync made of `snapshot`, keeping everything changed here in the meantime.
+    /// A workspace, the order and the pending orders each count as one piece.
+    public mutating func adopt(_ synced: DeviceSetup, since snapshot: DeviceSetup) {
+        for updated in synced.workspaces {
+            guard let index = workspaces.firstIndex(where: { $0.id == updated.id }),
+                  workspaces[index] == snapshot.workspaces.first(where: { $0.id == updated.id }) else { continue }
+            workspaces[index] = updated
+        }
+        if workspaces.map(\.id) == snapshot.workspaces.map(\.id) {
+            let rank = Dictionary(uniqueKeysWithValues: synced.workspaces.enumerated().map { ($1.id, $0) })
+            workspaces = workspaces.enumerated()
+                .sorted { (rank[$0.element.id] ?? $0.offset) < (rank[$1.element.id] ?? $1.offset) }
+                .map(\.element)
+        }
+        if orderPending == snapshot.orderPending {
+            orderPending = synced.orderPending
+        }
     }
 }
 
@@ -80,6 +165,7 @@ public struct LegacySignIn: Equatable, Sendable {
 public enum Workspaces {
     static let setupFile = "setup.json"
     static let folder = "workspaces"
+    static let iconFolder = "icons"
 
     /// Loads the setup under `base`, or makes one from the single library of older versions.
     /// That library becomes the workspace "Privat", synced with `main` of the account it was signed in to.
@@ -130,6 +216,33 @@ public enum Workspaces {
         let url = root(of: workspace, base: base)
         if FileManager.default.fileExists(atPath: url.path) {
             try FileManager.default.removeItem(at: url)
+        }
+    }
+
+    public static func iconURL(_ sha256: String, base: URL) -> URL {
+        base.appendingPathComponent(iconFolder, isDirectory: true).appendingPathComponent(sha256 + ".png")
+    }
+
+    /// Writes a picture made by `WorkspaceImage.normalize` and returns its sha256,
+    /// which is also its name on the server.
+    @discardableResult
+    public static func saveIcon(_ png: Data, base: URL) throws -> String {
+        let sha = sha256Hex(png)
+        let url = iconURL(sha, base: base)
+        try FileManager.default.createDirectory(at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
+        if !FileManager.default.fileExists(atPath: url.path) {
+            try png.write(to: url, options: .atomic)
+        }
+        return sha
+    }
+
+    /// Removes pictures no workspace shows anymore.
+    public static func pruneIcons(keeping setup: DeviceSetup, base: URL) throws {
+        let folder = base.appendingPathComponent(iconFolder, isDirectory: true)
+        guard FileManager.default.fileExists(atPath: folder.path) else { return }
+        let used = Set(setup.workspaces.compactMap(\.icon).map { $0 + ".png" })
+        for name in try FileManager.default.contentsOfDirectory(atPath: folder.path) where !used.contains(name) {
+            try FileManager.default.removeItem(at: folder.appendingPathComponent(name))
         }
     }
 

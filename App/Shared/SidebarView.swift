@@ -503,7 +503,7 @@ struct WorkspaceSwitcher: View {
                     if workspace.id == model.workspace.id {
                         Label(workspace.name, systemImage: "checkmark")
                     } else {
-                        Label(workspace.name, systemImage: workspace.symbol)
+                        WorkspaceMenuLabel(workspace: workspace)
                     }
                 }
             }
@@ -512,7 +512,7 @@ struct WorkspaceSwitcher: View {
             Button("Workspaces verwalten …", systemImage: "gearshape") { showSettings = true }
         } label: {
             HStack(spacing: 10) {
-                Image(systemName: model.workspace.symbol)
+                WorkspaceIcon(workspace: model.workspace, size: 20)
                     .font(.system(size: 14, weight: .medium))
                     .frame(width: 20)
                 Text(model.workspace.name)

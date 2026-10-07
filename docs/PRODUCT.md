@@ -27,7 +27,7 @@ Die Fläche ist hell: ein Blatt Papier auf einem hellen Schreibtisch. Was darüb
 
 Notizen liegen in Workspaces, etwa Privat und Arbeit. Alles, was man sieht, gehört zum gerade gewählten Workspace: Notizen, Ordner, Schlagwörter, Suche. In einem Workspace sagen Ordner, wo etwas liegt, und Schlagwörter, womit es zusammenhängt. Eine Notiz trägt einen Pfad wie „Projekt / Treffen / Thema“ und beliebig viele Schlagwörter; der Pfad steht mit dem Titel oben auf dem Blatt. Die Seitenleiste ist der Baum daraus, Notizen als Blätter. Tippt man `#schlagwort` in die Suche, bleibt der Baum stehen und zeigt nur noch die Notizen mit diesem Schlagwort (ADR 0022). Dazu gibt es Favoriten und einen Papierkorb, aus dem man zurückholen kann. Auf dem iPad füllt eine geöffnete Notiz den Bildschirm; die Seitenleiste holt man über den Knopf oben links zurück (ADR 0030).
 
-Server verbindet man einmal. Jeder Workspace bleibt auf dem Gerät oder gleicht mit einem Workspace auf einem dieser Server ab. Ein Account kann mehrere Workspaces abgleichen. Siehe ADR 0020.
+Server verbindet man einmal. Jeder Workspace bleibt auf dem Gerät oder gleicht mit einem Workspace auf einem dieser Server ab. Ein Account kann mehrere Workspaces abgleichen. Siehe ADR 0020. Jeder Workspace zeigt ein Symbol oder ein eigenes Bild, und ihre Reihenfolge legt man selbst fest. Ist ein Workspace verbunden, sieht er auf allen Geräten gleich aus und steht dort an derselben Stelle (ADR 0043).
 
 ## Suche
 

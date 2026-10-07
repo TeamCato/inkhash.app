@@ -406,7 +406,10 @@ test("workspaces keep their notes apart, main is the unscoped route", async () =
     const ada = await openAccount(port);
     const listed = await request(port, "GET", "/v1/workspaces", undefined, ada.token);
     assert.equal(listed.status, 200);
-    assert.deepEqual(JSON.parse(listed.raw.toString("utf8")), { workspaces: [{ id: "main", name: "Privat" }] });
+    assert.deepEqual(JSON.parse(listed.raw.toString("utf8")), {
+      workspaces: [{ id: "main", name: "Privat", symbol: null, icon: null, updatedAt: null }],
+      ordered: false,
+    });
 
     const created = await request(port, "POST", "/v1/workspaces", { name: "Arbeit" }, ada.token);
     assert.equal(created.status, 201);
@@ -444,6 +447,95 @@ test("workspaces keep their notes apart, main is the unscoped route", async () =
 
     const bea = await addAccount(port, ada.token, "bea");
     assert.equal((await request(port, "GET", `/v1/workspaces/${work.id}/changes`, undefined, bea.token)).status, 404);
+  });
+});
+
+test("a workspace's look is the same for every device", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    const work = JSON.parse(
+      (await request(port, "POST", "/v1/workspaces", { name: "Arbeit" }, ada.token)).raw.toString("utf8"),
+    ) as { id: string; updatedAt: string | null };
+    assert.equal(work.updatedAt, null);
+
+    const png = Buffer.from("not really a png");
+    const digest = createHash("sha256").update(png).digest("hex");
+    const missing = await request(port, "PATCH", `/v1/workspaces/${work.id}`, { icon: digest }, ada.token);
+    assert.equal(missing.status, 400);
+    assert.equal((JSON.parse(missing.raw.toString("utf8")) as { reason: string }).reason, "icon");
+
+    const blob = await request(port, "PUT", `/v1/workspaces/${work.id}/blobs/${digest}`, png, ada.token);
+    assert.equal(blob.status, 204);
+    const styled = await request(
+      port,
+      "PATCH",
+      `/v1/workspaces/${work.id}`,
+      { name: "Büro", symbol: "briefcase.fill", icon: digest },
+      ada.token,
+    );
+    assert.equal(styled.status, 200);
+    const look = JSON.parse(styled.raw.toString("utf8")) as {
+      name: string;
+      symbol: string;
+      icon: string;
+      updatedAt: string;
+    };
+    assert.deepEqual([look.name, look.symbol, look.icon], ["Büro", "briefcase.fill", digest]);
+    assert.ok(look.updatedAt);
+
+    // The icon lies in that workspace's blobs, not in main's.
+    const elsewhere = await request(port, "PATCH", "/v1/workspaces/main", { icon: digest }, ada.token);
+    assert.equal(elsewhere.status, 400);
+
+    const plain = await request(port, "PATCH", `/v1/workspaces/${work.id}`, { icon: null }, ada.token);
+    const cleared = JSON.parse(plain.raw.toString("utf8")) as { name: string; symbol: string; icon: string | null };
+    assert.deepEqual([cleared.name, cleared.symbol, cleared.icon], ["Büro", "briefcase.fill", null]);
+
+    const main = await request(port, "PATCH", "/v1/workspaces/main", { symbol: "house" }, ada.token);
+    const mainLook = JSON.parse(main.raw.toString("utf8")) as { name: string; symbol: string };
+    assert.deepEqual([mainLook.name, mainLook.symbol], ["Privat", "house"]);
+
+    for (const body of [{}, { symbol: "Not A Symbol" }, { symbol: 3 }, { icon: "abc" }, { name: "" }]) {
+      assert.equal((await request(port, "PATCH", "/v1/workspaces/main", body, ada.token)).status, 400, JSON.stringify(body));
+    }
+    const unknown = "11111111-2222-4333-8444-555555555555";
+    assert.equal((await request(port, "PATCH", `/v1/workspaces/${unknown}`, { symbol: "tray" }, ada.token)).status, 404);
+  });
+});
+
+test("the order of workspaces is the account's, a device moves only those it names", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    const ids: string[] = ["main"];
+    for (const name of ["A", "B", "C"]) {
+      const created = await request(port, "POST", "/v1/workspaces", { name }, ada.token);
+      ids.push((JSON.parse(created.raw.toString("utf8")) as { id: string }).id);
+    }
+    const [main, a, b, c] = ids as [string, string, string, string];
+    const order = async (): Promise<{ ids: string[]; ordered: boolean }> => {
+      const listed = JSON.parse((await request(port, "GET", "/v1/workspaces", undefined, ada.token)).raw.toString("utf8")) as {
+        workspaces: { id: string }[];
+        ordered: boolean;
+      };
+      return { ids: listed.workspaces.map((workspace) => workspace.id), ordered: listed.ordered };
+    };
+    assert.deepEqual(await order(), { ids: [main, a, b, c], ordered: false });
+
+    const moved = await request(port, "PUT", "/v1/workspace-order", { ids: [c, main, a, b] }, ada.token);
+    assert.equal(moved.status, 200);
+    assert.deepEqual(await order(), { ids: [c, main, a, b], ordered: true });
+
+    // A device that has only main and b swaps them; c and a stay where they are.
+    await request(port, "PUT", "/v1/workspace-order", { ids: [b, main] }, ada.token);
+    assert.deepEqual((await order()).ids, [c, b, a, main]);
+
+    const added = await request(port, "POST", "/v1/workspaces", { name: "D" }, ada.token);
+    const d = (JSON.parse(added.raw.toString("utf8")) as { id: string }).id;
+    assert.deepEqual((await order()).ids, [c, b, a, main, d]);
+
+    for (const body of [{ ids: [a, a] }, { ids: ["11111111-2222-4333-8444-555555555555"] }, { ids: "main" }, {}]) {
+      assert.equal((await request(port, "PUT", "/v1/workspace-order", body, ada.token)).status, 400, JSON.stringify(body));
+    }
   });
 });
 

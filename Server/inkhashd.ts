@@ -235,7 +235,7 @@ const ROUTES: Route[] = [
     method: "GET",
     pattern: /^\/v1\/workspaces$/,
     access: "session",
-    handle: (ctx) => json(200, { workspaces: ctx.accounts.workspaces(accountOf(ctx)) }),
+    handle: (ctx) => json(200, ctx.accounts.workspaces(accountOf(ctx))),
   },
   {
     method: "POST",
@@ -248,7 +248,13 @@ const ROUTES: Route[] = [
     pattern: /^\/v1\/workspaces\/([^/]+)$/,
     access: "session",
     handle: async (ctx) =>
-      json(200, ctx.accounts.renameWorkspace(accountOf(ctx), ctx.params[0] ?? "", await readJson(ctx))),
+      json(200, ctx.accounts.updateWorkspace(accountOf(ctx), ctx.params[0] ?? "", await readJson(ctx))),
+  },
+  {
+    method: "PUT",
+    pattern: /^\/v1\/workspace-order$/,
+    access: "session",
+    handle: async (ctx) => json(200, ctx.accounts.orderWorkspaces(accountOf(ctx), await readJson(ctx))),
   },
   {
     method: "GET",

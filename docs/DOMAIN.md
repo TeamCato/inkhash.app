@@ -24,7 +24,8 @@ Diese Wörter heißen im Code so.
 | dirty | Lokal geändert, noch nicht sauber bestätigt. |
 | conflict | Server und Gerät haben beide geschrieben. Beide Fassungen bleiben liegen. |
 | Bibliothek | Alle Notizen eines Workspace auf einem Gerät. Gehört keinem Account, gleicht höchstens mit einem Server-Workspace ab. |
-| Workspace | Eigene Bibliothek mit eigenen Ordnern, Schlagwörtern und Suche, z. B. Privat und Arbeit. Lokal oder mit einem Server-Workspace verbunden (ADR 0020). |
+| Workspace | Eigene Bibliothek mit eigenen Ordnern, Schlagwörtern und Suche, z. B. Privat und Arbeit. Lokal oder mit einem Server-Workspace verbunden (ADR 0020). Name, Symbol und eigenes Bild (`icon`) sind sein Aussehen; Aussehen und Reihenfolge gleicht der Server ab, wenn der Workspace verbunden ist (ADR 0043). |
+| Aussehen | Name, Symbol und Bild eines Workspace (`WorkspaceLook`). Die letzte Änderung gewinnt (ADR 0043). |
 | Server | Adresse plus angemeldeter Account (`ServerEntry`). Ein Gerät kennt mehrere. |
 | main | Der Workspace, den jeder Account auf dem Server hat. Auch ohne Präfix erreichbar. |
 | folder | Pfad an der Notiz, Segmente mit `/`. Leer heißt Wurzel des Workspace. In der Oberfläche „Pfad“, geschrieben mit ` / ` (ADR 0022). |

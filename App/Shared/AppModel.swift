@@ -103,6 +103,8 @@ final class AppModel {
     private let base: URL
     private(set) var setup: DeviceSetup
     private var stores: [UUID: LocalStore] = [:]
+    /// Workspace pictures by file name. A changed picture has a new name, so nothing goes stale.
+    @ObservationIgnored private var iconCache: [String: PlatformImage] = [:]
     /// Session tokens by server. A server without one is signed out.
     private var tokens: [UUID: String] = [:]
     private(set) var records: [NoteRecord] = []
@@ -228,7 +230,7 @@ final class AppModel {
         return isSignedIn(server.id) ? "" : "Abgleich mit \(Self.host(server.url)) ruht."
     }
 
-    func createWorkspace(name: String, symbol: String, target: WorkspaceTarget) async {
+    func createWorkspace(name: String, symbol: String, image: Data?, target: WorkspaceTarget) async {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !trimmed.isEmpty else {
             status = "Der Workspace braucht einen Namen."
@@ -243,16 +245,80 @@ final class AppModel {
         }
         setup.workspaces.append(workspace)
         persistSetup()
+        if let image { setWorkspaceImage(workspace.id, png: image) }
         switchWorkspace(workspace.id)
         await sync()
     }
 
     func updateWorkspace(_ id: UUID, name: String, symbol: String) {
         guard let index = setup.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let before = setup.workspaces[index]
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
         if !trimmed.isEmpty { setup.workspaces[index].name = trimmed.clippedUTF16(Limits.workspaceName) }
         setup.workspaces[index].symbol = symbol
+        lookChanged(index, from: before)
+    }
+
+    /// A linked workspace sends its new look with the next sync. See ADR 0043.
+    private func lookChanged(_ index: Int, from before: Workspace) {
+        guard setup.workspaces[index] != before else { return }
+        if setup.workspaces[index].link != nil { setup.workspaces[index].lookPending = true }
         persistSetup()
+        scheduleSync()
+    }
+
+    /// Sets or clears the workspace's own picture. `png` comes from `WorkspaceImage.normalize`.
+    func setWorkspaceImage(_ id: UUID, png: Data?) {
+        guard let index = setup.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        let before = setup.workspaces[index]
+        if let png {
+            do {
+                setup.workspaces[index].icon = try Workspaces.saveIcon(png, base: base)
+            } catch {
+                status = "Das Bild ließ sich nicht sichern."
+                return
+            }
+        } else {
+            setup.workspaces[index].icon = nil
+        }
+        lookChanged(index, from: before)
+        pruneIcons()
+    }
+
+    /// The workspace's own picture, or nil when it shows its symbol.
+    func workspaceImage(_ workspace: Workspace) -> PlatformImage? {
+        guard let name = workspace.icon else { return nil }
+        if let cached = iconCache[name] { return cached }
+        guard let image = PlatformImage(contentsOfFile: Workspaces.iconURL(name, base: base).path) else { return nil }
+        iconCache[name] = image
+        return image
+    }
+
+    /// Pictures are named by content, so a file no workspace names anymore can go.
+    private func pruneIcons() {
+        do {
+            try Workspaces.pruneIcons(keeping: setup, base: base)
+        } catch {
+            // A leftover file costs a few kilobytes and is retried on the next change.
+        }
+        let used = Set(setup.workspaces.compactMap(\.icon))
+        iconCache = iconCache.filter { used.contains($0.key) }
+    }
+
+    func moveWorkspaces(fromOffsets offsets: IndexSet, toOffset destination: Int) {
+        setup.moveWorkspaces(fromOffsets: offsets, toOffset: destination)
+        orderChanged()
+    }
+
+    func moveWorkspace(_ id: UUID, by step: Int) {
+        setup.moveWorkspace(id, by: step)
+        orderChanged()
+    }
+
+    private func orderChanged() {
+        setup.markOrderChanged()
+        persistSetup()
+        scheduleSync()
     }
 
     /// Points a workspace at another server workspace, or at none. Changing the target uploads
@@ -263,6 +329,8 @@ final class AppModel {
             let link = try await link(for: target, name: setup.workspaces[index].name)
             guard link != setup.workspaces[index].link else { return }
             setup.workspaces[index].link = link
+            // A workspace that already has a look on the server keeps it; a new one gets ours.
+            setup.workspaces[index].lookPending = false
             persistSetup()
             status = link == nil ? "Der Workspace bleibt jetzt auf diesem Gerät." : ""
             if id == setup.current { status = statusAtRest }
@@ -275,7 +343,7 @@ final class AppModel {
     /// Removes the workspace and its notes from this device. A server copy stays where it is.
     func removeWorkspace(_ id: UUID) {
         guard setup.workspaces.count > 1, let index = setup.workspaces.firstIndex(where: { $0.id == id }) else { return }
-        setup.workspaces.remove(at: index)
+        let removed = setup.workspaces.remove(at: index)
         stores[id] = nil
         if setup.current == id { setup.current = setup.workspaces[0].id }
         persistSetup()
@@ -284,6 +352,7 @@ final class AppModel {
         } catch {
             status = "Die Dateien des Workspace ließen sich nicht entfernen."
         }
+        if removed.icon != nil { pruneIcons() }
         reload()
     }
 
@@ -1146,6 +1215,7 @@ final class AppModel {
     }
 
     private func syncOnce() async {
+        await syncLooks()
         for workspace in setup.workspaces {
             guard let link = workspace.link, let entry = setup.server(link.server),
                   let client = client(for: link.server, workspace: link.remote) else { continue }
@@ -1207,6 +1277,27 @@ final class AppModel {
             records[index] = record
         } else {
             records.append(record)
+        }
+    }
+
+    /// Look and order of workspaces, per server, before the notes. See ADR 0043.
+    private func syncLooks() async {
+        let servers = Set(setup.workspaces.compactMap { $0.link?.server })
+        for server in setup.servers.map(\.id) where servers.contains(server) {
+            guard let client = client(for: server) else { continue }
+            let snapshot = setup
+            do {
+                let synced = try await LookSyncer.sync(snapshot, server: server, base: base, transport: client)
+                guard synced != snapshot else { continue }
+                setup.adopt(synced, since: snapshot)
+                persistSetup()
+                pruneIcons()
+            } catch APIError.unauthorized {
+                expireSession(of: server, ifStill: client.token)
+            } catch {
+                // Pending looks and orders stay marked and go out with the next sync.
+                if workspace.link?.server == server { status = describe(error) }
+            }
         }
     }
 
