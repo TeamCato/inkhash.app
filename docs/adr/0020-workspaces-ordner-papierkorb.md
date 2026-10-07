@@ -28,4 +28,4 @@ Privat und Arbeit sollen sich nicht mischen, auch nicht in Suche und Schlagwört
 
 ## Nicht
 
-Kein Teilen eines Workspace zwischen Accounts (0013 bleibt). Keine leeren Ordner auf dem Server. Kein Verschieben einer Notiz zwischen Workspaces. Workspaces werden auf dem Server nicht gelöscht, nur vom Gerät entfernt.
+Kein Teilen eines Workspace zwischen Accounts (0013 bleibt). Keine leeren Ordner auf dem Server. Kein Verschieben einer Notiz zwischen Workspaces. Workspaces werden auf dem Server nicht gelöscht, nur vom Gerät entfernt (geändert durch 0045: Löschen auf dem Server, außer `main`).

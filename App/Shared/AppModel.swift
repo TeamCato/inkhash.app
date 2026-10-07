@@ -311,6 +311,39 @@ final class AppModel {
         await sync()
     }
 
+    /// How many notes a server workspace holds, for the warning before deleting it. Nil if unknown.
+    func noteCount(of remote: RemoteWorkspace, on server: UUID) async -> Int? {
+        guard let client = sessions.client(for: server) else { return nil }
+        return try? await client.noteCount(workspace: remote.id)
+    }
+
+    /// Deletes a workspace on the server, for every device. Workspaces here that synced with it
+    /// keep their notes and stay on this device only. True if it is gone. See ADR 0045.
+    @discardableResult
+    func deleteOnServer(_ remote: RemoteWorkspace, on server: UUID) async -> Bool {
+        guard remote.id != APIClient.mainWorkspace, let client = sessions.client(for: server) else { return false }
+        do {
+            try await client.deleteWorkspace(id: remote.id)
+        } catch APIError.notFound {
+            // Already gone, e.g. deleted on another device.
+        } catch APIError.badStatus(405, _) {
+            status = "Dieser Server kann noch keine Workspaces löschen. Er braucht Version 0.3.0."
+            return false
+        } catch APIError.unauthorized {
+            sessions.expire(server, ifStill: client.token)
+            return false
+        } catch {
+            status = StatusLine.describe(error)
+            return false
+        }
+        for workspace in registry.workspaces(on: server) where workspace.link?.remote == remote.id {
+            registry.setLink(workspace.id, to: nil)
+        }
+        status = "„\(remote.name)“ ist auf dem Server gelöscht."
+        if registry.current.link == nil { status = syncer.statusAtRest }
+        return true
+    }
+
     private func link(for target: WorkspaceTarget, name: String) async throws -> WorkspaceLink? {
         switch target {
         case .local:

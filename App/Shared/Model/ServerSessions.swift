@@ -112,15 +112,20 @@ final class ServerSessions {
 
     /// Workspaces on a server, to choose one to sync with or to take over.
     func remoteWorkspaces(on server: UUID) async -> [RemoteWorkspace] {
-        guard let client = client(for: server) else { return [] }
+        await remoteWorkspaceList(on: server)?.workspaces ?? []
+    }
+
+    /// The account's workspaces in its order, and whether the server keeps looks. Nil if it failed.
+    func remoteWorkspaceList(on server: UUID) async -> RemoteWorkspaceList? {
+        guard let client = client(for: server) else { return nil }
         do {
-            return try await client.workspaces()
+            return try await client.workspaceList()
         } catch APIError.unauthorized {
             expire(server, ifStill: client.token)
-            return []
+            return nil
         } catch {
             status.message = StatusLine.describe(error)
-            return []
+            return nil
         }
     }
 

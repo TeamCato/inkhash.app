@@ -126,6 +126,27 @@ public struct APIClient: NoteTransport, Sendable {
         return try InkhashJSON.decode(RemoteWorkspace.self, from: data)
     }
 
+    /// Deletes a workspace on the server, for every device. `main` cannot be deleted. See ADR 0045.
+    public func deleteWorkspace(id: String) async throws {
+        _ = try await send(url: try endpoint("/v1/workspaces/\(id)"), method: "DELETE", body: nil, contentType: nil)
+    }
+
+    /// How many notes outside the trash a workspace on the server holds, read from its change log.
+    public func noteCount(workspace remote: String) async throws -> Int {
+        var scoped = self
+        scoped.workspace = remote
+        var living: [UUID: Bool] = [:]
+        var cursor = 0
+        var page: ChangePage
+        repeat {
+            page = try await scoped.changes(after: cursor)
+            for change in page.changes { living[change.noteId] = !change.deleted }
+            if page.hasMore && page.cursor <= cursor { throw APIError.invalidResponse }
+            cursor = page.cursor
+        } while page.hasMore
+        return living.values.filter { $0 }.count
+    }
+
     public func orderWorkspaces(ids: [String]) async throws -> RemoteWorkspaceList {
         let data = try await send(
             url: try endpoint("/v1/workspace-order"),

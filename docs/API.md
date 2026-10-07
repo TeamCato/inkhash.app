@@ -22,6 +22,7 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | GET | `/v1/workspaces` | `{ "workspaces": [Workspace], "ordered" }` in der Reihenfolge des Accounts |
 | POST | `/v1/workspaces` | `{ "name" }` → 201 Workspace. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main` |
 | PATCH | `/v1/workspaces/{id}` | `{ "name"?, "symbol"?, "icon"? }` → Workspace |
+| DELETE | `/v1/workspaces/{id}` | 204. Der Workspace verschwindet für den Account; `main` ist 400 mit `reason: "main"` |
 | PUT | `/v1/workspace-order` | `{ "ids": [...] }` → wie `GET /v1/workspaces` |
 | GET | `/v1/changes?after=<cursor>&limit=<n>` | `{ "cursor", "hasMore", "changes": [{ "cursor", "noteId", "revision", "deleted" }] }` |
 | GET | `/v1/notes/{id}` | die Notiz, auch wenn sie gelöscht ist |
@@ -31,6 +32,8 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | GET | `/v1/blobs/{sha256}` | Rohbytes |
 
 Ein Workspace ist `{ "id", "name", "symbol", "icon", "updatedAt" }`. `symbol` ist der Name eines SF Symbols (`[a-z0-9]` in Teilen mit `.`, höchstens 64 Zeichen), `icon` der sha256 eines Blobs im selben Workspace, `updatedAt` die letzte Änderung über `PATCH`. Alle drei sind `null`, solange kein Gerät das Aussehen gesetzt hat. `PATCH` ändert nur die genannten Felder, mindestens eines; `"icon": null` entfernt das Bild. Ein `icon`, das nicht als Blob im Workspace liegt, ist 400 mit `reason: "icon"`, ein ungültiges Symbol 400 mit `reason: "symbol"`. Siehe ADR 0043.
+
+`DELETE /v1/workspaces/{id}` nimmt den Workspace aus Liste und Reihenfolge; seine Routen antworten danach mit 404. Der Server verschiebt seinen Ordner nach `deleted/<id>-<zeit>` im Account, statt ihn zu löschen. Geräte erkennen das Löschen daran, dass der Workspace in `GET /v1/workspaces` fehlt. Siehe ADR 0045.
 
 `ordered` ist falsch, solange der Account keine Reihenfolge gespeichert hat; dann kommt `main` zuerst, die übrigen in der Reihenfolge des Anlegens. `PUT /v1/workspace-order` ordnet die genannten Workspaces unter den Plätzen, die sie schon haben; nicht genannte bleiben stehen. Ein neuer Workspace kommt ans Ende. Unbekannte oder doppelte IDs sind 400 mit `reason: "order"`.
 

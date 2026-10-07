@@ -251,6 +251,27 @@ final class WorkspaceTests: XCTestCase {
         XCTAssertEqual(order, ["w1", "main"])
     }
 
+    func testWorkspaceDeletedOnTheServerStaysHereUnlinked() async throws {
+        let server = UUID()
+        let kept = Workspace(name: "Privat", link: WorkspaceLink(server: server, remote: "main"))
+        var gone = Workspace(name: "Alt", link: WorkspaceLink(server: server, remote: "w1"))
+        gone.lookPending = true
+        let elsewhere = Workspace(name: "Anderswo", link: WorkspaceLink(server: UUID(), remote: "w1"))
+        let setup = DeviceSetup(servers: [], workspaces: [kept, gone, elsewhere], current: gone.id)
+        let remote = FakeWorkspaceServer([
+            RemoteWorkspace(id: "main", name: "Privat", updatedAt: "2026-10-07T08:00:00Z"),
+        ], ordered: true)
+
+        let synced = try await LookSyncer.sync(setup, server: server, base: freshBase(), transport: remote)
+        XCTAssertEqual(synced.workspaces.map(\.name), ["Privat", "Alt", "Anderswo"])
+        XCTAssertNil(synced.workspaces[1].link)
+        XCTAssertFalse(synced.workspaces[1].lookPending)
+        XCTAssertEqual(synced.workspaces[2].link, elsewhere.link)
+        XCTAssertEqual(synced.current, gone.id)
+        let looks = await remote.looks
+        XCTAssertNil(looks["w1"])
+    }
+
     func testServerWithoutLooksChangesNothing() async throws {
         let server = UUID()
         var a = Workspace(name: "Privat", link: WorkspaceLink(server: server, remote: "main"))

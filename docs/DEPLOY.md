@@ -126,6 +126,8 @@ sudo restic -r /mnt/backup/inkhash backup /var/lib/inkhash
 
 Wiederherstellen: Dienst stoppen, Verzeichnis ersetzen, Rechte prüfen (`inkhash` bzw. UID 1000, Modus `0700`), starten. Geräte gleichen danach alles einmal ab und laden fehlende Notizen wieder hoch.
 
+**Gelöschten Workspace zurückholen.** Ein in der App gelöschter Workspace liegt unter `spaces/<account-id>/deleted/<workspace-id>-<zeit>` (ADR 0045). Ordner zurück nach `spaces/<account-id>/workspaces/<workspace-id>` verschieben und in `spaces/<account-id>/workspaces.json` einen Eintrag `{ "id": "<workspace-id>", "name": "…" }` ergänzen. Ohne Neustart sichtbar. Sind sie sicher nicht mehr nötig, lassen sich die Ordner unter `deleted/` löschen.
+
 ## Gerät verloren, Passwort vergessen
 
 Dafür gibt es noch keinen Befehl. Bis dahin von Hand im Datenverzeichnis. Die Befehle unten sind für Linux; unter Docker statt `sudo -u inkhash` ein `docker compose exec inkhash` davor und `/data` statt `/var/lib/inkhash`.

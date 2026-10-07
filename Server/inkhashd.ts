@@ -251,6 +251,15 @@ const ROUTES: Route[] = [
       json(200, ctx.accounts.updateWorkspace(accountOf(ctx), ctx.params[0] ?? "", await readJson(ctx))),
   },
   {
+    method: "DELETE",
+    pattern: /^\/v1\/workspaces\/([^/]+)$/,
+    access: "session",
+    handle: (ctx) => {
+      ctx.accounts.deleteWorkspace(accountOf(ctx), ctx.params[0] ?? "");
+      return { status: 204 };
+    },
+  },
+  {
     method: "PUT",
     pattern: /^\/v1\/workspace-order$/,
     access: "session",

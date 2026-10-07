@@ -34,6 +34,12 @@ public enum LookSyncer {
         let list = try await transport.workspaceList()
         guard list.keepsLooks else { return setup }
         let remotes = Dictionary(list.workspaces.map { ($0.id, $0) }, uniquingKeysWith: { first, _ in first })
+        // Deleted on the server, maybe from another device: the notes stay here, unlinked. See ADR 0045.
+        for index in setup.workspaces.indices {
+            guard let link = setup.workspaces[index].link, link.server == server, remotes[link.remote] == nil else { continue }
+            setup.workspaces[index].link = nil
+            setup.workspaces[index].lookPending = false
+        }
 
         for index in setup.workspaces.indices {
             let workspace = setup.workspaces[index]

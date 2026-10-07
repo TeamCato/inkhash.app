@@ -98,6 +98,7 @@ final class SyncCoordinator {
             do {
                 let synced = try await LookSyncer.sync(snapshot, server: server, base: registry.base, transport: client)
                 registry.adopt(synced, since: snapshot)
+                reportDeleted(before: snapshot, after: registry.setup)
             } catch APIError.unauthorized {
                 sessions.expire(server, ifStill: client.token)
             } catch {
@@ -105,6 +106,17 @@ final class SyncCoordinator {
                 if registry.current.link?.server == server { status.message = StatusLine.describe(error) }
             }
         }
+    }
+
+    /// Workspaces whose server copy was deleted, maybe on another device, stay here unlinked. See ADR 0045.
+    private func reportDeleted(before: DeviceSetup, after: DeviceSetup) {
+        let unlinked = after.workspaces.filter { workspace in
+            workspace.link == nil && before.workspaces.contains { $0.id == workspace.id && $0.link != nil }
+        }
+        guard let first = unlinked.first else { return }
+        status.message = unlinked.count == 1
+            ? "„\(first.name)“ gibt es auf dem Server nicht mehr. Er bleibt auf diesem Gerät."
+            : "\(unlinked.count) Workspaces gibt es auf dem Server nicht mehr. Sie bleiben auf diesem Gerät."
     }
 
     private func describe(_ report: SyncReport) -> String {

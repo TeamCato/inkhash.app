@@ -539,6 +539,44 @@ test("the order of workspaces is the account's, a device moves only those it nam
   });
 });
 
+test("a deleted workspace is gone for the account but kept on disk", async () => {
+  await withServer(async (port, root) => {
+    const ada = await openAccount(port);
+    const ids: string[] = [];
+    for (const name of ["A", "B"]) {
+      const created = await request(port, "POST", "/v1/workspaces", { name }, ada.token);
+      ids.push((JSON.parse(created.raw.toString("utf8")) as { id: string }).id);
+    }
+    const [a, b] = ids as [string, string];
+    const noteId = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    const put = await request(port, "PUT", `/v1/workspaces/${a}/notes/${noteId}`, { baseRevision: 0, note: textNote(noteId) }, ada.token);
+    assert.equal(put.status, 201);
+    await request(port, "PUT", "/v1/workspace-order", { ids: [b, a, "main"] }, ada.token);
+
+    const bea = await addAccount(port, ada.token, "bea");
+    assert.equal((await request(port, "DELETE", `/v1/workspaces/${a}`, undefined, bea.token)).status, 404);
+
+    const deleted = await request(port, "DELETE", `/v1/workspaces/${a}`, undefined, ada.token);
+    assert.equal(deleted.status, 204);
+    const listed = JSON.parse((await request(port, "GET", "/v1/workspaces", undefined, ada.token)).raw.toString("utf8")) as {
+      workspaces: { id: string }[];
+    };
+    assert.deepEqual(listed.workspaces.map((workspace) => workspace.id), [b, "main"]);
+    assert.equal((await request(port, "GET", `/v1/workspaces/${a}/changes`, undefined, ada.token)).status, 404);
+    assert.equal((await request(port, "DELETE", `/v1/workspaces/${a}`, undefined, ada.token)).status, 404);
+
+    const main = await request(port, "DELETE", "/v1/workspaces/main", undefined, ada.token);
+    assert.equal(main.status, 400);
+    assert.equal((JSON.parse(main.raw.toString("utf8")) as { reason: string }).reason, "main");
+
+    const spaces = join(root, "spaces", ada.account.id);
+    const kept = readdirSync(join(spaces, "deleted"));
+    assert.equal(kept.length, 1);
+    assert.ok(kept[0]?.startsWith(`${a}-`));
+    assert.ok(readdirSync(join(spaces, "deleted", kept[0] ?? "", "notes")).length > 0);
+  });
+});
+
 test("an account has at most 50 workspaces, main included", async () => {
   await withServer(async (port) => {
     const ada = await openAccount(port);

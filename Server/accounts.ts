@@ -510,6 +510,32 @@ export class Accounts {
     return this.workspaces(accountId);
   }
 
+  /**
+   * Deletes a workspace of the account. Its folder moves to `deleted/<id>-<time>` in the account,
+   * so an admin can bring it back by hand; nothing is erased. `main` stays: it is the account's
+   * own space and what clients from before workspaces sync with. See ADR 0045.
+   */
+  deleteWorkspace(accountId: string, workspaceId: string): void {
+    if (workspaceId === MAIN_WORKSPACE) throw new StoreError(400, "bad-request", { reason: "main" });
+    const id = canonicalId(workspaceId);
+    const list = this.readWorkspaces(accountId);
+    if (!list.some((workspace) => workspace.id === id)) throw new StoreError(404, "not-found");
+    const space = this.spaceOf(accountId);
+    // Out of the list first: once it is gone there, no request reaches the folder anymore.
+    this.writeWorkspaces(accountId, list.filter((workspace) => workspace.id !== id));
+    const order = this.readOrder(accountId);
+    if (order) {
+      atomicWrite(join(space, "order.json"), Buffer.from(JSON.stringify(order.filter((entry) => entry !== id), null, 2)));
+    }
+    this.stores.delete(`${canonicalId(accountId)}/${id}`);
+    const folder = join(space, "workspaces", id);
+    if (existsSync(folder)) {
+      const deleted = join(space, "deleted");
+      mkdirSync(deleted, { recursive: true, mode: DIR_MODE });
+      renameSync(folder, join(deleted, `${id}-${nowStamp().replace(/[:]/g, "-")}`));
+    }
+  }
+
   /** The store of one workspace. Unknown workspaces are 404, never created on the fly. */
   workspaceStore(accountId: string, workspaceId: string): Store {
     if (workspaceId === MAIN_WORKSPACE) return this.storeFor(accountId);
