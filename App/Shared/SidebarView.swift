@@ -514,7 +514,7 @@ struct WorkspaceSwitcher: View {
             HStack(spacing: 10) {
                 WorkspaceIcon(workspace: model.registry.current, size: 20)
                     .font(.system(size: 14, weight: .medium))
-                    .frame(width: 20)
+                    .frame(width: 20, height: 20)
                 Text(model.registry.current.name)
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
