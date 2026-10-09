@@ -64,9 +64,15 @@ final class AppModel {
     var importRequested = false
     private var impulseToken = 0
 
-    init() {
-        let base = FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
+    /// Where the libraries live: Application Support, which the iCloud backup of iPad and iPhone
+    /// and Time Machine on the Mac include. Never Caches or tmp. See ADR 0051.
+    static var storageBase: URL {
+        FileManager.default.urls(for: .applicationSupportDirectory, in: .userDomainMask)[0]
             .appendingPathComponent("inkhash", isDirectory: true)
+    }
+
+    init() {
+        let base = Self.storageBase
         let defaults = UserDefaults.standard
         let legacy = LegacySignIn(
             url: defaults.string(forKey: "inkhash.baseURL") ?? "",
@@ -198,6 +204,42 @@ final class AppModel {
     func emptyTrash() {
         library.emptyTrash(syncs: registry.current.link != nil)
         dropMissingSelection()
+    }
+
+    // MARK: Export
+
+    /// One note as a file to save: Markdown or PDF. Nil if it failed; the status says why. See ADR 0051.
+    func exportFile(for id: UUID) -> ExportedFile? {
+        guard let note = library.record(id)?.note else { return nil }
+        do {
+            return ExportedFile(url: try NoteExport.file(for: note) { [library] in library.drawingData(for: $0) })
+        } catch {
+            status = "Die Notiz ließ sich nicht exportieren."
+            return nil
+        }
+    }
+
+    /// A note for the share sheet; the file is made when a target is picked.
+    func shared(_ id: UUID) -> SharedNote? {
+        guard let note = library.record(id)?.note else { return nil }
+        return SharedNote(note: note) { [weak library] in library?.drawingData(for: $0) }
+    }
+
+    /// A whole workspace as one ZIP: readable files and a copy to import again. See ADR 0051.
+    func exportWorkspace(_ id: UUID) -> ExportedFile? {
+        guard let workspace = registry.workspace(id) else { return nil }
+        do {
+            let (url, summary) = try WorkspaceExporter.export(workspace, store: registry.store(for: id))
+            var message = summary.notes == 1 ? "Eine Notiz exportiert." : "\(summary.notes) Notizen exportiert."
+            if summary.withoutPDF > 0 {
+                message += " \(summary.withoutPDF) Handschrift ohne PDF, aber in der Sicherung."
+            }
+            status = message
+            return ExportedFile(url: url)
+        } catch {
+            status = "Der Export ist fehlgeschlagen."
+            return nil
+        }
     }
 
     /// Ends a conflict. The open editor starts over from the kept version. See ADR 0049.

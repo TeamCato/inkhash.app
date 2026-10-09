@@ -29,7 +29,7 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 - Der Server speichert, liefert aus und synchronisiert. Er erkennt keine Handschrift, rendert nicht und leitet keine Tags ab.
 - Suche läuft auf dem Gerät über die lokale Bibliothek, inklusive der mitgelieferten Abschriften.
 - Nichts in der App darf einen Server voraussetzen. Ohne Anmeldung muss alles außer dem Abgleich gehen.
-- Kein iCloud, kein zweites Sync-Ziel, kein Assistent und kein Embedding-Modell in der App.
+- Kein iCloud als Ablage oder Abgleich (iCloud Drive, CloudKit), kein zweites Sync-Ziel, kein Assistent und kein Embedding-Modell in der App. Das iCloud-Backup des Geräts ist erlaubt und erwünscht (ADR 0051).
 - Keine Notion-Datenbanken, keine Whiteboards.
 - Das iOS-Ziel läuft auf iPad und iPhone, das Layout folgt der Breite, nicht dem Gerät (ADR 0026). Auf dem Mac gibt es keine Zeichenfläche: macOS PencilKit kann `PKDrawing` lesen und zeichnen, aber kein `PKCanvasView`.
 - Projektstruktur kommt aus `project.yml`. Die `xcodeproj` nicht von Hand editieren. Nach Änderungen an `project.yml`: `make generate`.

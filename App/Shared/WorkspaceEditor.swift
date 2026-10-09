@@ -25,8 +25,15 @@ struct WorkspaceEditor: View {
     @State private var busy = false
     @State private var confirmRemoval = false
     @State private var loaded = false
+    @State private var exported: ExportedFile?
 
     private static let newRemote = "+new"
+    /// Where the notes are safe besides the export. See ADR 0051.
+    #if os(macOS)
+    static let backupFooter = "Eine ZIP-Datei mit allen Notizen als Markdown und PDF und einer Kopie, die „Importieren“ zurückholt. Auf dem Mac sichert Time Machine die Notizen ohnehin mit."
+    #else
+    static let backupFooter = "Eine ZIP-Datei mit allen Notizen als Markdown und PDF und einer Kopie, die „Importieren“ zurückholt. Ist das iCloud-Backup des Geräts an, liegen die Notizen auch dort."
+    #endif
     static let symbols = ["house", "briefcase", "tray", "book", "lightbulb", "graduationcap", "heart", "leaf", "hammer", "paintpalette", "airplane", "cart"]
 
     var body: some View {
@@ -91,6 +98,15 @@ struct WorkspaceEditor: View {
             } footer: {
                 Text(syncFooter)
             }
+            if let workspace {
+                Section {
+                    Button("Exportieren…") { exported = model.exportWorkspace(workspace.id) }
+                } header: {
+                    Text("Sicherung")
+                } footer: {
+                    Text(Self.backupFooter)
+                }
+            }
             if let workspace, model.registry.workspaces.count > 1 {
                 Section {
                     Button("Vom Gerät entfernen", role: .destructive) { confirmRemoval = true }
@@ -125,6 +141,15 @@ struct WorkspaceEditor: View {
                 Button(workspace == nil ? "Anlegen" : "Sichern") { save() }
                     .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
+        }
+        .fileExporter(
+            isPresented: Binding(get: { exported != nil }, set: { if !$0 { exported = nil } }),
+            document: exported,
+            contentType: .zip,
+            defaultFilename: exported?.url.lastPathComponent
+        ) { result in
+            if case .failure = result { model.status = "Die Sicherung ließ sich nicht ablegen." }
+            exported = nil
         }
         .onAppear(perform: load)
         .onChange(of: serverChoice) { _, _ in Task { await loadRemotes() } }

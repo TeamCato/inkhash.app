@@ -15,6 +15,8 @@ struct SidebarView: View {
     @State private var pendingDelete: UUID?
     @State private var confirmEmptyTrash = false
     @State private var newWorkspace = false
+    /// A note written to a file, waiting for the person to pick where it goes. See ADR 0051.
+    @State private var exported: ExportedFile?
 
     var body: some View {
         @Bindable var model = model
@@ -53,6 +55,15 @@ struct SidebarView: View {
             TextField("Name", text: $folderName)
             Button("Abbrechen", role: .cancel) { folderPrompt = nil }
             Button(folderPrompt?.action ?? "OK") { commitFolder() }
+        }
+        .fileExporter(
+            isPresented: Binding(get: { exported != nil }, set: { if !$0 { exported = nil } }),
+            document: exported,
+            contentType: exported.map { UTType(filenameExtension: $0.url.pathExtension) ?? .data } ?? .data,
+            defaultFilename: exported?.url.lastPathComponent
+        ) { result in
+            if case .failure = result { model.status = "Die Datei ließ sich nicht sichern." }
+            exported = nil
         }
         .sheet(isPresented: $newWorkspace) {
             NavigationStack {
@@ -153,7 +164,7 @@ struct SidebarView: View {
             Divider()
             Button("Ordner", systemImage: "folder.badge.plus") { ask(.create(parent: "")) }
             Divider()
-            Button("PDF oder GoodNotes importieren…", systemImage: "square.and.arrow.down") { model.importRequested = true }
+            Button("PDF, GoodNotes oder Sicherung importieren…", systemImage: "square.and.arrow.down") { model.importRequested = true }
         } label: {
             Image(systemName: "plus")
                 .font(.system(size: 15, weight: .bold))
@@ -170,7 +181,7 @@ struct SidebarView: View {
         .accessibilityLabel("Neu")
         .padding(.trailing, 6)
         .padding(.bottom, 8)
-        .fileImporter(isPresented: $model.importRequested, allowedContentTypes: [.pdf, .goodnotes]) { result in
+        .fileImporter(isPresented: $model.importRequested, allowedContentTypes: [.pdf, .goodnotes, .zip]) { result in
             if case .success(let url) = result { model.importFile(at: url) }
         }
     }
@@ -388,6 +399,15 @@ struct SidebarView: View {
         if record.note.deletedAt == nil {
             Button(record.note.favorite ? "Aus Favoriten entfernen" : "Zu Favoriten", systemImage: record.note.favorite ? "star.slash" : "star") {
                 model.library.toggleFavorite(id: record.id)
+            }
+            Divider()
+            if let shared = model.shared(record.id) {
+                ShareLink(item: shared, preview: SharePreview(record.note.displayTitle)) {
+                    Label("Teilen…", systemImage: "square.and.arrow.up")
+                }
+            }
+            Button(record.note.kind == .ink ? "Als PDF exportieren…" : "Als Markdown exportieren…", systemImage: "arrow.down.doc") {
+                exported = model.exportFile(for: record.id)
             }
             Divider()
             Button("In den Papierkorb", systemImage: "trash", role: .destructive) { pendingDelete = record.id }

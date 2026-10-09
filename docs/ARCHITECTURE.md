@@ -16,6 +16,8 @@ Import sitzt in zwei Hälften. Im Kern liest `PDFInk` die Vektorpfade eines PDFs
 
 Papier gehört zur Notiz (`Note.paper`, `Paper` im Kern, mit optionalem Abstand `spacing`, ADR 0047). `PaperArt` in der App zeichnet Linien, Karos und Punkte in Seitenkoordinaten mit `Paper.shownSpacing`: auf dem iPad über `PaperPatternView`, die nur den sichtbaren Ausschnitt deckt und dem Scrollen folgt, auf dem Mac über `PaperPatternCanvas`. Die Farbe ist der Hintergrund der ganzen Notiz. `PageImage` rendert einen Ausschnitt einer Seite für Ausschnitte (ohne Papier) und für die Miniaturen in `PageOverview` (mit Papier). Seiten ordnet und löscht `Note.reorderPages`, `movePage` und `removePage`; Abschrift und Schlagwörter folgen. Siehe ADR 0042.
 
+Export sitzt ebenfalls in zwei Hälften. Im Kern schreibt `ZipWriter` ZIP-Dateien ohne Kompression, `ExportNames` macht aus Titeln und Pfaden sichere Dateinamen, und `WorkspaceExport` schreibt, liest und stellt eine Sicherung wieder her. In der App (`App/Shared/Export`) rendert `NotePDF` Handschrift als PDF über `PageImage.drawUnderInk` und `PageImage.inkImage`, `NoteExport` und `SharedNote` liefern eine Notiz als Datei oder fürs Teilen-Menü, `WorkspaceExporter` den ganzen Workspace. `NoteLibrary.importFile` erkennt Sicherungen an `inkhash-export.json`. Die Bibliotheken liegen unter `AppModel.storageBase` in Application Support und damit im Geräte-Backup. Siehe ADR 0051.
+
 Texterkennung sitzt in `HandwritingRecognizer`. Sie rendert die Zeichnung, liest sie mit Vision und gibt Wörter an `Hashtags` weiter. Das Ergebnis schreibt der Client auf die Seite, dann synchronisiert er es wie jeden anderen Feldwert.
 
 ## Verzeichnisse

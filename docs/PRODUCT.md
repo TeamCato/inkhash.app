@@ -47,11 +47,15 @@ Ein einzelnes erkanntes `#` neben einem Wort zählt als Schlagwort, auch wenn es
 
 Die App funktioniert ohne Server vollständig: schreiben, zeichnen, erkennen, suchen. Es gibt eine Bibliothek pro Gerät, ohne Anmeldung. Ein Server ist ein Plus, keine Voraussetzung. Meldet man sich an, wandern alle Notizen des Geräts in den Account. Meldet man sich ab, bleiben sie auf dem Gerät und der Abgleich hört auf. Siehe ADR 0017.
 
+## Sicherung und Export
+
+Auf iPad und iPhone liegen die Notizen im iCloud-Backup des Geräts, wenn es eingeschaltet ist, auf dem Mac in Time Machine. Das ist ein Backup, kein Abgleich. Dazu lässt sich jeder Workspace als ZIP-Datei exportieren: alle Notizen als Markdown und PDF, und eine Kopie, die der Import wieder in die App holt. Eine einzelne Notiz teilt oder exportiert man über ihr Kontextmenü, Text als Markdown, Handschrift als PDF. Siehe ADR 0051.
+
 ## Server
 
 Es gibt keine eigene Cloud. Die Apps sprechen nur mit der API, idealerweise ein einzelner Container. Der Server speichert Notizen, liefert sie aus und gleicht Geräte ab. Wer ihn erreicht, braucht einen Account: Name und Passwort, ohne E-Mail. Beim ersten Start schreibt der Server einen einmaligen Setup-Token in sein Log. Damit legt man auf der Seite `/admin` im Browser den Admin an, danach gilt der Token nicht mehr. Weitere Accounts legt nur der Admin dort an, mit Name und Startpasswort. Die App meldet sich nur an. Jeder Account hat seine eigenen Notizen.
 
-Mit Server gleicht jeder Workspace eines Geräts mit genau einem Workspace eines Accounts ab. iCloud und jedes zweite Sync-Ziel sind ausgeschlossen. Sicherung heißt mit Server: das Datenverzeichnis des Servers kopieren. Ohne Server liegt alles nur auf dem Gerät.
+Mit Server gleicht jeder Workspace eines Geräts mit genau einem Workspace eines Accounts ab. iCloud und jedes zweite Sync-Ziel sind ausgeschlossen. Sicherung heißt mit Server: das Datenverzeichnis des Servers kopieren. Ohne Server sichern das Geräte-Backup und der Export.
 
 ## Name
 

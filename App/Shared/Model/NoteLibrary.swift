@@ -101,27 +101,51 @@ final class NoteLibrary {
         }
     }
 
-    /// A PDF export or a GoodNotes notebook becomes ink notes, one page per page. Which one it is
-    /// comes from the bytes, not the file name. `place` puts each new note where it belongs.
-    /// Returns the first new note. See ADR 0024 and 0041.
+    /// A PDF export or a GoodNotes notebook becomes ink notes, one page per page; an inkhash export
+    /// brings its notes back as they were. Which one it is comes from the bytes, not the file name.
+    /// `place` puts each new ink note where it belongs. Returns the first new note.
+    /// See ADR 0024, 0041 and 0051.
     func importFile(at url: URL, place: (Note) -> Note) -> UUID? {
         let scoped = url.startAccessingSecurityScopedResource()
         defer { if scoped { url.stopAccessingSecurityScopedResource() } }
         let name = url.deletingPathExtension().lastPathComponent
         do {
             let data = try Data(contentsOf: url)
+            if data.starts(with: [0x50, 0x4B]), WorkspaceExport.isExport(data) {
+                return restoreBackup(data)
+            }
             if data.starts(with: [0x50, 0x4B]) {
                 let notebook = try InkImport.notebook(fromGoodNotes: data)
                 return addImported(notebook.pages, name: name, skipped: notebook.skipped, place: place)
             }
             return addImported(try InkImport.pages(fromPDF: data), name: name, skipped: 0, place: place)
         } catch PDFInkError.notAPDF, GoodNotesError.notGoodNotes {
-            status.message = "Die Datei ist weder ein PDF noch ein GoodNotes-Notizbuch."
+            status.message = "Die Datei ist weder ein PDF, ein GoodNotes-Notizbuch noch eine Sicherung."
         } catch PDFInkError.noPages, GoodNotesError.noPages {
             status.message = "Die Datei hat keine Seiten."
         } catch {
             status.message = "Der Import ist fehlgeschlagen."
         }
+        return nil
+    }
+
+    /// Notes from an inkhash export join this workspace as new notes. See ADR 0051.
+    private func restoreBackup(_ data: Data) -> UUID? {
+        do {
+            let backup = try WorkspaceExport.read(data)
+            let ids = try WorkspaceExport.restore(backup, into: store)
+            reload()
+            changed()
+            status.message = ids.count == 1
+                ? "Eine Notiz aus „\(backup.manifest.workspace)“ übernommen."
+                : "\(ids.count) Notizen aus „\(backup.manifest.workspace)“ übernommen."
+            return ids.first
+        } catch ExportError.newerVersion {
+            status.message = "Die Sicherung stammt aus einer neueren Version der App."
+        } catch {
+            status.message = "Die Sicherung ist beschädigt."
+        }
+        reload()
         return nil
     }
 

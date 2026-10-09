@@ -38,5 +38,7 @@ Diese Wörter heißen im Code so.
 | Sitzung | Zufalls-Token nach dem Anmelden. Liegt in der Keychain, nicht das Setup-Token. |
 | Setup-Token | Zufallswert, den der Server ohne Accounts beim Start ins Log schreibt. Legt nur den Admin an, dann ungültig. |
 | Admin | Darf auf `/admin` Accounts anlegen, umbenennen, Passwörter setzen, zu Admins machen und löschen, sonst ein Account wie jeder andere. Der erste Account ist Admin, der letzte bleibt es (ADR 0021, 0046). |
+| Export | Eine Notiz als Datei (Markdown oder PDF) oder ein Workspace als ZIP mit lesbaren Dateien und einer Kopie für die App (ADR 0051). |
+| Sicherung | Ein Workspace-Export, den der Import wieder als neue Notizen holt. Daneben das Geräte-Backup (iCloud-Backup, Time Machine), kein Sync-Ziel. |
 
 `# Titel` ist eine Überschrift. `#titel` ist ein Tag. In Handschrift-Abschriften ist `# titel` ebenfalls ein Tag.

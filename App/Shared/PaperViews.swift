@@ -87,10 +87,22 @@ enum PageImage {
         context.translateBy(x: 0, y: CGFloat(pixelHeight))
         context.scaleBy(x: scale, y: -scale)
         context.translateBy(x: -rect.minX, y: -rect.minY)
+        drawUnderInk(page, rect: rect, paper: paper, pixel: 1 / scale, in: context, load: load)
+        context.restoreGState()
+
+        // Ink on top, drawn upright in the unflipped bitmap.
+        if let ink = inkImage(page, rect: rect, scale: scale, load: load) {
+            context.draw(ink, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
+        }
+        return context.makeImage()
+    }
+
+    /// Paper and elements of `rect`, in page points with y down. Shared by bitmaps and PDF pages.
+    static func drawUnderInk(_ page: InkPage, rect: CGRect, paper: Paper?, pixel: CGFloat, in context: CGContext, load: (String) -> Data?) {
         if let paper {
             context.setFillColor(paper.cgFill)
             context.fill(rect)
-            PaperArt.draw(paper, in: context, visible: rect, pageWidth: page.width, pixel: 1 / scale)
+            PaperArt.draw(paper, in: context, visible: rect, pageWidth: page.width, pixel: pixel)
         }
         for element in page.elements.sorted(by: { $0.z < $1.z }) {
             context.saveGState()
@@ -98,14 +110,12 @@ enum PageImage {
             ElementRenderer.draw(element, in: context, image: ElementContent.image(for: element, load: load))
             context.restoreGState()
         }
-        context.restoreGState()
+    }
 
-        // Ink on top, drawn upright in the unflipped bitmap.
-        if let data = load(page.blob), let drawing = try? PKDrawing(data: data),
-           let ink = cgImage(drawing.image(from: rect, scale: scale)) {
-            context.draw(ink, in: CGRect(x: 0, y: 0, width: pixelWidth, height: pixelHeight))
-        }
-        return context.makeImage()
+    /// The ink of `rect` as a bitmap, or nil for a page without a readable drawing.
+    static func inkImage(_ page: InkPage, rect: CGRect, scale: CGFloat, load: (String) -> Data?) -> CGImage? {
+        guard let data = load(page.blob), let drawing = try? PKDrawing(data: data) else { return nil }
+        return cgImage(drawing.image(from: rect, scale: scale))
     }
 
     #if os(macOS)
