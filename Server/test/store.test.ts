@@ -478,3 +478,42 @@ test("paper is checked, stored and part of the retry comparison", () => {
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("createdAt is checked, kept when left out, and part of the retry comparison", () => {
+  const root = mkdtempSync(join(tmpdir(), "inkhash-"));
+  try {
+    const store = new Store(root);
+    const noteId = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    const reason = (createdAt: unknown) => {
+      try {
+        store.putNote(noteId, 0, { ...textNote(noteId), createdAt });
+        return "stored";
+      } catch (error) {
+        return error instanceof StoreError ? error.extra.reason : "other";
+      }
+    };
+    for (const bad of ["2026-10-09", "2026-10-09T10:00:00.000Z", "2026-02-31T10:00:00Z", "2026-10-09T10:00:00+02:00", 1760000000]) {
+      assert.equal(reason(bad), "createdAt", String(bad));
+    }
+
+    // Old notes and old clients: no date, no key.
+    const [, plain] = store.putNote(noteId, 0, textNote(noteId));
+    assert.equal("createdAt" in plain, false);
+
+    const [, dated] = store.putNote(noteId, 1, { ...textNote(noteId), createdAt: "2026-09-29T18:30:00Z" });
+    assert.equal(dated.createdAt, "2026-09-29T18:30:00Z");
+
+    // A client that does not know the field keeps the stored date.
+    const [, edited] = store.putNote(noteId, 2, { ...textNote(noteId, "# Neu\n") });
+    assert.equal(edited.createdAt, "2026-09-29T18:30:00Z");
+    assert.equal(store.getNote(noteId).createdAt, "2026-09-29T18:30:00Z");
+
+    // A retry with the same date is the stored note; another date is a conflict.
+    const [status, again] = store.putNote(noteId, 2, { ...textNote(noteId, "# Neu\n"), createdAt: "2026-09-29T18:30:00Z" });
+    assert.equal(status, 200);
+    assert.equal(again.revision, 3);
+    assert.throws(() => store.putNote(noteId, 2, { ...textNote(noteId, "# Neu\n"), createdAt: "2026-09-01T08:00:00Z" }), Conflict);
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});

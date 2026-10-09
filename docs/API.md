@@ -47,7 +47,7 @@ Die Routen für Änderungen, Notizen und Blobs gelten für den Workspace `main`.
 
 `baseRevision` > 0 auf eine Notiz, die der Server nicht kennt, ist 404 `not-found`, zum Beispiel nach einem Restore aus einer älteren Sicherung. Der Client legt die Notiz dann mit `baseRevision` 0 neu an. Ein `DELETE` darauf ist ebenfalls 404; die Notiz bleibt dann nur im lokalen Papierkorb, mit Revision 0.
 
-Passt `baseRevision` nicht, ist der Inhalt aber genau der gespeicherte (`kind`, `title`, `markdown`, `transcript`, `tags`, `pages`, `folder`, `favorite`, `paper`), antwortet der Server mit 200 und der gespeicherten Fassung, ohne neue Revision. Das ist der Retry nach einer verlorenen Antwort. Für gelöschte Notizen gilt das nicht.
+Passt `baseRevision` nicht, ist der Inhalt aber genau der gespeicherte (`kind`, `title`, `markdown`, `transcript`, `tags`, `pages`, `folder`, `favorite`, `paper`, `createdAt`), antwortet der Server mit 200 und der gespeicherten Fassung, ohne neue Revision. Das ist der Retry nach einer verlorenen Antwort. Für gelöschte Notizen gilt das nicht.
 
 Ein `PUT` mit passender `baseRevision` auf eine gelöschte Notiz holt sie zurück: `deletedAt` ist danach wieder `null`.
 
@@ -66,6 +66,7 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
   "kind": "text",
   "title": "Inkhash",
   "revision": 1,
+  "createdAt": "2026-09-29T18:30:00Z",
   "updatedAt": "2026-09-30T06:00:00Z",
   "deletedAt": null,
   "markdown": "# Inkhash\n",
@@ -81,6 +82,8 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
 `folder` ist ein Pfad aus Segmenten mit `/`, jedes 1–60 Zeichen ohne Rand-Leerzeichen, insgesamt höchstens 200; leer heißt kein Ordner. `favorite` ist ein Boolean. Fehlen beide, gelten `""` und `false`. Gespeicherte Notizen von vorher werden so ausgeliefert. Beide zählen zum Inhalt für den Retry-Vergleich.
 
 `paper` ist optional und gilt für die ganze Notiz (ADR 0042): `color` als `#RRGGBB` (der Server speichert groß) und `pattern` aus `blank`, `grid`, `lines`, `dots`; fehlt `pattern`, gilt `blank`. Eine Textnotiz hat nur `blank`. `spacing` ist optional (ADR 0047): der Abstand des Musters als ganze Zahl von 20 bis 64 Seitenpunkten, nur bei einem anderen Muster als `blank`. Fehlt es, gilt der Standard des Musters, und der Server lässt den Schlüssel weg. Fehlt `paper` oder ist es `null`, gilt das Standardpapier, und der Server lässt den Schlüssel weg. Der Server prüft nur die Form, nicht die Palette der App. Ein ungültiges Papier ergibt 400 `bad-request` mit `reason: "paper"`. `paper` zählt zum Inhalt für den Retry-Vergleich.
+
+`createdAt` ist optional und setzt der Client (ADR 0048): Zeitstempel in UTC als `YYYY-MM-DDTHH:MM:SSZ`, sonst 400 `bad-request` mit `reason: "createdAt"`. Fehlt es beim `PUT`, behält der Server das gespeicherte; hatte die Notiz keines, lässt er den Schlüssel weg, und der Client nimmt `updatedAt`. `createdAt` zählt zum Inhalt für den Retry-Vergleich.
 
 `kind: "ink"` hat `markdown: null`, `transcript` als String und `pages` als Liste. Eine Seite:
 

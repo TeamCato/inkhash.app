@@ -56,6 +56,43 @@ public struct NoteTree: Identifiable, Sendable {
         }
         return node("")
     }
+
+    /// The tree as the sidebar draws it: one flat row per visible folder or note, subfolders before
+    /// notes, nothing below a collapsed folder. Flat on purpose, see PITFALLS P-056.
+    public func rows(isExpanded: (String) -> Bool) -> [TreeRow] {
+        var rows: [TreeRow] = []
+        func walk(_ node: NoteTree, depth: Int) {
+            for folder in node.folders {
+                let expanded = isExpanded(folder.path)
+                rows.append(TreeRow(item: .folder(folder, expanded: expanded), depth: depth))
+                if expanded { walk(folder, depth: depth + 1) }
+            }
+            for record in node.notes {
+                rows.append(TreeRow(item: .note(record), depth: depth))
+            }
+        }
+        walk(self, depth: 0)
+        return rows
+    }
+}
+
+/// One line of the sidebar tree. `depth` 0 lies directly in the root.
+public struct TreeRow: Identifiable, Sendable {
+    public enum Item: Sendable {
+        case folder(NoteTree, expanded: Bool)
+        case note(NoteRecord)
+    }
+
+    public var item: Item
+    public var depth: Int
+
+    /// Folder paths and note IDs never collide: a path cannot carry the "note:" prefix as a whole.
+    public var id: String {
+        switch item {
+        case .folder(let node, _): "folder:\(node.path)"
+        case .note(let record): "note:\(record.id.uuidString)"
+        }
+    }
 }
 
 public struct TagCount: Identifiable, Equatable, Sendable {

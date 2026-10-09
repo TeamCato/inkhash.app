@@ -43,6 +43,34 @@ final class NoteListingTests: XCTestCase {
         XCTAssertEqual(filtered.folders.first?.notes.map(\.id), [bike.id])
     }
 
+    func testTreeRowsAreFlatAndSkipCollapsedFolders() {
+        let loose = record("Lose\n", at: "2026-10-01T06:00:00Z")
+        let retro = record("Retro\n", folder: "projects/retros", at: "2026-10-02T06:00:00Z")
+        let plan = record("Plan\n", folder: "projects", at: "2026-10-03T06:00:00Z")
+        let workshop = record("Workshop\n", folder: "workshops", at: "2026-10-04T06:00:00Z")
+        let tree = NoteListing(records: [loose, retro, plan, workshop], keptFolders: []).folderTree(query: "")
+
+        let open = tree.rows { _ in true }
+        XCTAssertEqual(open.map(\.id), [
+            "folder:projects", "folder:projects/retros", "note:\(retro.id.uuidString)", "note:\(plan.id.uuidString)",
+            "folder:workshops", "note:\(workshop.id.uuidString)",
+            "note:\(loose.id.uuidString)",
+        ])
+        XCTAssertEqual(open.map(\.depth), [0, 1, 2, 1, 0, 1, 0])
+
+        let collapsed = tree.rows { $0 != "projects" }
+        XCTAssertEqual(collapsed.map(\.id), [
+            "folder:projects",
+            "folder:workshops", "note:\(workshop.id.uuidString)",
+            "note:\(loose.id.uuidString)",
+        ])
+        if case .folder(_, let expanded) = collapsed[0].item {
+            XCTAssertFalse(expanded)
+        } else {
+            XCTFail("first row should be the folder")
+        }
+    }
+
     func testLinkableFoldsCaseAndAccents() {
         let cafe = record("Café Plan\n", at: "2026-10-01T06:00:00Z")
         let other = record("Anderes\n", at: "2026-10-02T06:00:00Z")

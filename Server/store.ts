@@ -137,6 +137,8 @@ export interface Note {
   /** Absent means the standard paper. */
   paper?: Paper;
   revision: number;
+  /** Set by the client, absent on notes from before ADR 0048. */
+  createdAt?: string;
   updatedAt: string;
   deletedAt: string | null;
 }
@@ -192,6 +194,15 @@ function syncDirectory(path: string): void {
   }
 }
 
+const STAMP_RE = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/;
+
+/** A UTC timestamp in the form of `updatedAt`, and a real moment: no 31 February. */
+export function validStamp(value: unknown): value is string {
+  if (typeof value !== "string" || !STAMP_RE.test(value)) return false;
+  const time = Date.parse(value);
+  return Number.isFinite(time) && new Date(time).toISOString().replace(/\.\d{3}Z$/, "Z") === value;
+}
+
 /** A folder path the client wrote. The server checks the form only, like tags. */
 export function validFolder(folder: unknown): folder is string {
   if (typeof folder !== "string" || folder.length > MAX_FOLDER) return false;
@@ -216,6 +227,7 @@ function contentKey(note: Note): string {
     note.folder ?? "",
     note.favorite ?? false,
     note.paper ?? null,
+    note.createdAt ?? null,
   ]);
 }
 
@@ -416,6 +428,8 @@ export class Store {
     const id = canonicalId(noteId);
     const note = this.normalize(id, body);
     const existing = this.readNote(id);
+    // A client from before ADR 0048 leaves the date out; the note keeps the one it has.
+    if (note.createdAt === undefined && existing?.createdAt !== undefined) note.createdAt = existing.createdAt;
     if (!existing) {
       if (baseRevision !== 0) throw new StoreError(404, "not-found", { reason: "unknown note" });
       return [201, this.writeNew(note, 1, null)];
@@ -486,6 +500,10 @@ export class Store {
     const favorite = "favorite" in body && body.favorite != null ? body.favorite : false;
     if (typeof favorite !== "boolean") throw new StoreError(400, "bad-request", { reason: "favorite" });
     const paper = "paper" in body && body.paper != null ? paperOf(body.paper, kind) : undefined;
+    const createdAt = "createdAt" in body && body.createdAt != null ? body.createdAt : undefined;
+    if (createdAt !== undefined && !validStamp(createdAt)) {
+      throw new StoreError(400, "bad-request", { reason: "createdAt" });
+    }
     if ("deletedAt" in body && body.deletedAt != null) {
       throw new StoreError(400, "bad-request", { reason: "use DELETE" });
     }
@@ -508,6 +526,7 @@ export class Store {
         folder,
         favorite,
         ...(paper ? { paper } : {}),
+        ...(createdAt ? { createdAt } : {}),
         revision: 0,
         updatedAt: "",
         deletedAt: null,
@@ -529,6 +548,7 @@ export class Store {
       folder,
       favorite,
       ...(paper ? { paper } : {}),
+      ...(createdAt ? { createdAt } : {}),
       revision: 0,
       updatedAt: "",
       deletedAt: null,

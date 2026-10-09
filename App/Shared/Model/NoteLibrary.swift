@@ -73,7 +73,7 @@ final class NoteLibrary {
     /// Stores a new note as it is and marks it for the next sync.
     func add(_ note: Note) {
         var note = note
-        note.updatedAt = InkhashTime.now()
+        note.touch(InkhashTime.now())
         upsert(note, dirty: true, conflict: false)
         changed()
     }
@@ -154,7 +154,7 @@ final class NoteLibrary {
             note.pages = part
             let suffix = parts.count > 1 ? " (\(offset + 1))" : ""
             note.title = name.clippedUTF16(Limits.title - suffix.utf16.count) + suffix
-            note.updatedAt = InkhashTime.now()
+            note.touch(InkhashTime.now())
             upsert(note, dirty: true, conflict: false)
             if firstID == nil { firstID = note.id }
         }
@@ -349,7 +349,7 @@ final class NoteLibrary {
         guard let index = index(of: id) else { return }
         var record = records[index]
         guard record.note.applyMarkdown(markdown) else { return }
-        record.note.updatedAt = InkhashTime.now()
+        record.note.touch(InkhashTime.now())
         record.dirty = true
         record.conflict = false
         records[index] = record
@@ -361,6 +361,11 @@ final class NoteLibrary {
     /// Sets a title by hand for any note. An empty title goes back to the automatic one (ADR 0019).
     func rename(id: UUID, title: String) {
         change(id) { note in note.setTitle(title) }
+    }
+
+    /// Sets the creation date by hand, a UTC timestamp. See ADR 0048.
+    func setCreatedAt(id: UUID, date: Date) {
+        change(id) { note in note.setCreatedAt(InkhashTime.now(date)) }
     }
 
     /// Stores a page's drawing. True if the drawing or the page height changed.
@@ -376,7 +381,7 @@ final class NoteLibrary {
             pages[pageIndex].height = grown
             var record = records[index]
             record.note.pages = pages
-            record.note.updatedAt = InkhashTime.now()
+            record.note.touch(InkhashTime.now())
             record.dirty = true
             records[index] = record
             try store.save(note: record.note, meta: LocalMeta(dirty: true, conflict: record.conflict))
@@ -404,7 +409,7 @@ final class NoteLibrary {
             var pages = record.note.pages ?? []
             pages.append(InkPage(blob: sha))
             record.note.pages = pages
-            record.note.updatedAt = InkhashTime.now()
+            record.note.touch(InkhashTime.now())
             record.dirty = true
             records[index] = record
             try store.save(note: record.note, meta: LocalMeta(dirty: true, conflict: record.conflict))
@@ -440,7 +445,7 @@ final class NoteLibrary {
         pages[pageIndex].elements = elements
         var record = records[index]
         record.note.pages = pages
-        record.note.updatedAt = InkhashTime.now()
+        record.note.touch(InkhashTime.now())
         record.dirty = true
         records[index] = record
         do {
@@ -489,7 +494,7 @@ final class NoteLibrary {
     }
 
     private func persistChange(at index: Int, now: String) {
-        records[index].note.updatedAt = now
+        records[index].note.touch(now)
         records[index].dirty = true
         let record = records[index]
         do {

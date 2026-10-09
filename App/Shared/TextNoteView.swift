@@ -340,13 +340,22 @@ struct ConflictBanner: View {
 
 /// Title and path, top left on the sheet, each a plain line that turns into a field on click.
 /// An empty title hands the title back to the content (ADR 0019); an empty path puts the note
-/// at the root of the workspace. See ADR 0022.
+/// at the root of the workspace. See ADR 0022. The creation date stands on the right (ADR 0048).
 struct NoteHeader: View {
     @Environment(AppModel.self) private var model
     var noteID: UUID
 
     var body: some View {
         let note = model.library.record(noteID)?.note
+        HStack(alignment: .firstTextBaseline, spacing: 12) {
+            titleAndPath(note)
+            if let created = note.flatMap({ InkhashTime.date(from: $0.shownCreatedAt) }) {
+                CreatedDateField(date: created) { model.library.setCreatedAt(id: noteID, date: $0) }
+            }
+        }
+    }
+
+    private func titleAndPath(_ note: Note?) -> some View {
         VStack(alignment: .leading, spacing: 3) {
             InlineField(
                 value: note.map { $0.hasAutomaticTitle ? "" : $0.title } ?? "",
@@ -371,6 +380,56 @@ struct NoteHeader: View {
     }
 }
 
+/// The creation date as a muted line; a click opens a calendar with the time. The date changes
+/// once the popover closes, so picking a day and a time is one change, not one per step.
+struct CreatedDateField: View {
+    var date: Date
+    var commit: (Date) -> Void
+
+    @State private var editing = false
+    @State private var draft = Date()
+
+    private static let locale = Locale(identifier: "de_DE")
+
+    var body: some View {
+        Button {
+            draft = date
+            editing = true
+        } label: {
+            Text(date.formatted(.dateTime.day().month(.abbreviated).year().hour().minute().locale(Self.locale)))
+                .font(.system(size: 12))
+                .foregroundStyle(Ink.muted)
+                .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .help("Erstellungsdatum ändern")
+        .accessibilityLabel("Erstellt")
+        .accessibilityValue(date.formatted(date: .long, time: .shortened))
+        .accessibilityHint("Erstellungsdatum ändern")
+        .popover(isPresented: $editing, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 8) {
+                Text("Erstellt")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundStyle(Ink.muted)
+                DatePicker("Erstellt", selection: $draft, displayedComponents: [.date, .hourAndMinute])
+                    .datePickerStyle(.graphical)
+                    .labelsHidden()
+                    .environment(\.locale, Self.locale)
+            }
+            .padding(14)
+            .presentationCompactAdaptation(.popover)
+            .onDisappear {
+                // Whole seconds, like every stamp in a note: a draft that only differs below that is no change.
+                let picked = Date(timeIntervalSince1970: draft.timeIntervalSince1970.rounded(.down))
+                if abs(picked.timeIntervalSince(date)) >= 1 { commit(picked) }
+            }
+        }
+    }
+}
+
 /// A line of text that becomes a field on click and hands its text back when done.
 struct InlineField: View {
     /// What the field starts with when editing.
@@ -384,12 +443,20 @@ struct InlineField: View {
     /// Typed as is: no automatic capitals or corrections. Capitals only when typed by hand.
     var literal = false
     /// Proposals for what is typed so far; picking one replaces the draft. Nil shows none.
+    /// Arrow keys move through them, Return takes the marked one and keeps the field open.
     var suggestions: ((String) -> [String])? = nil
     var commit: (String) -> Void
 
     @State private var editing = false
     @State private var draft = ""
+    /// The proposal marked with the arrow keys, an index into the current proposals.
+    @State private var marked: Int?
     @FocusState private var focused: Bool
+
+    private var proposals: [String] {
+        guard let suggestions, focused else { return [] }
+        return suggestions(draft)
+    }
 
     var body: some View {
         Group {
@@ -397,7 +464,10 @@ struct InlineField: View {
                 TextField(placeholder, text: $draft)
                     .textFieldStyle(.plain)
                     .focused($focused)
-                    .onSubmit(finish)
+                    .onSubmit(submit)
+                    .onKeyPress(.downArrow) { moveMark(by: 1) }
+                    .onKeyPress(.upArrow) { moveMark(by: -1) }
+                    .onChange(of: draft) { _, _ in marked = nil }
                     #if os(iOS)
                     .textInputAutocapitalization(literal ? .never : .sentences)
                     .autocorrectionDisabled(literal)
@@ -410,20 +480,22 @@ struct InlineField: View {
                         }
                     }
                     .overlay(alignment: .topLeading) {
-                        if let suggestions, focused {
-                            let proposals = suggestions(draft)
-                            if !proposals.isEmpty {
-                                proposalList(proposals)
-                                    .offset(y: 22)
-                            }
+                        let proposals = proposals
+                        if !proposals.isEmpty {
+                            proposalList(proposals)
+                                .offset(y: 22)
                         }
                     }
                     #if os(macOS)
-                    .onExitCommand(perform: { editing = false })
+                    .onExitCommand(perform: {
+                        // Escape first drops the mark, then leaves the field.
+                        if marked != nil { marked = nil } else { editing = false }
+                    })
                     #endif
             } else {
                 Button {
                     draft = value
+                    marked = nil
                     editing = true
                     focused = true
                 } label: {
@@ -445,10 +517,9 @@ struct InlineField: View {
 
     private func proposalList(_ proposals: [String]) -> some View {
         VStack(alignment: .leading, spacing: 0) {
-            ForEach(proposals, id: \.self) { proposal in
+            ForEach(Array(proposals.enumerated()), id: \.element) { index, proposal in
                 Button {
-                    draft = proposal
-                    focused = true
+                    take(proposal)
                 } label: {
                     Text(proposal)
                         .font(.system(size: 13))
@@ -457,14 +528,45 @@ struct InlineField: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                         .padding(.horizontal, 10)
                         .padding(.vertical, 6)
+                        .background(
+                            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                                .fill(index == marked ? Ink.accent.opacity(0.12) : Color.clear)
+                        )
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
+                .accessibilityAddTraits(index == marked ? .isSelected : [])
             }
         }
         .frame(width: 280)
         .padding(4)
         .inkPanel(radius: 12)
+    }
+
+    /// Moves the mark through the proposals, from none to the first and back to none above it.
+    private func moveMark(by step: Int) -> KeyPress.Result {
+        let count = proposals.count
+        guard count > 0 else { return .ignored }
+        let next = (marked ?? -1) + step
+        marked = next < 0 ? nil : min(next, count - 1)
+        return .handled
+    }
+
+    /// Return takes the marked proposal and stays in the field; without a mark it saves.
+    private func submit() {
+        let proposals = proposals
+        if let marked, proposals.indices.contains(marked) {
+            take(proposals[marked])
+        } else {
+            finish()
+        }
+    }
+
+    /// The draft becomes the proposal; the field keeps the focus to go on typing or confirm.
+    private func take(_ proposal: String) {
+        draft = proposal
+        focused = true
+        marked = nil
     }
 
     private func finish() {

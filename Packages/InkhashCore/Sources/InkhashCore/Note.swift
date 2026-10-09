@@ -48,6 +48,9 @@ public struct Note: Equatable, Sendable, Identifiable {
     public var kind: NoteKind
     public var title: String
     public var revision: Int
+    /// Set by the client when the note is made, changeable by hand. Nil on notes from before
+    /// ADR 0048; `shownCreatedAt` falls back to `updatedAt` for them.
+    public var createdAt: String?
     public var updatedAt: String
     public var deletedAt: String?
     public var markdown: String?
@@ -66,6 +69,7 @@ public struct Note: Equatable, Sendable, Identifiable {
         kind: NoteKind,
         title: String = "",
         revision: Int = 0,
+        createdAt: String? = nil,
         updatedAt: String,
         deletedAt: String? = nil,
         markdown: String? = nil,
@@ -81,6 +85,7 @@ public struct Note: Equatable, Sendable, Identifiable {
         self.kind = kind
         self.title = title
         self.revision = revision
+        self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
         self.markdown = markdown
@@ -103,7 +108,28 @@ public struct Note: Equatable, Sendable, Identifiable {
             && folder == other.folder
             && favorite == other.favorite
             && paper == other.paper
+            // A missing date is the fallback, not a different date: a note from before ADR 0048
+            // equals the same note after `touch` wrote the fallback down.
+            && (createdAt == nil || other.createdAt == nil || createdAt == other.createdAt)
             && (deletedAt == nil) == (other.deletedAt == nil)
+    }
+
+    /// When the note was made, as shown. See ADR 0048.
+    public var shownCreatedAt: String { createdAt ?? updatedAt }
+
+    /// Stamps a change. A note from before ADR 0048 first keeps its last change as its creation
+    /// date, so the shown date does not move with every edit.
+    public mutating func touch(_ now: String) {
+        if createdAt == nil { createdAt = updatedAt }
+        updatedAt = now
+    }
+
+    /// Sets the creation date by hand. Returns false if nothing changed.
+    @discardableResult
+    public mutating func setCreatedAt(_ value: String) -> Bool {
+        guard InkhashTime.date(from: value) != nil, value != shownCreatedAt else { return false }
+        createdAt = value
+        return true
     }
 
     public var displayTitle: String {
@@ -123,13 +149,13 @@ public struct Note: Equatable, Sendable, Identifiable {
     }
 
     public static func newText(now: String = InkhashTime.now()) -> Note {
-        var note = Note(kind: .text, updatedAt: now, markdown: "")
+        var note = Note(kind: .text, createdAt: now, updatedAt: now, markdown: "")
         note.applyMarkdown("")
         return note
     }
 
     public static func newInk(page: InkPage, now: String = InkhashTime.now()) -> Note {
-        Note(kind: .ink, updatedAt: now, transcript: "", tags: [], pages: [page])
+        Note(kind: .ink, createdAt: now, updatedAt: now, transcript: "", tags: [], pages: [page])
     }
 
     /// True while the title follows the text. A title someone typed stays put. No flag on the wire:
@@ -275,7 +301,7 @@ public struct Note: Equatable, Sendable, Identifiable {
 
 extension Note: Codable {
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, id, kind, title, revision, updatedAt, deletedAt
+        case schemaVersion, id, kind, title, revision, createdAt, updatedAt, deletedAt
         case markdown, transcript, tags, pages, folder, favorite, paper
     }
 
@@ -290,6 +316,8 @@ extension Note: Codable {
         self.kind = try container.decode(NoteKind.self, forKey: .kind)
         self.title = try container.decode(String.self, forKey: .title)
         self.revision = try container.decode(Int.self, forKey: .revision)
+        // Notes from before ADR 0048 carry none.
+        self.createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         self.updatedAt = try container.decode(String.self, forKey: .updatedAt)
         self.deletedAt = try container.decodeIfPresent(String.self, forKey: .deletedAt)
         self.markdown = try container.decodeIfPresent(String.self, forKey: .markdown)
@@ -310,6 +338,7 @@ extension Note: Codable {
         try container.encode(kind, forKey: .kind)
         try container.encode(title, forKey: .title)
         try container.encode(revision, forKey: .revision)
+        try container.encodeIfPresent(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
         if let deletedAt {
             try container.encode(deletedAt, forKey: .deletedAt)

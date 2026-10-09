@@ -183,42 +183,53 @@ struct SidebarView: View {
             if root.isEmpty {
                 hint(model.tagFilter == nil ? "Noch keine Notizen." : "Keine Notiz mit diesem Schlagwort.")
             }
-            TreeRows(node: root, sidebar: self)
+            // One flat ForEach, not nested DisclosureGroups: those left stale rows on the Mac. See PITFALLS P-056.
+            ForEach(root.rows(isExpanded: model.library.isExpanded)) { row in
+                Group {
+                    switch row.item {
+                    case .folder(let node, let expanded): folderRow(node, expanded: expanded)
+                    case .note(let record): noteRow(record)
+                    }
+                }
+                .padding(.leading, CGFloat(row.depth) * Self.indent)
+            }
         }
         .listStyle(.sidebar)
         .scrollContentBackground(.hidden)
     }
 
-    /// One folder with its subfolders and notes, drawn recursively.
-    private struct TreeRows: View {
-        var node: NoteTree
-        var sidebar: SidebarView
+    private static let indent: CGFloat = 16
 
-        var body: some View {
-            ForEach(node.folders) { child in
-                DisclosureGroup(isExpanded: sidebar.expansion(child.path)) {
-                    TreeRows(node: child, sidebar: sidebar)
-                } label: {
-                    sidebar.folderLabel(child)
-                }
-            }
-            ForEach(node.notes) { record in
-                sidebar.noteRow(record)
+    /// Room for the disclosure chevron, kept on note rows too so labels line up per level.
+    private func chevronSlot(_ expanded: Bool?) -> some View {
+        Group {
+            if let expanded {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundStyle(Ink.muted)
+                    .rotationEffect(.degrees(expanded ? 90 : 0))
             }
         }
+        .frame(width: 12)
     }
 
-    fileprivate func expansion(_ key: String) -> Binding<Bool> {
-        Binding(get: { model.library.isExpanded(key) }, set: { model.library.setExpanded(key, $0) })
-    }
-
-    fileprivate func folderLabel(_ node: NoteTree) -> some View {
-        HStack {
-            Label(Folders.name(of: node.path), systemImage: "folder")
-                .lineLimit(1)
-            Spacer()
-            count(node.notes.count)
+    private func folderRow(_ node: NoteTree, expanded: Bool) -> some View {
+        Button {
+            withAnimation(.easeInOut(duration: 0.15)) {
+                model.library.setExpanded(node.path, !expanded)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                chevronSlot(expanded)
+                Label(Folders.name(of: node.path), systemImage: "folder")
+                    .lineLimit(1)
+                Spacer()
+                count(node.notes.count)
+            }
+            .contentShape(Rectangle())
         }
+        .buttonStyle(.plain)
+        .accessibilityValue(expanded ? "aufgeklappt" : "zugeklappt")
         .contextMenu {
             Button("Textnotiz hier", systemImage: "doc.text") { model.createText(in: node.path) }
             Button("Stiftnotiz hier", systemImage: "pencil.tip") { model.createInk(data: InkDrawing.empty(), in: node.path) }
@@ -246,6 +257,7 @@ struct SidebarView: View {
     fileprivate func noteRow(_ record: NoteRecord) -> some View {
         let note = record.note
         return HStack(spacing: 6) {
+            chevronSlot(nil)
             Image(systemName: note.kind == .ink ? "pencil.tip" : "doc.text")
                 .font(.system(size: 12))
                 .foregroundStyle(Ink.muted)

@@ -334,3 +334,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Nach dem Import eines GoodNotes-Notizbuchs steht dauerhaft „lese Handschrift…“, die App reagiert kaum, die Suche findet nichts. iPad und iPhone.
 **Ursache.** Beim Öffnen startet für jede ungelesene Seite eine Erkennung. `PKDrawing.image` und Vision blockieren ihren Thread synchron, liefen aber auf dem kooperativen Pool von Swift Concurrency. Bei zehn Seiten waren alle Threads des Pools belegt und warteten aufeinander (PencilKit-Metal, Vision-Queue): Deadlock, danach lief keine Task der App mehr.
 **Wache.** `HandwritingRecognizer` rendert und liest nur auf seiner eigenen seriellen `DispatchQueue`, eine Seite nach der anderen, und kehrt per Continuation zurück. Blockierende Framework-Aufrufe nie in `Task`/`Task.detached` direkt ausführen. Kein automatischer Test; im Simulator mit einem Notizbuch mit vielen Seiten prüfen.
+
+## P-056 · Geisterzeilen im Ordnerbaum
+
+**Symptom.** Auf dem Mac stehen in der Seitenleiste Notizen, die dort nicht hingehören: nach dem Wechsel in einen leeren Workspace unter „Noch keine Notizen.“, oder eine Zeile liegt über einem Ordner und beide Titel überlagern sich. Ein Neustart behebt es; die Daten sind heil.
+**Ursache.** Der Baum war aus verschachtelten `DisclosureGroup`s in einer `List` gebaut. Auf macOS steckt dahinter ein `NSOutlineView`, und wenn sich die Kinder eines aufgeklappten Ordners zusammen mit der übrigen Struktur ändern (Workspace-Wechsel, Notiz in anderen Ordner, neue Notiz), entfernt SwiftUI alte Zeilen nicht immer.
+**Wache.** `NoteTree.rows(isExpanded:)` macht den Baum zu flachen Zeilen mit Tiefe; die Seitenleiste zeichnet sie in einem einzigen `ForEach` und klappt Ordner selbst auf. Test `NoteListingTests.testTreeRowsAreFlatAndSkipCollapsedFolders`. Keine verschachtelten `DisclosureGroup`s oder `OutlineGroup`s in der Seitenleiste.
