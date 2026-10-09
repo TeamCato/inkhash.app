@@ -328,3 +328,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Auf dem iPad zeigt die Sprechblase von „Notiz löschen?“, „Server entfernen?“ und ähnlichen Dialogen auf die Mitte der Seitenleiste oder des Formulars, nicht auf die Zeile oder den Knopf, der sie geöffnet hat.
 **Ursache.** `confirmationDialog` wird auf regulärer Breite ein Popover und zeigt auf die View, an der der Modifier hängt. Hängt er am ganzen Container, zeigt er auf dessen Mitte.
 **Wache.** Jeden `confirmationDialog` an die auslösende Zeile oder den Knopf hängen. Bei Listen bindet `isPresented` an die ID der Zeile (`pendingDelete == id`). Kein automatischer Test; auf dem iPad ausprobieren.
+
+## P-055 · Importiertes Notizbuch friert die App ein
+
+**Symptom.** Nach dem Import eines GoodNotes-Notizbuchs steht dauerhaft „lese Handschrift…“, die App reagiert kaum, die Suche findet nichts. iPad und iPhone.
+**Ursache.** Beim Öffnen startet für jede ungelesene Seite eine Erkennung. `PKDrawing.image` und Vision blockieren ihren Thread synchron, liefen aber auf dem kooperativen Pool von Swift Concurrency. Bei zehn Seiten waren alle Threads des Pools belegt und warteten aufeinander (PencilKit-Metal, Vision-Queue): Deadlock, danach lief keine Task der App mehr.
+**Wache.** `HandwritingRecognizer` rendert und liest nur auf seiner eigenen seriellen `DispatchQueue`, eine Seite nach der anderen, und kehrt per Continuation zurück. Blockierende Framework-Aufrufe nie in `Task`/`Task.detached` direkt ausführen. Kein automatischer Test; im Simulator mit einem Notizbuch mit vielen Seiten prüfen.

@@ -21,21 +21,35 @@ struct PageReading: Equatable {
 }
 
 enum HandwritingRecognizer {
+    /// Rendering and Vision block their thread. They run one page at a time on this queue, never on
+    /// the Swift concurrency pool: a notebook opened with many unread pages filled the pool with
+    /// waiting threads and froze every task of the app. See P-055.
+    private static let queue = DispatchQueue(label: "inkhash.handwriting", qos: .userInitiated)
+
     /// Reads pen and marker strokes apart: the transcript starts with what the pens wrote, so the
     /// automatic title never comes from a highlight. Marker text follows for search. See ADR 0034.
     static func recognize(drawing: PKDrawing, width: Double, height: Double) async -> PageReading {
+        let box = DrawingBox(drawing: drawing)
+        return await withCheckedContinuation { continuation in
+            queue.async {
+                continuation.resume(returning: readSplit(box.drawing, width: width, height: height))
+            }
+        }
+    }
+
+    private static func readSplit(_ drawing: PKDrawing, width: Double, height: Double) -> PageReading {
         let isMarker: (PKStroke) -> Bool = { $0.ink.inkType == .marker }
         guard drawing.strokes.contains(where: isMarker) else {
-            return await read(drawing, width: width, height: height)
+            return read(drawing, width: width, height: height)
         }
-        let pens = await read(PKDrawing(strokes: drawing.strokes.filter { !isMarker($0) }), width: width, height: height)
-        let markers = await read(PKDrawing(strokes: drawing.strokes.filter(isMarker)), width: width, height: height)
+        let pens = read(PKDrawing(strokes: drawing.strokes.filter { !isMarker($0) }), width: width, height: height)
+        let markers = read(PKDrawing(strokes: drawing.strokes.filter(isMarker)), width: width, height: height)
         let transcript = [pens.transcript, markers.transcript].filter { !$0.isEmpty }.joined(separator: "\n")
         return PageReading(transcript: transcript, tags: Hashtags.unique(pens.tags + markers.tags))
     }
 
     /// Renders the drawing and reads it on device. Language correction stays off so unusual tags survive.
-    private static func read(_ drawing: PKDrawing, width: Double, height: Double) async -> PageReading {
+    private static func read(_ drawing: PKDrawing, width: Double, height: Double) -> PageReading {
         if drawing.strokes.isEmpty {
             return PageReading(transcript: "", tags: [])
         }
@@ -43,10 +57,7 @@ enum HandwritingRecognizer {
         guard let image = rendered(drawing, rect: rect) else {
             return PageReading(transcript: "", tags: [])
         }
-        let box = ImageBox(image: image)
-        let words = await Task.detached(priority: .userInitiated) {
-            observations(in: box.image)
-        }.value
+        let words = observations(in: image)
         let transcript = Hashtags.transcript(from: words)
         let tags = Hashtags.inObservations(words)
         if transcript.isEmpty, tags.isEmpty {
@@ -103,6 +114,6 @@ enum HandwritingRecognizer {
     }
 }
 
-private struct ImageBox: @unchecked Sendable {
-    var image: CGImage
+private struct DrawingBox: @unchecked Sendable {
+    var drawing: PKDrawing
 }
