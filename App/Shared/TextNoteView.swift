@@ -316,28 +316,6 @@ struct SlashMenu: View {
     }
 }
 
-struct ConflictBanner: View {
-    @Environment(AppModel.self) private var model
-    var noteID: UUID
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Auf dem Server liegt eine andere Fassung.")
-                .font(.system(size: 14, design: .serif))
-            HStack {
-                Button("Meine behalten") { model.keepMine(id: noteID) }
-                    .inkButton()
-                Button("Server nehmen") { model.takeServer(id: noteID) }
-                    .inkButton()
-            }
-        }
-        .padding(14)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .inkSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.bottom, 16)
-    }
-}
-
 /// Title and path, top left on the sheet, each a plain line that turns into a field on click.
 /// An empty title hands the title back to the content (ADR 0019); an empty path puts the note
 /// at the root of the workspace. See ADR 0022. The creation date stands on the right (ADR 0048).

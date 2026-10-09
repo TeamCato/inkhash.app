@@ -200,12 +200,9 @@ final class AppModel {
         dropMissingSelection()
     }
 
-    func keepMine(id: UUID) {
-        if library.keepMine(id: id) { editorEpoch += 1 }
-    }
-
-    func takeServer(id: UUID) {
-        if library.takeServer(id: id) { editorEpoch += 1 }
+    /// Ends a conflict. The open editor starts over from the kept version. See ADR 0049.
+    func resolveConflict(id: UUID, choice: ConflictChoice) {
+        if library.resolveConflict(id: id, choice: choice) != nil { editorEpoch += 1 }
     }
 
     /// A new note lands next to the selected one, or in `folder` when asked for one there.

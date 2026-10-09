@@ -22,7 +22,7 @@ Diese Wörter heißen im Code so.
 | displayTitle | Titel für die Liste. Bei leerem Handschrift-Titel die erste Zeile der Abschrift. |
 | baseRevision | Die Revision, die das Gerät beim Schreiben noch für aktuell hielt. |
 | dirty | Lokal geändert, noch nicht sauber bestätigt. |
-| conflict | Server und Gerät haben beide geschrieben. Beide Fassungen bleiben liegen. |
+| conflict | Server und Gerät haben beide geschrieben. Beide Fassungen bleiben liegen, bis man sie vergleicht und eine, die andere oder beide behält (`NoteConflict`, ADR 0049). |
 | Bibliothek | Alle Notizen eines Workspace auf einem Gerät. Gehört keinem Account, gleicht höchstens mit einem Server-Workspace ab. |
 | Workspace | Eigene Bibliothek mit eigenen Ordnern, Schlagwörtern und Suche, z. B. Privat und Arbeit. Lokal oder mit einem Server-Workspace verbunden (ADR 0020). Name, Symbol und eigenes Bild (`icon`) sind sein Aussehen; Aussehen und Reihenfolge gleicht der Server ab, wenn der Workspace verbunden ist (ADR 0043). |
 | Aussehen | Name, Symbol und Bild eines Workspace (`WorkspaceLook`). Die letzte Änderung gewinnt (ADR 0043). |

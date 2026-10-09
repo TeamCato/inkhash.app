@@ -210,8 +210,16 @@ final class NoteLibrary {
     }
 
     func emptyTrash(syncs: Bool) {
+        var failed = 0
         for record in records where Self.purgeable(record, syncs: syncs) {
-            try? store.remove(id: record.id)
+            do {
+                try store.remove(id: record.id)
+            } catch {
+                failed += 1
+            }
+        }
+        if failed > 0 {
+            status.message = failed == 1 ? "Eine Notiz ließ sich nicht entfernen." : "\(failed) Notizen ließen sich nicht entfernen."
         }
         reload()
     }
@@ -220,8 +228,12 @@ final class NoteLibrary {
     func discard(_ id: UUID) {
         guard let record = record(id) else { return }
         if record.note.revision == 0 {
-            try? store.remove(id: id)
-            records.removeAll { $0.id == id }
+            do {
+                try store.remove(id: id)
+                records.removeAll { $0.id == id }
+            } catch {
+                status.message = "Die Notiz ließ sich nicht entfernen."
+            }
         } else {
             moveToTrash(id)
         }
@@ -345,17 +357,10 @@ final class NoteLibrary {
 
     // MARK: Editing
 
+    /// Typing in a note in conflict keeps the conflict: the server's version stays until someone
+    /// chooses. See ADR 0049.
     func updateMarkdown(id: UUID, markdown: String) {
-        guard let index = index(of: id) else { return }
-        var record = records[index]
-        guard record.note.applyMarkdown(markdown) else { return }
-        record.note.touch(InkhashTime.now())
-        record.dirty = true
-        record.conflict = false
-        records[index] = record
-        try? store.save(note: record.note, meta: LocalMeta(dirty: true, conflict: false))
-        try? store.clearConflict(id: id)
-        changed()
+        change(id) { note in note.applyMarkdown(markdown) }
     }
 
     /// Sets a title by hand for any note. An empty title goes back to the automatic one (ADR 0019).
@@ -458,27 +463,40 @@ final class NoteLibrary {
 
     // MARK: Conflicts
 
-    /// Keeps this device's version on top of the server's revision. True if there was a conflict.
-    @discardableResult
-    func keepMine(id: UUID) -> Bool {
-        guard let index = index(of: id), let server = try? store.conflictNote(id: id) else { return false }
-        let resolved = keepingMine(local: records[index].note, server: server)
-        records[index] = NoteRecord(note: resolved.0, meta: resolved.1)
-        try? store.save(note: resolved.0, meta: resolved.1)
-        try? store.clearConflict(id: id)
-        changed()
-        return true
+    /// Both versions of a note in conflict, or nil if there is none.
+    func conflict(_ id: UUID) -> NoteConflict? {
+        guard let record = record(id), record.conflict else { return nil }
+        do {
+            guard let server = try store.conflictNote(id: id) else { return nil }
+            return NoteConflict(local: record.note, server: server)
+        } catch {
+            status.message = "Die Fassung vom Server ließ sich nicht lesen."
+            return nil
+        }
     }
 
-    /// Takes the server's version. True if there was a conflict.
+    /// Ends a conflict the way `choice` says. Returns the id of the note to show afterwards:
+    /// the kept one, or for `.both` still the kept one; the copy appears next to it. Nil if it failed.
+    /// See ADR 0049.
     @discardableResult
-    func takeServer(id: UUID) -> Bool {
-        guard let server = try? store.conflictNote(id: id), let index = index(of: id) else { return false }
-        let resolved = takingServer(server)
-        records[index] = NoteRecord(note: resolved.0, meta: resolved.1)
-        try? store.save(note: resolved.0, meta: resolved.1)
-        try? store.clearConflict(id: id)
-        return true
+    func resolveConflict(id: UUID, choice: ConflictChoice) -> UUID? {
+        guard let conflict = conflict(id),
+              let resolution = conflict.resolve(choice, now: InkhashTime.now()) else { return nil }
+        do {
+            if let copy = resolution.copy {
+                try store.save(note: copy.note, meta: copy.meta)
+                set(NoteRecord(note: copy.note, meta: copy.meta))
+            }
+            try store.save(note: resolution.kept.note, meta: resolution.kept.meta)
+            try store.clearConflict(id: id)
+        } catch {
+            status.message = "Die Entscheidung ließ sich nicht sichern."
+            reload()
+            return nil
+        }
+        set(NoteRecord(note: resolution.kept.note, meta: resolution.kept.meta))
+        if resolution.kept.meta.dirty || resolution.copy != nil { changed() }
+        return id
     }
 
     // MARK: Private
@@ -506,7 +524,11 @@ final class NoteLibrary {
 
     private func upsert(_ note: Note, dirty: Bool, conflict: Bool) {
         set(NoteRecord(note: note, dirty: dirty, conflict: conflict))
-        try? store.save(note: note, meta: LocalMeta(dirty: dirty, conflict: conflict))
+        do {
+            try store.save(note: note, meta: LocalMeta(dirty: dirty, conflict: conflict))
+        } catch {
+            status.message = "Die Notiz ließ sich nicht sichern."
+        }
     }
 
     private func set(_ record: NoteRecord) {

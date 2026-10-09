@@ -93,16 +93,6 @@ public func decide(local: Note, dirty: Bool, server: Note) -> SyncDecision {
     return dirty ? .conflict : .takeServer
 }
 
-public func keepingMine(local: Note, server: Note) -> (Note, LocalMeta) {
-    var note = local
-    note.revision = server.revision
-    return (note, LocalMeta(dirty: true, conflict: false))
-}
-
-public func takingServer(_ server: Note) -> (Note, LocalMeta) {
-    (server, .clean)
-}
-
 public protocol NoteTransport: Sendable {
     func changes(after cursor: Int) async throws -> ChangePage
     func fetchNote(id: UUID) async throws -> Note

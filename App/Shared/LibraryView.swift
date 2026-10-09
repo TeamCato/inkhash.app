@@ -103,9 +103,9 @@ struct TrashedNoteView: View {
                     Text("Auf einem anderen Gerät wurde sie inzwischen geändert.")
                         .font(.system(size: 14, design: .serif))
                     HStack {
-                        Button("Trotzdem löschen") { model.keepMine(id: record.id) }
+                        Button("Trotzdem löschen") { model.resolveConflict(id: record.id, choice: .mine) }
                             .inkButton()
-                        Button("Geänderte Fassung holen") { model.takeServer(id: record.id) }
+                        Button("Geänderte Fassung holen") { model.resolveConflict(id: record.id, choice: .server) }
                             .inkButton()
                     }
                 }

@@ -340,3 +340,10 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Auf dem Mac stehen in der Seitenleiste Notizen, die dort nicht hingehören: nach dem Wechsel in einen leeren Workspace unter „Noch keine Notizen.“, oder eine Zeile liegt über einem Ordner und beide Titel überlagern sich. Ein Neustart behebt es; die Daten sind heil.
 **Ursache.** Der Baum war aus verschachtelten `DisclosureGroup`s in einer `List` gebaut. Auf macOS steckt dahinter ein `NSOutlineView`, und wenn sich die Kinder eines aufgeklappten Ordners zusammen mit der übrigen Struktur ändern (Workspace-Wechsel, Notiz in anderen Ordner, neue Notiz), entfernt SwiftUI alte Zeilen nicht immer.
 **Wache.** `NoteTree.rows(isExpanded:)` macht den Baum zu flachen Zeilen mit Tiefe; die Seitenleiste zeichnet sie in einem einzigen `ForEach` und klappt Ordner selbst auf. Test `NoteListingTests.testTreeRowsAreFlatAndSkipCollapsedFolders`. Keine verschachtelten `DisclosureGroup`s oder `OutlineGroup`s in der Seitenleiste.
+
+## P-057 · Tippen löst den Konflikt still auf
+
+**Symptom.** In einer Textnotiz mit Konflikt verschwindet der Hinweis, sobald man tippt. Beim nächsten Abgleich kommt er wieder, und die Fassung des Servers war zwischendurch nicht mehr zu sehen.
+**Ursache.** `NoteLibrary.updateMarkdown` setzte `conflict = false` und löschte die gespeicherte Fassung des Servers, ohne die Revision des Servers zu übernehmen. Der nächste PUT lief mit der alten `baseRevision` wieder in 409.
+**Wache.** Text geht wie jede andere Änderung durch `NoteLibrary.change`, das den Konflikt stehen lässt. Gelöst wird nur über `resolveConflict` (ADR 0049). Test `NoteLibraryTests.testTypingKeepsTheConflict`.
+
