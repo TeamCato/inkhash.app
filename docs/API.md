@@ -80,7 +80,7 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
 
 `folder` ist ein Pfad aus Segmenten mit `/`, jedes 1–60 Zeichen ohne Rand-Leerzeichen, insgesamt höchstens 200; leer heißt kein Ordner. `favorite` ist ein Boolean. Fehlen beide, gelten `""` und `false`. Gespeicherte Notizen von vorher werden so ausgeliefert. Beide zählen zum Inhalt für den Retry-Vergleich.
 
-`paper` ist optional und gilt für die ganze Notiz (ADR 0042): `color` als `#RRGGBB` (der Server speichert groß) und `pattern` aus `blank`, `grid`, `lines`, `dots`; fehlt `pattern`, gilt `blank`. Eine Textnotiz hat nur `blank`. Fehlt `paper` oder ist es `null`, gilt das Standardpapier, und der Server lässt den Schlüssel weg. Der Server prüft nur die Form, nicht die Palette der App. Ein ungültiges Papier ergibt 400 `bad-request` mit `reason: "paper"`. `paper` zählt zum Inhalt für den Retry-Vergleich.
+`paper` ist optional und gilt für die ganze Notiz (ADR 0042): `color` als `#RRGGBB` (der Server speichert groß) und `pattern` aus `blank`, `grid`, `lines`, `dots`; fehlt `pattern`, gilt `blank`. Eine Textnotiz hat nur `blank`. `spacing` ist optional (ADR 0047): der Abstand des Musters als ganze Zahl von 20 bis 64 Seitenpunkten, nur bei einem anderen Muster als `blank`. Fehlt es, gilt der Standard des Musters, und der Server lässt den Schlüssel weg. Fehlt `paper` oder ist es `null`, gilt das Standardpapier, und der Server lässt den Schlüssel weg. Der Server prüft nur die Form, nicht die Palette der App. Ein ungültiges Papier ergibt 400 `bad-request` mit `reason: "paper"`. `paper` zählt zum Inhalt für den Retry-Vergleich.
 
 `kind: "ink"` hat `markdown: null`, `transcript` als String und `pages` als Liste. Eine Seite:
 

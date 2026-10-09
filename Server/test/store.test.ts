@@ -449,6 +449,31 @@ test("paper is checked, stored and part of the retry comparison", () => {
     const inkId = "11111111-2222-4333-8444-555555555555";
     const [, lined] = store.putNote(inkId, 0, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines" } });
     assert.deepEqual(lined.paper, { color: "#FDFDFC", pattern: "lines" });
+
+    // Spacing (ADR 0047): a whole number in range, only with a pattern, and part of the content.
+    const otherInk = "22222222-2222-4333-8444-555555555555";
+    const inkReason = (paper: unknown) => {
+      try {
+        store.putNote(otherInk, 0, { ...inkNote(otherInk), paper });
+      } catch (error) {
+        return error instanceof StoreError ? error.extra.reason : "other";
+      }
+      return "stored";
+    };
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "grid", spacing: 19 }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "grid", spacing: 65 }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "grid", spacing: 30.5 }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "grid", spacing: "40" }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "blank", spacing: 40 }), "paper");
+    assert.equal(reason({ ...textNote(noteId), paper: { color: "#FAF5E8", spacing: 40 } }), "paper");
+
+    const [, wide] = store.putNote(inkId, 1, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 48 } });
+    assert.deepEqual(wide.paper, { color: "#FDFDFC", pattern: "lines", spacing: 48 });
+    assert.deepEqual(store.getNote(inkId).paper, { color: "#FDFDFC", pattern: "lines", spacing: 48 });
+    assert.throws(
+      () => store.putNote(inkId, 1, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 40 } }),
+      Conflict,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }

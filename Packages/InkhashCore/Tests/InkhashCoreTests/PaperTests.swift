@@ -42,6 +42,38 @@ final class PaperTests: XCTestCase {
         XCTAssertNil(Paper(color: "blau").components)
     }
 
+    func testSpacingIsNormalizedAndRoundTrips() throws {
+        XCTAssertNil(Paper(color: "#FDFDFC", pattern: .grid, spacing: 32).spacing, "the default is not stored")
+        XCTAssertNil(Paper(color: "#FDFDFC", pattern: .blank, spacing: 40).spacing, "blank paper has no spacing")
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .lines, spacing: 4).spacing, 20)
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .dots, spacing: 900).spacing, 64)
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .lines).shownSpacing, 36)
+
+        let wide = Paper(color: "#FDFDFC", pattern: .dots, spacing: 48)
+        XCTAssertEqual(wide.shownSpacing, 48)
+        let plain = String(decoding: try InkhashJSON.encode(Paper(color: "#FDFDFC", pattern: .dots)), as: UTF8.self)
+        XCTAssertFalse(plain.contains("spacing"), "the default spacing stays off the wire")
+        XCTAssertEqual(try InkhashJSON.decode(Paper.self, from: try InkhashJSON.encode(wide)), wide)
+
+        let odd = ##"{"color":"#FDFDFC","pattern":"grid","spacing":500}"##
+        XCTAssertNil(try InkhashJSON.decode(Paper.self, from: Data(odd.utf8)).spacing, "out of range reads as default")
+        let fraction = ##"{"color":"#FDFDFC","pattern":"grid","spacing":30.5}"##
+        XCTAssertNil(try InkhashJSON.decode(Paper.self, from: Data(fraction.utf8)).spacing)
+    }
+
+    func testSpacingCountsAsContentAndTextNotesDropIt() {
+        let (note, _) = inkNote(pages: 1)
+        var dotted = note
+        XCTAssertTrue(dotted.setPaper(Paper(color: "#FDFDFC", pattern: .dots)))
+        var wide = dotted
+        XCTAssertTrue(wide.setPaper(Paper(color: "#FDFDFC", pattern: .dots, spacing: 48)))
+        XCTAssertFalse(wide.sameContent(as: dotted))
+
+        var text = Note.newText(now: "2026-10-09T10:00:00Z")
+        XCTAssertTrue(text.setPaper(Paper(color: "#FAF5E8", pattern: .lines, spacing: 48)))
+        XCTAssertEqual(text.paper, Paper(color: "#FAF5E8"))
+    }
+
     func testReorderAndMoveFollowTranscriptAndTags() {
         var (note, pages) = inkNote(pages: 3)
         XCTAssertTrue(note.reorderPages([pages[2].id, pages[0].id, pages[1].id]))

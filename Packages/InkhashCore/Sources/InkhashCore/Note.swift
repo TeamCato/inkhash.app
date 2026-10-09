@@ -212,7 +212,8 @@ public struct Note: Equatable, Sendable, Identifiable {
     @discardableResult
     public mutating func setPaper(_ next: Paper) -> Bool {
         var next = next
-        if kind == .text { next.pattern = .blank }
+        // A text note has only a colour, so neither pattern nor spacing.
+        if kind == .text { next = Paper(color: next.color) }
         let stored: Paper? = next == .standard ? nil : next
         guard stored != paper else { return false }
         paper = stored

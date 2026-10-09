@@ -1,6 +1,6 @@
 # 0042 Papier wählen, Seiten ordnen
 
-Status: angenommen
+Status: angenommen, Abstand geändert durch 0047
 
 Ergänzt 0018 (die Notiz ist der Bildschirm) und 0029 (Papier statt Glas).
 

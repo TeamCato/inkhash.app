@@ -111,11 +111,16 @@ export interface Element {
   link?: string;
 }
 
-/** Colour and pattern under the writing, for the whole note. See ADR 0042. */
+/** Colour and pattern under the writing, for the whole note. See ADR 0042 and 0047. */
 export interface Paper {
   color: string;
   pattern: "blank" | "grid" | "lines" | "dots";
+  /** Distance between lines or dots in page points. Absent means the pattern's default. */
+  spacing?: number;
 }
+
+const SPACING_MIN = 20;
+const SPACING_MAX = 64;
 
 export interface Note {
   schemaVersion: 1;
@@ -272,14 +277,19 @@ function link(value: unknown): string {
   return value;
 }
 
-/** A text note has a colour only; its pattern is always blank. */
+/** A text note has a colour only; its pattern is always blank. Blank paper has no spacing. */
 function paperOf(value: unknown, kind: Note["kind"]): Paper {
   const bad = () => new StoreError(400, "bad-request", { reason: "paper" });
   if (!isRecord(value) || typeof value.color !== "string" || !COLOR_RE.test(value.color)) throw bad();
   const pattern = value.pattern ?? "blank";
   if (pattern !== "blank" && pattern !== "grid" && pattern !== "lines" && pattern !== "dots") throw bad();
   if (kind === "text" && pattern !== "blank") throw bad();
-  return { color: value.color.toUpperCase(), pattern };
+  const spacing = value.spacing ?? undefined;
+  if (spacing !== undefined) {
+    if (!Number.isInteger(spacing) || (spacing as number) < SPACING_MIN || (spacing as number) > SPACING_MAX) throw bad();
+    if (pattern === "blank") throw bad();
+  }
+  return { color: value.color.toUpperCase(), pattern, ...(spacing !== undefined ? { spacing: spacing as number } : {}) };
 }
 
 const UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";

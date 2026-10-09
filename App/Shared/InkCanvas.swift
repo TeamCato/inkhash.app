@@ -260,7 +260,7 @@ struct InkNoteView: View {
                     pageID: page.id,
                     pageWidth: page.width,
                     pageHeight: page.height,
-                    paper: current.shownPaper.pattern,
+                    paper: current.shownPaper,
                     scale: scale,
                     // An iPhone has no pencil: the finger always draws, two fingers scroll. See ADR 0026.
                     fingerDrawing: tools.fingerDraws || Device.isPhone,
@@ -344,7 +344,7 @@ struct InkPageCanvas: UIViewRepresentable {
     var pageWidth: Double
     var pageHeight: Double
     /// Lines, grid or dots under everything, see ADR 0042. The colour is the view's background.
-    var paper: PaperPattern
+    var paper: Paper
     /// Screen points per page point. Strokes and elements stay in page coordinates, see ADR 0018.
     var scale: CGFloat
     var fingerDrawing: Bool
@@ -1212,7 +1212,7 @@ struct InkPageCanvas: View {
     var pageID: UUID
     var pageWidth: Double
     var pageHeight: Double
-    var paper: PaperPattern
+    var paper: Paper
     var scale: CGFloat
     var fingerDrawing: Bool
     var tools: InkToolState
@@ -1226,7 +1226,7 @@ struct InkPageCanvas: View {
         let size = CGSize(width: pageWidth, height: pageHeight)
         ScrollView(.vertical) {
             ZStack(alignment: .topLeading) {
-                PaperPatternCanvas(pattern: paper, pageWidth: pageWidth, scale: scale)
+                PaperPatternCanvas(paper: paper, pageWidth: pageWidth, scale: scale)
                     .frame(width: pageWidth * scale, height: pageHeight * scale)
                 if let image = PageElementsImage.cgImage(elements: elements, size: size, scale: 2, load: loadBlob) {
                     Image(decorative: image, scale: 2)

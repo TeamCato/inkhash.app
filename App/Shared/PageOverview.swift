@@ -165,7 +165,7 @@ struct PageThumbnail: View {
                 }
             }
             .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
-            .task(id: "\(page.id)-\(page.blob)-\(paper.color)-\(paper.pattern.rawValue)") {
+            .task(id: "\(page.id)-\(page.blob)-\(paper.color)-\(paper.pattern.rawValue)-\(paper.shownSpacing)") {
                 let rect = CGRect(x: 0, y: 0, width: page.width, height: min(page.height, page.width * Self.aspect))
                 image = PageImage.render(page, rect: rect, scale: 380 / page.width, paper: paper) { model.library.drawingData(for: $0) }
             }
