@@ -56,16 +56,16 @@ final class EditorEngine {
     private(set) var slashOpen = false
     /// Style of the empty last paragraph. It has no character to carry its attributes.
     private var trailing = BlockStyle.paragraph
-    private var programmatic = false
+    var programmatic = false
     private var pendingRange: NSRange?
     /// The open `/` token, from the slash to the cursor.
     private var slashRange: NSRange?
     /// The token Escape closed, as location and text, so it stays closed until it changes.
     private var suppressedSlash: String?
     /// Width the table tab stops were laid out for.
-    private var tableWidth: CGFloat = 0
+    var tableWidth: CGFloat = 0
     private(set) var noteLinkOpen = false
-    private var suppressedNoteQuery: String?
+    var suppressedNoteQuery: String?
     /// Set when the text view inserts a newline itself; styles of the two halves follow in `didChange`.
     private var pendingNewline: (location: Int, atStart: Bool, upper: BlockStyle, below: BlockStyle)?
 
@@ -84,7 +84,7 @@ final class EditorEngine {
         applyTypingForCursor()
     }
 
-    private var ns: NSString { host.storage.string as NSString }
+    var ns: NSString { host.storage.string as NSString }
 
     // MARK: Paragraphs
 
@@ -118,7 +118,7 @@ final class EditorEngine {
         return NSMaxRange(paragraph) == ns.length && ns.character(at: ns.length - 1) != 0x0A ? trailing : .paragraph
     }
 
-    private func paragraphs(in range: NSRange) -> [NSRange] {
+    func paragraphs(in range: NSRange) -> [NSRange] {
         var result: [NSRange] = []
         var location = paragraph(at: range.location).location
         let end = NSMaxRange(range)
@@ -246,7 +246,7 @@ final class EditorEngine {
     /// Return. Continues lists, ends them on an empty item, leaves headings for a paragraph.
     /// Returns true when the text view should insert the newline itself. Letting it do so keeps the
     /// keyboard's own idea of the text intact; an inserted newline behind its back scrambles autocorrect.
-    private func newline(replacing range: NSRange) -> Bool {
+    func newline(replacing range: NSRange) -> Bool {
         if slashOpen {
             session?.applySlash()
             return false
@@ -435,7 +435,7 @@ final class EditorEngine {
         updateState()
     }
 
-    private static func key(_ token: NSRange, _ text: String) -> String {
+    static func key(_ token: NSRange, _ text: String) -> String {
         "\(token.location):\(text)"
     }
 
@@ -521,82 +521,9 @@ final class EditorEngine {
         return ceil(max(used, 24)) + host.containerOrigin.y * 2 + 4
     }
 
-    // MARK: Excerpts
-
-    /// True if the paragraph holds an excerpt attachment. See ADR 0032.
-    func hasExcerpt(_ paragraph: NSRange) -> Bool {
-        excerptAttachment(in: paragraph) != nil
-    }
-
-    private func excerptAttachment(in paragraph: NSRange) -> ExcerptAttachment? {
-        guard paragraph.length > 0, NSMaxRange(paragraph) <= host.storage.length else { return nil }
-        var found: ExcerptAttachment?
-        host.storage.enumerateAttribute(.attachment, in: paragraph) { value, _, stop in
-            if let attachment = value as? ExcerptAttachment { found = attachment; stop.pointee = true }
-        }
-        return found
-    }
-
-    /// The excerpt drawn under `point` (text view coordinates), if any.
-    func excerpt(at point: CGPoint) -> ExcerptTarget? {
-        guard ns.length > 0 else { return nil }
-        let local = CGPoint(x: point.x - host.containerOrigin.x, y: point.y - host.containerOrigin.y)
-        let layout = host.markers
-        layout.ensureLayout(for: host.container)
-        let glyph = layout.glyphIndex(for: local, in: host.container)
-        let character = layout.characterIndexForGlyph(at: glyph)
-        guard character < ns.length,
-              let attachment = host.storage.attribute(.attachment, at: character, effectiveRange: nil) as? ExcerptAttachment else { return nil }
-        let box = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: host.container)
-        return box.contains(local) ? attachment.target : nil
-    }
-
-    /// Puts an excerpt where the cursor stands, in a paragraph of its own. See ADR 0032.
-    func insertExcerpt(_ excerpt: ExcerptTarget, label: String) {
-        let line = MarkdownCodec.serialize([MarkdownCodec.excerptBlock(excerpt, label: label)])
-        insertMarkdown(line.trimmingCharacters(in: .newlines), replacing: host.selection)
-        host.focus()
-        updateState()
-    }
-
-    /// A single pasted `![label](excerpt)` becomes an excerpt, not text with a link.
-    private func isExcerptLine(_ text: String) -> Bool {
-        let blocks = MarkdownCodec.parse(text.trimmingCharacters(in: .whitespacesAndNewlines))
-        return blocks.count == 1 && MarkdownCodec.excerpt(in: blocks[0]) != nil
-    }
-
-    /// Text typed into an excerpt's paragraph goes into a new paragraph before or after it.
-    private func insertBesideExcerpt(_ text: String, at location: Int) -> Bool {
-        let current = paragraph(at: location)
-        guard style(of: current).type == .excerpt, hasExcerpt(current) else { return false }
-        let contentRange = content(of: current)
-        let plain = NoteDocument.typingAttributes(.paragraph)
-        let insertion: NSAttributedString
-        let at: Int
-        let cursor: Int
-        if location <= contentRange.location {
-            insertion = NSAttributedString(string: text + "\n", attributes: plain)
-            at = contentRange.location
-            cursor = at + (text as NSString).length
-        } else {
-            let built = NSMutableAttributedString(string: "\n", attributes: NoteDocument.typingAttributes(BlockStyle(type: .excerpt)))
-            built.append(NSAttributedString(string: text, attributes: plain))
-            insertion = built
-            at = NSMaxRange(contentRange)
-            cursor = at + built.length
-        }
-        let target = NSRange(location: at, length: 0)
-        edit(target, replacement: insertion.string) { host.storage.replaceCharacters(in: target, with: insertion) }
-        host.selection = NSRange(location: cursor, length: 0)
-        restyle(NSRange(location: at, length: insertion.length))
-        applyTypingForCursor()
-        publish()
-        return true
-    }
-
     // MARK: Internals
 
-    private func edit(_ range: NSRange, replacement: String?, _ body: () -> Void) {
+    func edit(_ range: NSRange, replacement: String?, _ body: () -> Void) {
         programmatic = true
         host.performEdit(range, replacement: replacement, body)
         programmatic = false
@@ -619,7 +546,7 @@ final class EditorEngine {
     }
 
     /// Pasted or dictated text with line breaks is read as Markdown.
-    private func insertMarkdown(_ text: String, replacing range: NSRange) {
+    func insertMarkdown(_ text: String, replacing range: NSRange) {
         let normalized = text.replacingOccurrences(of: "\r\n", with: "\n").replacingOccurrences(of: "\r", with: "\n")
         let blocks = MarkdownCodec.parse(normalized)
         let inserted: NSAttributedString
@@ -657,6 +584,10 @@ final class EditorEngine {
         guard currentStyle.type != .code, currentStyle.type != .excerpt else { return false }
         let contentRange = content(of: current)
         let text = host.storage.attributedSubstring(from: contentRange)
+        // Backticks alone are a code fence being typed, not empty inline code. See P-059.
+        if currentStyle.type == .paragraph, !text.string.isEmpty, text.string.count <= 3, text.string.allSatisfy({ $0 == "`" }) {
+            return false
+        }
         guard let rewritten = RichText.reconcile(text, cursor: cursor - contentRange.location, type: currentStyle.type) else { return false }
         let rebuilt = NoteDocument.paragraph(rewritten.spans, style: currentStyle, newline: false)
         edit(contentRange, replacement: rebuilt.string) { host.storage.replaceCharacters(in: contentRange, with: rebuilt) }
@@ -668,7 +599,7 @@ final class EditorEngine {
     }
 
     /// Gives each touched paragraph the style of its first character and fonts that fit it.
-    private func restyle(_ range: NSRange) {
+    func restyle(_ range: NSRange) {
         let storage = host.storage
         guard storage.length > 0 else { return }
         storage.beginEditing()
@@ -697,193 +628,8 @@ final class EditorEngine {
         }
     }
 
-    // MARK: Tables
-
-    private var hasTables: Bool {
-        var found = false
-        host.storage.enumerateAttribute(.inkhashBlockType, in: NSRange(location: 0, length: host.storage.length)) { value, _, stop in
-            if value as? String == BlockType.tableRow.rawValue { found = true; stop.pointee = true }
-        }
-        return found
-    }
-
-    /// The rows of the table that contains `location`.
-    private func tableRows(around location: Int) -> [NSRange] {
-        let start = paragraph(at: location)
-        guard style(of: start).type == .tableRow, start.length > 0 else { return [] }
-        var rows = [start]
-        var cursor = start.location
-        while cursor > 0 {
-            let previous = paragraph(at: cursor - 1)
-            guard style(of: previous).type == .tableRow else { break }
-            rows.insert(previous, at: 0)
-            cursor = previous.location
-        }
-        var next = NSMaxRange(start)
-        while next < ns.length {
-            let following = paragraph(at: next)
-            guard following.length > 0, style(of: following).type == .tableRow else { break }
-            rows.append(following)
-            next = NSMaxRange(following)
-        }
-        return rows
-    }
-
-    /// The style of the table these rows form, kept on its first row.
-    private func tableStyle(_ rows: [NSRange]) -> TableFormat? {
-        guard let first = rows.first, first.length > 0 else { return nil }
-        return (host.storage.attribute(.inkhashTable, at: first.location, effectiveRange: nil) as? TableFormatBox)?.style
-    }
-
-    /// The table and column the cursor is in, for the table menu. See ADR 0036.
-    var tableAtCursor: (style: TableFormat, column: Int, columns: Int)? {
-        let cursor = host.selection.location
-        let row = paragraph(at: cursor)
-        guard row.length > 0, style(of: row).type == .tableRow else { return nil }
-        let rows = tableRows(around: cursor)
-        let before = ns.substring(with: NSRange(location: row.location, length: max(0, cursor - row.location)))
-        let column = before.filter { $0 == "\t" }.count
-        return (tableStyle(rows) ?? .plain, column, max(1, rows.map(cellCount).max() ?? 1))
-    }
-
-    /// Changes the style of the table at the cursor and lays it out again.
-    func changeTable(_ change: (inout TableFormat, _ column: Int, _ columns: Int) -> Void) {
-        guard let current = tableAtCursor else { return }
-        var next = current.style
-        change(&next, current.column, current.columns)
-        let rows = tableRows(around: host.selection.location)
-        guard let first = rows.first, next != current.style else { return }
-        let selection = host.selection
-        programmatic = true
-        host.storage.beginEditing()
-        host.storage.removeAttribute(.inkhashTable, range: first)
-        if next != .plain { host.storage.addAttribute(.inkhashTable, value: TableFormatBox(next), range: first) }
-        host.storage.endEditing()
-        programmatic = false
-        host.selection = selection
-        layoutTable(around: first.location)
-        publish()
-        updateState()
-    }
-
-    private func cellCount(_ row: NSRange) -> Int {
-        ns.substring(with: content(of: row)).components(separatedBy: "\t").count
-    }
-
-    /// Equal columns across the text width, as tab stops. The layout manager draws the grid on them.
-    private func layoutTable(around location: Int, width: CGFloat? = nil) {
-        let rows = tableRows(around: location)
-        guard !rows.isEmpty else { return }
-        let columns = max(1, rows.map(cellCount).max() ?? 1)
-        let total = max((width ?? host.container.size.width) - NoteDocument.gutter, 120)
-        let table = tableStyle(rows) ?? .plain
-        let edges = NoteDocument.tableEdges(columns: columns, width: total, table: table)
-        let style = NoteDocument.tableStyle(edges: edges, table: table, header: false)
-        let header = NoteDocument.tableStyle(edges: edges, table: table, header: true)
-        programmatic = true
-        host.storage.beginEditing()
-        for (index, row) in rows.enumerated() {
-            host.storage.addAttribute(.paragraphStyle, value: index == 0 ? header : style, range: row)
-            host.storage.addAttribute(.inkhashTableColumns, value: columns, range: row)
-            let layout = TableRowLayout(edges: edges, index: index, header: table.header, zebra: table.zebra, last: index == rows.count - 1)
-            host.storage.addAttribute(.inkhashTableRow, value: layout, range: row)
-            // The header reads as a label row: muted, not louder.
-            let isHeader = index == 0 && table.header
-            host.storage.enumerateAttribute(.inkhashLink, in: content(of: row)) { link, run, _ in
-                guard link == nil else { return }
-                host.storage.addAttribute(.foregroundColor, value: isHeader ? RichText.mutedColor : RichText.inkColor, range: run)
-            }
-        }
-        host.storage.endEditing()
-        programmatic = false
-    }
-
-    private func layoutTables(width: CGFloat? = nil) {
-        tableWidth = width ?? host.container.size.width
-        var location = 0
-        while location < ns.length {
-            let current = paragraph(at: location)
-            if current.length == 0 { break }
-            if style(of: current).type == .tableRow {
-                let rows = tableRows(around: current.location)
-                layoutTable(around: current.location, width: width)
-                location = NSMaxRange(rows.last ?? current)
-            } else {
-                location = NSMaxRange(current)
-            }
-        }
-        host.contentChanged()
-    }
-
-    /// Tab in a table: behind the next tab of the row, else the start of the next row, else a new row.
-    private func nextCell() {
-        let cursor = host.selection.location
-        let row = paragraph(at: cursor)
-        let rowContent = content(of: row)
-        let rest = NSRange(location: cursor, length: NSMaxRange(rowContent) - cursor)
-        let tab = ns.range(of: "\t", options: [], range: rest)
-        if tab.location != NSNotFound {
-            host.selection = NSRange(location: tab.location + 1, length: 0)
-        } else if NSMaxRange(row) < ns.length, style(of: paragraph(at: NSMaxRange(row))).type == .tableRow {
-            host.selection = NSRange(location: NSMaxRange(row), length: 0)
-        } else {
-            tableNewline(row, atEnd: true)
-            return
-        }
-        applyTypingForCursor()
-        updateState()
-    }
-
-    /// Return in a table adds a row below with as many cells. On an empty row it leaves the table.
-    private func tableNewline(_ row: NSRange, atEnd: Bool = false) {
-        let text = ns.substring(with: content(of: row))
-        if text.trimmingCharacters(in: CharacterSet(charactersIn: "\t ")).isEmpty, !atEnd {
-            let rows = tableRows(around: row.location)
-            if rows.count > 1 {
-                let contentRange = content(of: row)
-                edit(contentRange, replacement: "") { host.storage.deleteCharacters(in: contentRange) }
-                setStyle(.paragraph, of: paragraph(at: row.location))
-                host.selection = NSRange(location: row.location, length: 0)
-                applyTypingForCursor()
-                publish()
-                return
-            }
-        }
-        let columns = max(1, tableRows(around: row.location).map(cellCount).max() ?? cellCount(row))
-        let style = BlockStyle(type: .tableRow)
-        let empty = String(repeating: "\t", count: columns - 1)
-        let insertAt = NSMaxRange(content(of: row))
-        let inserted = NoteDocument.paragraph([InlineSpan(text: empty)], style: style, newline: false)
-        let piece = NSMutableAttributedString(string: "\n", attributes: NoteDocument.typingAttributes(style))
-        piece.append(inserted)
-        let at = NSRange(location: insertAt, length: 0)
-        edit(at, replacement: piece.string) { host.storage.replaceCharacters(in: at, with: piece) }
-        host.selection = NSRange(location: insertAt + 1, length: 0)
-        layoutTable(around: insertAt + 1)
-        applyTypingForCursor()
-        publish()
-    }
-
-    /// `| a | b |` and Return turns the line into the header of a new table. See ADR 0027.
-    private func startTable(_ current: NSRange) -> Bool {
-        let line = ns.substring(with: content(of: current)).trimmingCharacters(in: .whitespaces)
-        guard line.hasPrefix("|"), line.filter({ $0 == "|" }).count >= 2 else { return false }
-        var inner = line.dropFirst()
-        if inner.hasSuffix("|") { inner = inner.dropLast() }
-        let cells = inner.components(separatedBy: "|").map { $0.trimmingCharacters(in: .whitespaces) }
-        guard !cells.isEmpty else { return false }
-        let style = BlockStyle(type: .tableRow)
-        let header = NoteDocument.paragraph(
-            MarkdownCodec.parseInline(cells.joined(separator: "\t")).spans, style: style, newline: false
-        )
-        let contentRange = content(of: current)
-        edit(contentRange, replacement: header.string) { host.storage.replaceCharacters(in: contentRange, with: header) }
-        tableNewline(paragraph(at: current.location), atEnd: true)
-        return true
-    }
-
     /// Typing attributes follow the paragraph the cursor is in, not the character before it.
-    private func applyTypingForCursor() {
+    func applyTypingForCursor() {
         let selection = host.selection
         guard selection.length == 0 else { return }
         let current = paragraph(at: selection.location)
@@ -908,7 +654,7 @@ final class EditorEngine {
         host.typing = typing
     }
 
-    private func publish() {
+    func publish() {
         let length = ns.length
         if length > 0, ns.character(at: length - 1) != 0x0A, trailing != .paragraph {
             trailing = .paragraph
@@ -954,78 +700,6 @@ final class EditorEngine {
             tableColumn: tableAtCursor?.column ?? 0,
             tableColumns: tableAtCursor?.columns ?? 0
         ))
-    }
-
-    // MARK: Note links
-
-    var isInTable: Bool {
-        style(of: paragraph(at: host.selection.location)).type == .tableRow
-    }
-
-    /// The link whose text the cursor touches, on either side.
-    private func link(around location: Int) -> String? {
-        for index in [location, location - 1] where index >= 0 && index < host.storage.length {
-            if let target = host.storage.attribute(.inkhashLink, at: index, effectiveRange: nil) as? String { return target }
-        }
-        return nil
-    }
-
-    /// `[[abc` right before the cursor, without a closing bracket or a line break: "abc".
-    private func openNoteQuery(before location: Int, in contentRange: NSRange) -> String? {
-        let head = NSRange(location: contentRange.location, length: location - contentRange.location)
-        guard head.length >= 2 else { return nil }
-        let opener = ns.range(of: "[[", options: .backwards, range: head)
-        guard opener.location != NSNotFound else { return nil }
-        let query = ns.substring(with: NSRange(location: NSMaxRange(opener), length: location - NSMaxRange(opener)))
-        guard !query.contains("]"), query.count <= 60 else { return nil }
-        if let suppressedNoteQuery, suppressedNoteQuery == query { return nil }
-        suppressedNoteQuery = nil
-        return query
-    }
-
-    /// Replaces `[[query` before the cursor with `title` linked to `target`.
-    func insertNoteLink(title: String, target: String) {
-        let cursor = host.selection.location
-        let contentRange = content(of: paragraph(at: cursor))
-        let head = NSRange(location: contentRange.location, length: cursor - contentRange.location)
-        let opener = ns.range(of: "[[", options: .backwards, range: head)
-        guard opener.location != NSNotFound else { return }
-        insertLink(label: title, target: target, replacing: NSRange(location: opener.location, length: cursor - opener.location))
-    }
-
-    /// Puts `label` linked to `target` where the cursor stands, as asked by `/Link`. See ADR 0031.
-    func insertLink(label: String, target: String) {
-        let selection = host.selection
-        let range = NSRange(location: min(selection.location, ns.length), length: min(selection.length, ns.length - min(selection.location, ns.length)))
-        insertLink(label: label, target: target, replacing: range)
-    }
-
-    /// `label` as a link, then a plain space so typing goes on outside the link.
-    private func insertLink(label: String, target: String, replacing range: NSRange) {
-        var attributes = host.typing
-        for key in RichText.linkAttributeKeys { attributes.removeValue(forKey: key) }
-        attributes.merge(RichText.linkAttributes(target)) { _, new in new }
-        let linked = NSMutableAttributedString(string: label, attributes: attributes)
-        var plain = host.typing
-        for key in RichText.linkAttributeKeys { plain.removeValue(forKey: key) }
-        plain[.foregroundColor] = RichText.inkColor
-        linked.append(NSAttributedString(string: " ", attributes: plain))
-        edit(range, replacement: linked.string) { host.storage.replaceCharacters(in: range, with: linked) }
-        host.selection = NSRange(location: range.location + linked.length, length: 0)
-        host.typing = plain
-        host.focus()
-        publish()
-    }
-
-    func escapeNoteLink() {
-        let cursor = host.selection.location
-        let contentRange = content(of: paragraph(at: cursor))
-        let head = NSRange(location: contentRange.location, length: cursor - contentRange.location)
-        let opener = ns.range(of: "[[", options: .backwards, range: head)
-        if opener.location != NSNotFound {
-            suppressedNoteQuery = ns.substring(with: NSRange(location: NSMaxRange(opener), length: cursor - NSMaxRange(opener)))
-        }
-        updateState()
     }
 
     private func caretRect(_ location: Int) -> CGRect {

@@ -1,342 +1,10 @@
 import InkhashCore
 import PencilKit
 import SwiftUI
-import UniformTypeIdentifiers
 
 #if os(iOS)
-import PhotosUI
 import UIKit
-#else
-import AppKit
-#endif
 
-struct InkNoteView: View {
-    @Environment(AppModel.self) private var model
-    var note: Note
-    @State private var readingPages: Set<UUID> = []
-    @State private var recognitionGeneration: [UUID: Int] = [:]
-    @State private var tools = InkToolState()
-    @State private var editor = InkEditorState()
-    @State private var pageIndex = 0
-    @State private var compact = false
-    @State private var showsPaper = false
-    @State private var showsPages = false
-    #if os(iOS)
-    @State private var photoItem: PhotosPickerItem?
-    @State private var showsPhotos = false
-    @State private var showsFiles = false
-    @State private var showsTextExcerpt = false
-    #endif
-
-    init(note: Note) {
-        self.note = note
-    }
-
-    /// The note as the model has it now. The `note` handed in is a copy from the parent's last render
-    /// and lags behind our own edits when only this view updates.
-    private var current: Note { model.library.record(note.id)?.note ?? note }
-
-    var body: some View {
-        let note = current
-        let pages = note.pages ?? []
-        let index = min(pageIndex, max(pages.count - 1, 0))
-        VStack(spacing: 0) {
-            NoteHeader(noteID: note.id)
-                .zIndex(2)
-                .padding(.leading, 20)
-                .padding(.trailing, 20)
-                .padding(.top, 12)
-                .padding(.bottom, 6)
-            HStack(spacing: 0) {
-                #if os(iOS)
-                // The tools sit at the edge, always open, never on the sheet. See ADR 0018 and 0028.
-                if !compact {
-                    InkToolRail(tools: tools, vertical: true, addImage: addImage)
-                        .padding(.leading, 10)
-                        .padding(.vertical, 10)
-                        .frame(maxHeight: .infinity, alignment: .top)
-                }
-                #endif
-                pageStack(pages, index: index)
-                    .frame(maxWidth: .infinity, maxHeight: .infinity)
-                    .overlay(alignment: .top) { selectionBar(pages, index: index) }
-            }
-            #if os(iOS)
-            if compact {
-                InkToolRail(tools: tools, vertical: false, addImage: addImage)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 8)
-            }
-            #endif
-        }
-        .compactWidth($compact)
-        // The paper's colour is the whole screen of the note, also under the title. See ADR 0042.
-        .background(note.shownPaper.fill.ignoresSafeArea())
-        .overlay(alignment: .top) {
-            if model.library.record(note.id)?.conflict == true {
-                ConflictBanner(noteID: note.id)
-                    .frame(maxWidth: 520)
-                    .padding(.top, 12)
-            }
-        }
-        .overlay(alignment: compact ? .topTrailing : .bottomTrailing) {
-            VStack(alignment: .trailing, spacing: 8) {
-                if !readingPages.isEmpty {
-                    Text("lese Handschrift…")
-                        .font(.system(size: 12))
-                        .foregroundStyle(Ink.muted)
-                }
-                if !note.tags.isEmpty {
-                    HStack(spacing: 8) {
-                        ForEach(note.tags, id: \.self) { tag in
-                            Text("#\(tag)")
-                                .font(.system(size: 12, weight: .medium))
-                                .foregroundStyle(Ink.accent)
-                                .padding(.horizontal, 12)
-                                .padding(.vertical, 6)
-                                .inkSurface(in: Capsule())
-                        }
-                    }
-                }
-            }
-            .padding(16)
-            .allowsHitTesting(false)
-        }
-        .toolbar {
-            if pages.count > 1 {
-                ToolbarItemGroup(placement: .primaryAction) {
-                    Button { turn(to: max(0, pageIndex - 1)) } label: { Image(systemName: "chevron.up") }
-                        .disabled(pageIndex == 0)
-                        .accessibilityLabel("Vorige Seite")
-                    Text("\(index + 1) / \(pages.count)")
-                        .font(.system(size: 13))
-                        .foregroundStyle(Ink.muted)
-                    Button { turn(to: min(pages.count - 1, pageIndex + 1)) } label: { Image(systemName: "chevron.down") }
-                        .disabled(pageIndex >= pages.count - 1)
-                        .accessibilityLabel("Nächste Seite")
-                    Button { showsPages = true } label: { Image(systemName: "square.grid.2x2") }
-                        .accessibilityLabel("Seiten ordnen")
-                }
-            }
-            ToolbarItem(placement: .primaryAction) {
-                Button { showsPaper = true } label: { Image(systemName: "rectangle.split.3x3") }
-                    .accessibilityLabel("Papier")
-                    .popover(isPresented: $showsPaper) {
-                        PaperPicker(paper: note.shownPaper, patterns: true) { model.library.setPaper(noteID: note.id, paper: $0) }
-                    }
-            }
-            #if os(iOS)
-            ToolbarItem(placement: .primaryAction) {
-                Button {
-                    model.library.addPage(noteID: note.id, data: InkDrawing.empty())
-                    turn(to: pages.count)
-                } label: {
-                    Image(systemName: "plus.rectangle.portrait")
-                }
-                .accessibilityLabel("Seite hinzufügen")
-            }
-            #endif
-        }
-        .navigationTitle("")
-        .sheet(isPresented: $showsPages) {
-            PageOverview(noteID: note.id, current: pages.indices.contains(index) ? pages[index].id : nil) { pageID in
-                if let target = current.pages?.firstIndex(where: { $0.id == pageID }) { turn(to: target) }
-            }
-            .environment(model)
-        }
-        // Moving or deleting pages keeps the open page open, or the one that took its place.
-        .onChange(of: pages.map(\.id)) { old, new in
-            guard old.indices.contains(pageIndex) else { return }
-            if let moved = new.firstIndex(of: old[pageIndex]) {
-                if moved != pageIndex { turn(to: moved) }
-            } else {
-                turn(to: min(pageIndex, max(new.count - 1, 0)))
-            }
-        }
-        #if os(iOS)
-        .navigationBarTitleDisplayMode(.inline)
-        .photosPicker(isPresented: $showsPhotos, selection: $photoItem, matching: .images)
-        .onChange(of: photoItem) { _, item in
-            guard let item else { return }
-            Task {
-                if let data = try? await item.loadTransferable(type: Data.self) { insertImage(data) }
-                photoItem = nil
-            }
-        }
-        .sheet(isPresented: $showsTextExcerpt) {
-            ExcerptPicker(parent: current) { target, _ in
-                showsTextExcerpt = false
-                tools.choose(.select)
-                editor.insertExcerpt(target)
-            } cancel: {
-                showsTextExcerpt = false
-            }
-            .environment(model)
-        }
-        .fileImporter(isPresented: $showsFiles, allowedContentTypes: [.image]) { result in
-            guard case .success(let url) = result else { return }
-            let scoped = url.startAccessingSecurityScopedResource()
-            defer { if scoped { url.stopAccessingSecurityScopedResource() } }
-            if let data = try? Data(contentsOf: url) { insertImage(data) }
-        }
-        .onChange(of: tools.mode) { _, mode in
-            if mode != .select { editor.clearSelection() }
-        }
-        #endif
-        .onAppear {
-            for page in pages {
-                let data = model.library.drawingData(for: page.blob) ?? Data()
-                guard page.transcript.isEmpty, !data.isEmpty, data != InkDrawing.empty() else { continue }
-                recognize(page: page, data: data)
-            }
-        }
-    }
-
-    private func turn(to index: Int) {
-        editor.clearSelection()
-        pageIndex = index
-    }
-
-    #if os(iOS)
-    private func addImage(_ source: ImageSource) {
-        switch source {
-        case .photos: showsPhotos = true
-        case .files: showsFiles = true
-        case .text: showsTextExcerpt = true
-        }
-    }
-
-    private func insertImage(_ data: Data) {
-        guard let stored = model.library.storeImage(data) else { return }
-        tools.choose(.select)
-        editor.insertImage(blob: stored.blob, size: stored.size)
-    }
-    #endif
-
-    /// The selection with the margin of its outline, as an excerpt line on the pasteboard. See ADR 0032.
-    private func copyExcerpt(page: InkPage) {
-        guard let bounds = editor.selection?.bounds, !bounds.isNull else { return }
-        let rect = bounds.insetBy(dx: -8, dy: -8)
-        let x = max(rect.minX, 0)
-        let y = max(rect.minY, 0)
-        guard let excerpt = Excerpt(
-            noteID: note.id, pageID: page.id, x: x, y: y,
-            width: min(rect.maxX, page.width) - x, height: min(rect.maxY, page.height) - y
-        ) else { return }
-        let line = MarkdownCodec.serialize([MarkdownCodec.excerptBlock(excerpt, label: note.displayTitle)])
-        #if os(iOS)
-        UIPasteboard.general.string = line.trimmingCharacters(in: .newlines)
-        #endif
-        model.status = "Ausschnitt kopiert. In einer Textnotiz einfügen."
-        editor.clearSelection()
-    }
-
-    @ViewBuilder
-    private func selectionBar(_ pages: [InkPage], index: Int) -> some View {
-        if editor.selection != nil || editor.maskDrawing != nil, pages.indices.contains(index) {
-            let page = pages[index]
-            let single = editor.selection.flatMap { selection in
-                selection.elementIDs.count == 1 && !selection.hasInk
-                    ? page.elements.first { $0.id == selection.elementIDs.first } : nil
-            }
-            InkSelectionBar(state: editor, element: single, excluding: note.id) {
-                copyExcerpt(page: page)
-            }
-                .padding(.top, 10)
-                .transition(.opacity)
-        }
-    }
-
-    /// The current page fills the whole surface and is drawable everywhere. Its width fits the
-    /// surface; it scrolls down and grows as the writing reaches the bottom. See ADR 0018.
-    private func pageStack(_ pages: [InkPage], index: Int) -> some View {
-        GeometryReader { geometry in
-            if pages.indices.contains(index) {
-                let page = pages[index]
-                let scale = max(0.01, geometry.size.width / page.width)
-                InkPageCanvas(
-                    drawingData: model.library.drawingData(for: page.blob) ?? InkDrawing.empty(),
-                    elements: page.elements,
-                    pageID: page.id,
-                    pageWidth: page.width,
-                    pageHeight: page.height,
-                    paper: current.shownPaper,
-                    scale: scale,
-                    // An iPhone has no pencil: the finger always draws, two fingers scroll. See ADR 0026.
-                    fingerDrawing: tools.fingerDraws || Device.isPhone,
-                    tools: tools,
-                    editor: editor,
-                    loadBlob: { model.library.drawingData(for: $0) },
-                    onDrawing: { pageID, data, height in
-                        // The page comes from the canvas that drew it, never from what is shown now.
-                        // Only a changed drawing is read again; otherwise reading and reloading feed each other. See P-047.
-                        guard model.library.updateDrawing(noteID: note.id, pageID: pageID, data: data, height: height) else { return }
-                        if let drawn = model.library.record(note.id)?.note.pages?.first(where: { $0.id == pageID }) {
-                            recognize(page: drawn, data: data)
-                        }
-                    },
-                    onElements: { pageID, elements in
-                        model.library.updateElements(noteID: note.id, pageID: pageID, elements: elements)
-                    }
-                )
-                .id(page.id)
-                .frame(width: geometry.size.width, height: geometry.size.height)
-                #if os(iOS)
-                .overlay(alignment: .topLeading) {
-                    PageBadges(elements: page.elements, scale: scale)
-                        .offset(x: -editor.offset.x, y: -editor.offset.y)
-                }
-                .clipped()
-                #endif
-            }
-        }
-    }
-
-    /// Reads a page after a short pause in writing. Every stroke asks again; only the newest request
-    /// may write its result, so a slow early reading cannot overwrite a later one. See P-043.
-    private func recognize(page: InkPage, data: Data) {
-        let noteID = note.id
-        let pageID = page.id
-        let width = page.width
-        let height = page.height
-        let generation = (recognitionGeneration[pageID] ?? 0) + 1
-        recognitionGeneration[pageID] = generation
-        readingPages.insert(pageID)
-        Task {
-            // The newest request for the page clears the mark, however it ends.
-            defer { if recognitionGeneration[pageID] == generation { readingPages.remove(pageID) } }
-            try? await Task.sleep(for: .milliseconds(900))
-            guard recognitionGeneration[pageID] == generation else { return }
-            let drawing = (try? PKDrawing(data: data)) ?? PKDrawing()
-            let reading = await HandwritingRecognizer.recognize(drawing: drawing, width: width, height: height)
-            guard recognitionGeneration[pageID] == generation else { return }
-            if drawing.strokes.isEmpty {
-                model.library.applyReading(noteID: noteID, pageID: pageID, transcript: "", tags: [], pageHasInk: false)
-            } else {
-                model.library.applyReading(noteID: noteID, pageID: pageID, transcript: reading.transcript, tags: reading.tags, pageHasInk: true)
-            }
-        }
-    }
-}
-
-/// Link marks at the top-right corner of every linked element, in screen points from the page origin.
-struct PageBadges: View {
-    var elements: [PageElement]
-    var scale: CGFloat
-
-    var body: some View {
-        ZStack(alignment: .topLeading) {
-            Color.clear.frame(width: 1, height: 1)
-            ForEach(elements.filter { $0.link != nil }) { element in
-                let point = ElementGeometry.badgePoint(of: element)
-                LinkBadge(target: element.link ?? "")
-                    .offset(x: point.x * scale - 18, y: point.y * scale - 18)
-            }
-        }
-    }
-}
-
-#if os(iOS)
 struct InkPageCanvas: UIViewRepresentable {
     var drawingData: Data
     var elements: [PageElement]
@@ -654,8 +322,12 @@ struct InkPageCanvas: UIViewRepresentable {
                     canvas.drawing.strokes.isEmpty ? 0 : Double(canvas.drawing.bounds.maxY),
                     elements.map { Double(ElementGeometry.bounds(of: $0).maxY) }.max() ?? 0
                 )
-                if bottom > 0, bottom > height - InkPageCanvas.growMargin {
-                    height = min(InkPageCanvas.maxHeight, bottom + InkPageCanvas.growStep)
+                let grown = PageEdits.grownHeight(
+                    current: height, contentBottom: bottom,
+                    margin: InkPageCanvas.growMargin, step: InkPageCanvas.growStep, limit: InkPageCanvas.maxHeight
+                )
+                if grown != height {
+                    height = grown
                     InkPageCanvas.layoutContent(canvas, pageWidth: parent.pageWidth, pageHeight: height, scale: parent.scale)
                     layoutLayers()
                 }
@@ -728,7 +400,7 @@ struct InkPageCanvas: UIViewRepresentable {
             canvas.undoManager?.setActionName(name)
         }
 
-        private var nextZ: Int { (elements.map(\.z).max() ?? 0) + 1 }
+        private var nextZ: Int { PageEdits.topZ(elements) }
 
         // MARK: Selection
 
@@ -769,20 +441,14 @@ struct InkPageCanvas: UIViewRepresentable {
 
         /// Elements by their center, strokes by the center of their bounds. Same rule as Scweble.
         private func selectContent(in rect: CGRect) {
-            selectedIDs = Set(elements.filter { rect.contains(CGPoint(x: $0.x, y: $0.y)) }.map(\.id))
-            selectedStrokes = []
-            if let canvas {
-                for (index, stroke) in canvas.drawing.strokes.enumerated() {
-                    let bounds = stroke.renderBounds
-                    if rect.contains(CGPoint(x: bounds.midX, y: bounds.midY)) { selectedStrokes.append(index) }
-                }
-            }
+            let strokes = canvas?.drawing.strokes.map(\.renderBounds) ?? []
+            (selectedIDs, selectedStrokes) = PageEdits.selection(in: rect, elements: elements, strokeBounds: strokes)
             refreshSelection()
         }
 
         func deleteSelection() {
             guard let canvas else { return }
-            let remaining = elements.filter { !selectedIDs.contains($0.id) }
+            let remaining = PageEdits.removing(selectedIDs, from: elements)
             var drawing: PKDrawing?
             if !selectedStrokes.isEmpty {
                 let removed = Set(selectedStrokes)
@@ -794,22 +460,13 @@ struct InkPageCanvas: UIViewRepresentable {
         }
 
         func setLink(_ target: String?) {
-            var next = elements
-            if !selectedStrokes.isEmpty, let target {
-                // Ink cannot carry a link; an invisible area over it does.
-                let area = selectionBounds.insetBy(dx: -12, dy: -12)
-                let link = PageElement(kind: .link, x: area.midX, y: area.midY, width: area.width, height: area.height, z: nextZ, link: target)
-                next.append(link)
-                selectedIDs = [link.id]
-                selectedStrokes = []
-            } else if target == nil {
-                // An area that only existed for its link goes with it.
-                next.removeAll { selectedIDs.contains($0.id) && $0.kind == .link }
-                for index in next.indices where selectedIDs.contains(next[index].id) { next[index].link = nil }
-            } else {
-                for index in next.indices where selectedIDs.contains(next[index].id) { next[index].link = target }
-            }
-            commit(elements: next, name: "Link")
+            let result = PageEdits.linking(
+                selectedIDs, in: elements, to: target,
+                strokeBounds: selectedStrokes.isEmpty ? nil : selectionBounds
+            )
+            if target != nil, !selectedStrokes.isEmpty { selectedStrokes = [] }
+            selectedIDs = result.selected
+            commit(elements: result.elements, name: "Link")
         }
 
         func changeSelected(_ body: @escaping (inout PageElement) -> Void) {
@@ -819,10 +476,7 @@ struct InkPageCanvas: UIViewRepresentable {
         }
 
         func restack(front: Bool) {
-            var next = elements
-            let target = front ? nextZ : (elements.map(\.z).min() ?? 0) - 1
-            for index in next.indices where selectedIDs.contains(next[index].id) { next[index].z = target }
-            commit(elements: next, name: front ? "Nach vorn" : "Nach hinten")
+            commit(elements: PageEdits.restacking(selectedIDs, in: elements, front: front), name: front ? "Nach vorn" : "Nach hinten")
         }
 
         func setMaskDrawing(_ id: UUID?) {
@@ -835,12 +489,9 @@ struct InkPageCanvas: UIViewRepresentable {
             let scale = max(parent.scale, 0.01)
             let visible = CGRect(origin: canvas.contentOffset, size: canvas.bounds.size)
             let center = CGPoint(x: visible.midX / scale, y: visible.midY / scale)
-            let longest = min(480, parent.pageWidth - 80)
-            let ratio = longest / max(pixelSize.width, pixelSize.height, 1)
-            let image = PageElement(
-                kind: .image, x: center.x, y: center.y,
-                width: max(40, pixelSize.width * ratio), height: max(40, pixelSize.height * ratio),
-                rotation: Double.random(in: -0.03...0.03), z: nextZ, blob: blob, frame: .classic
+            let image = PageEdits.image(
+                blob: blob, pixelSize: pixelSize, center: center, pageWidth: parent.pageWidth,
+                z: nextZ, rotation: Double.random(in: -0.03...0.03)
             )
             selectedIDs = [image.id]
             selectedStrokes = []
@@ -975,7 +626,7 @@ struct InkPageCanvas: UIViewRepresentable {
             case .move(let start):
                 follow(CGAffineTransform(translationX: point.x - start.x, y: point.y - start.y))
             case .resize(let anchor, let start):
-                follow(resizeTransform(anchor: anchor, start: start, point: point))
+                follow(PageEdits.resizeTransform(anchor: anchor, start: start, point: point))
             case nil:
                 break
             }
@@ -998,30 +649,23 @@ struct InkPageCanvas: UIViewRepresentable {
             case .move(let start):
                 finishTransform(cancelled ? .identity : CGAffineTransform(translationX: point.x - start.x, y: point.y - start.y), name: "Verschieben")
             case .resize(let anchor, let start):
-                finishTransform(cancelled ? .identity : resizeTransform(anchor: anchor, start: start, point: point), name: "Größe")
+                finishTransform(cancelled ? .identity : PageEdits.resizeTransform(anchor: anchor, start: start, point: point), name: "Größe")
             case nil:
                 break
             }
         }
 
-        private func resizeTransform(anchor: CGPoint, start: CGPoint, point: CGPoint) -> CGAffineTransform {
-            let from = max(hypot(start.x - anchor.x, start.y - anchor.y), 1)
-            let to = hypot(point.x - anchor.x, point.y - anchor.y)
-            let factor = min(max(to / from, 0.1), 10)
-            return CGAffineTransform(translationX: anchor.x, y: anchor.y).scaledBy(x: factor, y: factor).translatedBy(x: -anchor.x, y: -anchor.y)
-        }
-
         /// While dragging: element views and the lifted ink follow; the model does not change yet.
         private func follow(_ transform: CGAffineTransform) {
             for element in dragElements where selectedIDs.contains(element.id) {
-                elementViews[element.id]?.update(Self.transformed(element, by: transform), image: ElementContent.image(for: element, load: parent.loadBlob))
+                elementViews[element.id]?.update(PageEdits.transformed(element, by: transform), image: ElementContent.image(for: element, load: parent.loadBlob))
             }
             if !snapshot.isHidden {
                 snapshot.transform = .identity
                 let frame = snapshot.frame
                 let center = CGPoint(x: frame.midX, y: frame.midY)
                 let moved = center.applying(transform)
-                let factor = sqrt(abs(transform.a * transform.d - transform.b * transform.c))
+                let factor = PageEdits.scale(of: transform)
                 snapshot.transform = CGAffineTransform(translationX: moved.x - center.x, y: moved.y - center.y).scaledBy(x: factor, y: factor)
             }
             let outline = selectionBounds.applying(transform)
@@ -1033,7 +677,7 @@ struct InkPageCanvas: UIViewRepresentable {
             snapshot.isHidden = true
             snapshot.transform = .identity
             snapshot.image = nil
-            let next = dragElements.map { selectedIDs.contains($0.id) ? Self.transformed($0, by: transform) : $0 }
+            let next = PageEdits.transforming(selectedIDs, in: dragElements, by: transform)
             var drawing: PKDrawing?
             if !selectedStrokes.isEmpty {
                 let chosen = Set(selectedStrokes)
@@ -1057,34 +701,12 @@ struct InkPageCanvas: UIViewRepresentable {
             commit(elements: next, drawing: drawing, name: name)
         }
 
-        static func transformed(_ element: PageElement, by transform: CGAffineTransform) -> PageElement {
-            var copy = element
-            let center = CGPoint(x: element.x, y: element.y).applying(transform)
-            let factor = sqrt(abs(transform.a * transform.d - transform.b * transform.c))
-            copy.x = center.x
-            copy.y = center.y
-            copy.width = max(8, element.width * factor)
-            copy.height = max(8, element.height * factor)
-            return copy
-        }
-
         private func createShape(from start: CGPoint, to end: CGPoint) {
             let form = parent.tools.shapeForm
-            let length = hypot(end.x - start.x, end.y - start.y)
-            guard length > 4 else { return }
-            let shape: PageElement
-            if form == .line {
-                // A line is a flat box along the drag, turned; the box is its hit area.
-                shape = parent.tools.shapeElement(
-                    form: .line, x: (start.x + end.x) / 2, y: (start.y + end.y) / 2,
-                    width: length, height: max(parent.tools.shapeWidth, 24),
-                    rotation: atan2(end.y - start.y, end.x - start.x), z: nextZ
-                )
-            } else {
-                let rect = CGRect(start: start, end: end)
-                guard rect.width > 4, rect.height > 4 else { return }
-                shape = parent.tools.shapeElement(form: form, x: rect.midX, y: rect.midY, width: rect.width, height: rect.height, rotation: 0, z: nextZ)
-            }
+            guard let box = PageEdits.shapeBox(form, from: start, to: end, lineThickness: parent.tools.shapeWidth) else { return }
+            let shape = parent.tools.shapeElement(
+                form: form, x: box.x, y: box.y, width: box.width, height: box.height, rotation: box.rotation, z: nextZ
+            )
             commit(elements: elements + [shape], name: "Form")
         }
 
@@ -1096,19 +718,7 @@ struct InkPageCanvas: UIViewRepresentable {
         }
 
         private func tapeElement(from start: CGPoint, to end: CGPoint) -> PageElement {
-            var length = hypot(end.x - start.x, end.y - start.y)
-            var angle = atan2(end.y - start.y, end.x - start.x)
-            var center = CGPoint(x: (start.x + end.x) / 2, y: (start.y + end.y) / 2)
-            if length < 20 {
-                // A short touch puts down a strip of the usual length, slightly askew.
-                length = 240
-                angle = 0.08
-                center = start
-            }
-            return PageElement(
-                kind: .tape, x: center.x, y: center.y, width: length, height: parent.tools.tapeWidth,
-                rotation: angle, z: nextZ, color: parent.tools.tapeColor
-            )
+            PageEdits.tape(from: start, to: end, width: parent.tools.tapeWidth, color: parent.tools.tapeColor, z: nextZ)
         }
 
         private func createTape(from start: CGPoint, to end: CGPoint) {
@@ -1117,92 +727,19 @@ struct InkPageCanvas: UIViewRepresentable {
 
         /// Turns the drawn outline into a freehand mask, 0…1 in the photo area of the image.
         private func finishMask(_ points: [CGPoint]) {
-            guard let id = maskTarget, let element = elements.first(where: { $0.id == id }), points.count > 2 else { return }
-            let content = ElementRenderer.contentRect(in: CGRect(x: 0, y: 0, width: element.width, height: element.height), frame: element.frame)
-            let inverse = ElementGeometry.transform(of: element).inverted()
-            let normalized = points.map { point -> PageElement.Point in
-                let local = point.applying(inverse)
-                return PageElement.Point(
-                    x: min(max((local.x - content.minX) / max(content.width, 1), 0), 1),
-                    y: min(max((local.y - content.minY) / max(content.height, 1), 0), 1)
-                )
-            }
+            guard let id = maskTarget, let element = elements.first(where: { $0.id == id }),
+                  let mask = PageEdits.mask(from: points, on: element) else { return }
             maskTarget = nil
             parent.editor.maskDrawing = nil
             applyMode()
             var next = elements
             if let index = next.firstIndex(where: { $0.id == id }) {
-                next[index].mask = PageElement.Mask(kind: .freehand, points: Self.thinned(normalized))
+                next[index].mask = mask
             }
             commit(elements: next, name: "Maske")
         }
-
-        /// At most 400 points, so the outline stays within what the server takes.
-        static func thinned(_ points: [PageElement.Point]) -> [PageElement.Point] {
-            guard points.count > 400 else { return points }
-            let step = Double(points.count) / 400
-            return (0..<400).map { points[Int(Double($0) * step)] }
-        }
     }
 }
-
-/// One element under the ink. Draws itself with the shared renderer.
-final class ElementView: UIView {
-    private var element: PageElement?
-    private var image: CGImage?
-
-    override init(frame: CGRect) {
-        super.init(frame: frame)
-        isOpaque = false
-        backgroundColor = .clear
-        isUserInteractionEnabled = false
-    }
-
-    required init?(coder: NSCoder) { fatalError("init(coder:) is not used") }
-
-    func update(_ next: PageElement, image nextImage: CGImage?) {
-        let changed = next.kind != element?.kind || next.width != element?.width || next.height != element?.height
-            || next.frame != element?.frame || next.mask != element?.mask || next.color != element?.color
-            || next.stroke != element?.stroke || next.strokeWidth != element?.strokeWidth || next.fill != element?.fill
-            || next.fillOpacity != element?.fillOpacity || next.shape != element?.shape || nextImage !== image
-        element = next
-        image = nextImage
-        // Room around the box for a frame's shadow; drawing starts at the box origin.
-        let margin: CGFloat = next.kind == .image ? 16 : 2
-        transform = .identity
-        bounds = CGRect(x: -margin, y: -margin, width: next.width + margin * 2, height: next.height + margin * 2)
-        center = CGPoint(x: next.x, y: next.y)
-        transform = CGAffineTransform(rotationAngle: next.rotation)
-        if next.kind == .link {
-            // A link area shows itself softly in the editor so it can be found.
-            backgroundColor = UIColor(Ink.accent).withAlphaComponent(0.07)
-            layer.cornerRadius = 8
-        } else {
-            backgroundColor = .clear
-        }
-        if changed { setNeedsDisplay() }
-    }
-
-    override func draw(_ rect: CGRect) {
-        guard let element, let context = UIGraphicsGetCurrentContext() else { return }
-        ElementRenderer.draw(element, in: context, image: image)
-    }
-}
-
-/// Lets touches through unless they land on a subview that wants them.
-final class PassthroughView: UIView {
-    override func hitTest(_ point: CGPoint, with event: UIEvent?) -> UIView? {
-        let view = super.hitTest(point, with: event)
-        return view === self ? nil : view
-    }
-}
-
-extension CGRect {
-    init(start: CGPoint, end: CGPoint) {
-        self.init(x: min(start.x, end.x), y: min(start.y, end.y), width: abs(end.x - start.x), height: abs(end.y - start.y))
-    }
-}
-
 #else
 /// macOS PencilKit can read and render a PKDrawing, but it has no canvas view.
 /// Handwriting is written on the iPad. The Mac shows the page, its elements and their links.

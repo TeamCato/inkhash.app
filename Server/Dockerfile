@@ -1,7 +1,7 @@
 FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json tsconfig.json ./
-COPY inkhashd.ts store.ts accounts.ts ./
+COPY inkhashd.ts store.ts accounts.ts vault.ts ./
 COPY admin ./admin
 RUN npm ci && npx tsc --pretty false
 

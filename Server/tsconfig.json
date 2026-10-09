@@ -10,5 +10,5 @@
     "sourceMap": true,
     "types": ["node"]
   },
-  "include": ["inkhashd.ts", "store.ts", "accounts.ts", "admin/*.ts", "test/**/*.ts"]
+  "include": ["inkhashd.ts", "store.ts", "accounts.ts", "vault.ts", "admin/*.ts", "test/**/*.ts"]
 }

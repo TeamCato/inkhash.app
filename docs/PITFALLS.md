@@ -163,13 +163,13 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Nach 90 Tagen ohne Benutzung steht nur „Anmeldung abgelehnt.“ im Status. Die Einstellungen zeigen weiter „Angemeldet als …“, und jeder Abgleich scheitert still.
 **Ursache.** Ein 401 auf eine Anfrage mit Sitzung wurde wie jeder andere Fehler als Status gemeldet. Ein 401 beim Anmelden selbst heißt dagegen nur: falsches Passwort.
-**Wache.** `ServerSessions.expire(_:ifStill:)` läuft nur bei `sync` und `remoteWorkspaces`, nicht beim Anmelden. Die Sitzung gilt pro Server. Es vergleicht den Token vom Start der Anfrage mit dem aktuellen. Die Bibliothek bleibt gebunden, `ExpiredSessionBanner` bietet das Anmelden an. Kein automatischer Test, weil die App kein Testziel hat. Prüfen: Sitzungsdatei auf dem Server löschen, dann abgleichen.
+**Wache.** `ServerSessions.expire(_:ifStill:)` läuft nur bei `sync` und `remoteWorkspaces`, nicht beim Anmelden. Die Sitzung gilt pro Server. Es vergleicht den Token vom Start der Anfrage mit dem aktuellen. Die Bibliothek bleibt gebunden, `ExpiredSessionBanner` bietet das Anmelden an. Tests `SessionTests.testAnOldRequestDoesNotEndANewSession`, `testAnExpiredSessionEndsAndSaysSo`.
 
 ## P-028 · Block-Kürzel lassen das Zeichen stehen
 
 **Symptom.** `# hallo` wird zur Überschrift `#hallo`, gespeichert als `# #hallo`.
 **Ursache.** Nach dem Leerzeichen wechselte nur der Blocktyp im Modell. Das Textfeld behielt das `#`, bis SwiftUI den leeren Block zurückschob, und schnelles Tippen landete dahinter.
-**Wache.** `EditorEngine.applyShortcut` löscht das Kürzel im selben Aufruf, in dem es erkannt wird, und setzt den Stil des Absatzes. Nach einem geschlossenen Inline-Marker (`*x*`, `**x**`, `` `x` ``) gehen die Tippattribute auf normal zurück. Kein automatischer Test, die App hat kein Testziel.
+**Wache.** `EditorEngine.applyShortcut` löscht das Kürzel im selben Aufruf, in dem es erkannt wird, und setzt den Stil des Absatzes. Nach einem geschlossenen Inline-Marker (`*x*`, `**x**`, `` `x` ``) gehen die Tippattribute auf normal zurück. Tests `BlockEditingTests.testShortcutsTurnTheLineAndLeaveNoMarker`, `testTypingAfterBoldIsPlain`.
 
 ## P-029 · Return öffnet auf dem iPad das Neu-Menü
 
@@ -199,13 +199,13 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Eine lange Zeile bricht nicht um, sondern läuft über den rechten Rand, vor allem in schmalen Spalten.
 **Ursache.** Ein `UITextView` ohne Scrollen meldet SwiftUI seine einzeilige Breite als eigene Größe. Die Höhe wurde außerdem geschätzt statt gemessen.
-**Wache.** `IOSNoteText` und `MacNoteText` implementieren `sizeThatFits`: Sie nehmen die angebotene Breite und messen die Höhe über `EditorEngine.height(for:)`, siehe P-037. Kein automatischer Test, die App hat kein Testziel. Prüfen: lange Zeile im iPad-Hochformat mit offener Liste.
+**Wache.** `IOSNoteText` und `MacNoteText` implementieren `sizeThatFits`: Sie nehmen die angebotene Breite und messen die Höhe über `EditorEngine.height(for:)`, siehe P-037. Kein automatischer Test für `sizeThatFits`; das Messen selbst prüft `BlockEditingTests.testMeasuringLeavesTheContainerAlone`. Prüfen: lange Zeile im iPad-Hochformat mit offener Liste.
 
 ## P-034 · Zeichnung landet auf der falschen Seite
 
 **Symptom.** Was man auf einer Handschriftseite schreibt, erscheint nach dem Blättern auf der falschen Seite, oder eine Seite zeigt ihre eigenen Striche nicht.
 **Ursache.** Zwei Dinge. Die Zeichenfläche speichert verzögert (0,45 s), und der verzögerte Auftrag fragte beim Ausführen nach der gerade gezeigten Seite, nicht nach der, auf der gezeichnet wurde. Und `PKCanvasView` malt eine Zeichnung nicht, die es bekam, bevor Größe und Zoom feststanden.
-**Wache.** `InkPageCanvas.Coordinator` merkt sich seine `pageID` und gibt sie bei jedem Speichern mit. Wechselt die Seite oder verschwindet die Fläche, wird Ausstehendes zuerst für die alte Seite gesichert (`flush`). Nach dem Anlegen und nach jeder Zoom-Änderung gibt `redrawSoon` die Zeichnung noch einmal herein. Kein automatischer Test, die App hat kein Testziel. Prüfen: auf Seite 1 schreiben, sofort blättern, auf Seite 2 schreiben, zurück.
+**Wache.** `InkPageCanvas.Coordinator` merkt sich seine `pageID` und gibt sie bei jedem Speichern mit. Wechselt die Seite oder verschwindet die Fläche, wird Ausstehendes zuerst für die alte Seite gesichert (`flush`). Nach dem Anlegen und nach jeder Zoom-Änderung gibt `redrawSoon` die Zeichnung noch einmal herein. Test `InkPageCanvasTests.testAWaitingDrawingIsSavedForItsPage` für das Sichern; das Malen nach dem Layout nur von Hand: auf Seite 1 schreiben, sofort blättern, auf Seite 2 schreiben, zurück.
 
 ## P-035 · Anmelden im Simulator scheitert am Schlüsselbund
 
@@ -223,13 +223,13 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Auf dem Mac bricht ein Block plötzlich auf 40 Punkt Breite um, Zeile für Zeile, und die Zeilen darunter liegen über ihm. Oft nach dem Markieren, wenn die Formatleiste erscheint.
 **Ursache.** `sizeThatFits` setzte die `containerSize` des echten `NSTextView`. SwiftUI misst in einem `HStack` auch mit Breite 0; der Container wurde dabei schmal. Blieb die Endgröße gleich, setzte SwiftUI den Rahmen nicht neu, und der Container blieb schmal.
-**Wache.** `EditorEngine.height(for:)` misst nur dann am echten Layout, wenn dessen Container genau so breit ist wie gefragt und nicht in der Höhe begrenzt; sonst auf einem eigenen `NSLayoutManager`. UIKit setzt den Container eines nicht scrollenden `UITextView` auf die Höhe der View; `InkNoteTextView.layoutSubviews` hebt das wieder auf, sonst wird nach einem Zusammenführen die letzte Zeile abgeschnitten. Kein automatischer Test, die App hat kein Testziel.
+**Wache.** `EditorEngine.height(for:)` misst nur dann am echten Layout, wenn dessen Container genau so breit ist wie gefragt und nicht in der Höhe begrenzt; sonst auf einem eigenen `NSLayoutManager`. UIKit setzt den Container eines nicht scrollenden `UITextView` auf die Höhe der View; `InkNoteTextView.layoutSubviews` hebt das wieder auf, sonst wird nach einem Zusammenführen die letzte Zeile abgeschnitten. Test `BlockEditingTests.testMeasuringLeavesTheContainerAlone`.
 
 ## P-038 · Tastatur weiß nichts von Änderungen am Textspeicher
 
 **Symptom.** Auf dem iPad landen getippte Zeichen an falscher Stelle, Wörter werden zerhackt oder Autokorrektur ersetzt fremden Text, sobald der Editor selbst etwas umbaut (Return, Block-Kürzel, Stil).
 **Ursache.** Direkte Änderungen an `textStorage` gehen am Eingabesystem vorbei; dessen Puffer hält noch den alten Text. Ein selbst eingefügter Zeilenumbruch verschiebt alles Folgende.
-**Wache.** Return fügt das Textfeld selbst ein; der Editor setzt danach nur die Stile (`EditorEngine.finishNewline`). Jede eigene Änderung läuft durch `performEdit`, das auf dem iPad `inputDelegate.textWillChange/textDidChange` meldet, und jede eigene Auswahl durch `selectionWillChange/selectionDidChange`. Kein automatischer Test, die App hat kein Testziel. Prüfen: im Simulator „a, Return, b“ zügig tippen.
+**Wache.** Return fügt das Textfeld selbst ein; der Editor setzt danach nur die Stile (`EditorEngine.finishNewline`). Jede eigene Änderung läuft durch `performEdit`, das auf dem iPad `inputDelegate.textWillChange/textDidChange` meldet, und jede eigene Auswahl durch `selectionWillChange/selectionDidChange`. Kein automatischer Test für das Eingabesystem; die Testumgebung tippt ohne Tastatur-Puffer. Prüfen: im Simulator „a, Return, b“ zügig tippen.
 
 ## P-039 · Textfeld mit eigenem Container hält den Textspeicher nicht
 
@@ -241,7 +241,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Auf dem iPad wird nach Return in einer Liste oder Aufgabe der nächste Punkt zu normalem Text.
 **Ursache.** `UITextView` gibt eigene Attribute (`inkhash.blockType`) aus den Tippattributen nicht zuverlässig an neue Zeichen weiter. Der Stil eines Absatzes wurde aus seinem ersten Zeichen gelesen, und das hatte keinen.
-**Wache.** `EditorEngine.style(of:)` nimmt das erste Zeichen, das einen Stil trägt; ein letzter Absatz ohne solches nimmt den Stil der leeren Zeile (`trailing`). `restyle` schreibt ihn danach auf den ganzen Absatz. Kein automatischer Test, die App hat kein Testziel.
+**Wache.** `EditorEngine.style(of:)` nimmt das erste Zeichen, das einen Stil trägt; ein letzter Absatz ohne solches nimmt den Stil der leeren Zeile (`trailing`). `restyle` schreibt ihn danach auf den ganzen Absatz. Test `BlockEditingTests.testReturnContinuesListsAndTasks`.
 
 ## P-041 · Return per Tastenbefehl läuft am Delegate vorbei
 
@@ -352,4 +352,10 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Server-Tests und Swift-Tests sind grün, trotzdem lehnt der Server, was die App schickt, oder die App versteht seine Antwort nicht. Bei verschlüsselten Notizen fällt das erst auf einem zweiten Gerät auf.
 **Ursache.** Jede Seite testete gegen ihr eigenes Bild des Vertrags: der Server mit JSON von Hand, die App mit einem Fake-Transport.
 **Wache.** `make test` startet den echten Server auf einem freien Port und lässt `ContractTests` mit `APIClient`, `SealedTransport` und `SealedLooks` dagegen laufen (`tools/contract-test.sh`): Umstieg auf den Tresor, zweites Gerät, Konflikt, Retry, Bild, Passphrase, Reset. Neue Routen bekommen dort einen Fall.
+
+## P-059 · Code-Block per Kürzel kommt nie an
+
+**Symptom.** „```“ und Leerzeichen am Zeilenanfang macht keinen Code-Block. Die Backticks verschwinden oder bleiben als Text stehen.
+**Ursache.** Nach jedem Zeichen liest der Editor die Zeile als Inline-Markdown neu (`reconcileInline`). Zwei Backticks sind dort leerer Inline-Code und wurden entfernt, bevor der dritte und das Leerzeichen das Block-Kürzel (`BlockShortcut`) erreichen konnten.
+**Wache.** `EditorEngine.reconcileInline` lässt einen Absatz in Ruhe, der nur aus ein bis drei Backticks besteht. Test `BlockEditingTests.testCodeBlockKeepsItsLines`.
 
