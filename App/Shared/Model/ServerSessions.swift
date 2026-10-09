@@ -84,6 +84,24 @@ final class ServerSessions {
         }
     }
 
+    /// Changes the account's password on `server`. Nil on success, else what went wrong, in
+    /// words for the form. Other devices signed in to the account have to sign in again. See ADR 0050.
+    func changePassword(on server: UUID, current: String, new: String) async -> String? {
+        guard let client = client(for: server) else { return "Nicht angemeldet." }
+        do {
+            try await client.changePassword(current: current, to: new)
+            status.message = "Passwort geändert."
+            return nil
+        } catch APIError.wrongPassword {
+            return "Das bisherige Passwort stimmt nicht."
+        } catch APIError.unauthorized {
+            expire(server, ifStill: client.token)
+            return StatusLine.describe(APIError.unauthorized)
+        } catch {
+            return StatusLine.describe(error)
+        }
+    }
+
     /// Ends the session. Linked workspaces keep their notes and their binding; syncing pauses.
     func logout(_ server: UUID) {
         if let client = client(for: server) {

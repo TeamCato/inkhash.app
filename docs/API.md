@@ -16,6 +16,7 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | POST | `/v1/setup` | `{ "setupToken", "name", "password" }` → 201 `{ "token", "account": { "id", "name", "admin": true } }`, ohne Sitzung |
 | POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
 | DELETE | `/v1/session` | Sitzung beenden |
+| PUT | `/v1/password` | `{ "current", "password" }` → 204. Das eigene Passwort ändern. Die anderen Sitzungen des Accounts enden, die fragende bleibt (ADR 0050) |
 | GET | `/v1/accounts` | nur Admin: `{ "accounts": [{ "id", "name", "admin", "createdAt" }], "me" }`, nach Name; `me` ist der fragende Account |
 | POST | `/v1/accounts` | nur Admin: `{ "name", "password" }` → 201 `{ "id", "name", "admin": false, "createdAt" }`. Keine Sitzung für den neuen Account |
 | PATCH | `/v1/accounts/{id}` | nur Admin: `{ "name"?, "password"?, "admin"? }` → der Account. Ein neues Passwort beendet seine Sitzungen außer der fragenden |
@@ -54,6 +55,8 @@ Ein `PUT` mit passender `baseRevision` auf eine gelöschte Notiz holt sie zurüc
 `title` setzt der Client: automatisch aus dem Inhalt oder von Hand, siehe ADR 0019. Der Server prüft nur die Länge.
 
 Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür werden ignoriert. Notiz-IDs sind kleingeschriebene UUIDs. Account-IDs ebenfalls. Blob-Namen sind 64 hexadezimale Zeichen, kleingeschrieben.
+
+`PUT /v1/password` antwortet bei falschem `current` mit 403 `wrong-password`, nicht mit 401: die Sitzung bleibt gültig. Fehlversuche zählen wie beim Anmelden für Name und Adresse, danach 429 `slow-down`. Das neue Passwort hat 8–200 Zeichen, sonst 400.
 
 `POST /v1/setup` antwortet mit 401 bei falschem Setup-Token, 403 `setup-done`, wenn es schon einen Account gibt, und 429 `slow-down` nach zu vielen Fehlversuchen. Alle Routen unter `/v1/accounts` antworten ohne Sitzung mit 401, mit der Sitzung eines Accounts, der kein Admin ist, mit 403 `forbidden`, für eine unbekannte ID mit 404. Den letzten Admin zu löschen oder ihm die Rechte zu nehmen ist 400 mit `reason: "last admin"`. Siehe ADR 0046. 409 `name-taken`, wenn der Name schon da ist. Der Name ist 2–32 Zeichen, klein, aus Buchstaben, Ziffern, `.`, `_`, `-`, und beginnt und endet mit Buchstabe oder Ziffer. Das Passwort hat 8–200 Zeichen. `403 setup-done` kommt vor jeder Prüfung des Bodys.
 

@@ -806,3 +806,47 @@ test("data files are private to the server", async () => {
     assert.equal(mode(join(space, "changes.jsonl")), 0o600);
   });
 });
+
+test("an account changes its own password with the current one", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    const bea = await addAccount(port, ada.token, "bea");
+    const second = JSON.parse(
+      (await request(port, "POST", "/v1/session", { name: "bea", password: "secretsecret" }, null)).raw.toString("utf8"),
+    ) as Opened;
+
+    // A wrong current password is 403, not 401: the session stays good.
+    const wrong = await request(port, "PUT", "/v1/password", { current: "nichtrichtig", password: "neuesneues" }, bea.token);
+    assert.equal(wrong.status, 403);
+    assert.equal((JSON.parse(wrong.raw.toString("utf8")) as { error: string }).error, "wrong-password");
+    assert.equal((await request(port, "GET", "/v1/workspaces", undefined, bea.token)).status, 200);
+
+    // Too short, missing fields, no session.
+    assert.equal((await request(port, "PUT", "/v1/password", { current: "secretsecret", password: "kurz" }, bea.token)).status, 400);
+    assert.equal((await request(port, "PUT", "/v1/password", { password: "neuesneues" }, bea.token)).status, 400);
+    assert.equal((await request(port, "PUT", "/v1/password", { current: "secretsecret", password: "neuesneues" }, null)).status, 401);
+
+    const changed = await request(port, "PUT", "/v1/password", { current: "secretsecret", password: "neuesneues" }, bea.token);
+    assert.equal(changed.status, 204);
+    // The asking session goes on, the account's other sessions end.
+    assert.equal((await request(port, "GET", "/v1/workspaces", undefined, bea.token)).status, 200);
+    assert.equal((await request(port, "GET", "/v1/workspaces", undefined, second.token)).status, 401);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "bea", password: "secretsecret" }, null)).status, 401);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "bea", password: "neuesneues" }, null)).status, 200);
+    // Other accounts are untouched.
+    assert.equal((await request(port, "GET", "/v1/accounts", undefined, ada.token)).status, 200);
+  });
+});
+
+test("wrong current passwords lock the name like failed logins", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    for (let attempt = 0; attempt < NAME_LOCK_AFTER; attempt += 1) {
+      const wrong = await request(port, "PUT", "/v1/password", { current: `falsch-${attempt}`, password: "neuesneues" }, ada.token);
+      assert.equal(wrong.status, 403);
+    }
+    const locked = await request(port, "PUT", "/v1/password", { current: "secretsecret", password: "neuesneues" }, ada.token);
+    assert.equal(locked.status, 429);
+    assert.equal((await request(port, "POST", "/v1/session", { name: "ada", password: "secretsecret" }, null)).status, 429);
+  });
+});

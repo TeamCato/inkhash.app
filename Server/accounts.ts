@@ -414,6 +414,36 @@ export class Accounts {
   }
 
   /**
+   * An account changes its own password with the one it has. A wrong current password counts
+   * like a failed login and answers 403 `wrong-password`, not 401: the session is still good.
+   * The account's other sessions end; the asking one stays. See ADR 0050.
+   */
+  async changePassword(accountId: string, body: unknown, token: string, client: string): Promise<void> {
+    const key = clientKey(client);
+    if (this.clients.blocked(key)) throw slowDown();
+    if (!isRecord(body)) throw new StoreError(400, "bad-request");
+    if (typeof body.current !== "string") throw new StoreError(400, "bad-request", { reason: "current" });
+    const current = body.current;
+    const password = passwordOf(body.password);
+    const name = this.identityById(accountId).name;
+    if (this.names.blocked(name)) throw slowDown();
+    await this.limitHashing(key, async () => {
+      const identity = this.identityById(accountId);
+      if (!(await this.verifyPassword(current, identity.passwordHash))) {
+        this.names.fail(identity.name);
+        this.clients.fail(key);
+        throw new StoreError(403, "wrong-password");
+      }
+      this.names.clear(identity.name);
+      const passwordHash = await this.hashPassword(password);
+      // Read again: a rename may have landed while hashing.
+      const latest = this.identityById(accountId);
+      atomicWrite(join(this.identities, `${latest.name}.json`), Buffer.from(JSON.stringify({ ...latest, passwordHash })));
+    });
+    this.endSessions(accountId, token);
+  }
+
+  /**
    * Failures are counted after the hash, so without a bound a burst of requests would all
    * reach PBKDF2 before the first one counts. Beyond the bound the answer is 429 at once.
    */

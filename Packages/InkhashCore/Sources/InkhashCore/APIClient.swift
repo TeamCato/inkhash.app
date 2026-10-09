@@ -229,6 +229,16 @@ public struct APIClient: NoteTransport, Sendable {
         return try InkhashJSON.decode(ServerSession.self, from: data)
     }
 
+    /// Changes the account's own password. Its other sessions end, this one stays. See ADR 0050.
+    public func changePassword(current: String, to password: String) async throws {
+        let payload = try InkhashJSON.encode(["current": current, "password": password])
+        do {
+            _ = try await send(url: try endpoint("/v1/password"), method: "PUT", body: payload, contentType: "application/json")
+        } catch let APIError.badStatus(code, body) where code == 403 && body.contains("wrong-password") {
+            throw APIError.wrongPassword
+        }
+    }
+
     public func logout() async throws {
         _ = try await send(url: try endpoint("/v1/session"), method: "DELETE", body: nil, contentType: nil)
     }

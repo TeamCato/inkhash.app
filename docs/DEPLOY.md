@@ -114,7 +114,7 @@ Nur Proxys eintragen, die man selbst betreibt. Wer in der Liste steht, darf dem 
 
 ## Was der Betreiber sieht
 
-Notizen liegen unverschlüsselt im Datenverzeichnis. Wer Zugriff auf die Maschine hat, kann sie lesen. Der Admin vergibt die Startpasswörter, und es gibt noch keinen Weg, das eigene Passwort zu ändern. Wer Accounts für andere anlegt, sollte ihnen das sagen.
+Notizen liegen unverschlüsselt im Datenverzeichnis. Wer Zugriff auf die Maschine hat, kann sie lesen. Der Admin vergibt die Startpasswörter. Jeder Account ändert sein Passwort danach in der App selbst (ADR 0050). Wer Accounts für andere anlegt, sollte ihnen das sagen.
 
 ## Sichern und Wiederherstellen
 

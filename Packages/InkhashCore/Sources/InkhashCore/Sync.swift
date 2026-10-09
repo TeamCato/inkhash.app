@@ -109,6 +109,8 @@ public enum APIError: Error, Equatable {
     case notFound
     case badStatus(Int, String)
     case invalidResponse
+    /// The current password given to change it was wrong. The session is still good.
+    case wrongPassword
 }
 
 @MainActor

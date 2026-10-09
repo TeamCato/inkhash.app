@@ -233,6 +233,15 @@ const ROUTES: Route[] = [
     },
   },
   {
+    method: "PUT",
+    pattern: /^\/v1\/password$/,
+    access: "session",
+    handle: async (ctx) => {
+      await ctx.accounts.changePassword(accountOf(ctx), await readJson(ctx), ctx.token, ctx.client);
+      return { status: 204 };
+    },
+  },
+  {
     method: "POST",
     pattern: /^\/v1\/session$/,
     access: "open",
@@ -448,7 +457,9 @@ async function route(
   } catch (error) {
     if (error instanceof StoreError) {
       // For fail2ban. Never the name, the password or a token, see P-017.
-      if ((error.status === 401 || error.status === 429) && /^\/v1\/(setup|session)$/.test(url.pathname) && method === "POST") {
+      const signIn = /^\/v1\/(setup|session)$/.test(url.pathname) && method === "POST" && (error.status === 401 || error.status === 429);
+      const passwordChange = url.pathname === "/v1/password" && method === "PUT" && (error.status === 403 || error.status === 429);
+      if (signIn || passwordChange) {
         process.stderr.write(`auth failed ${url.pathname} ${error.status} from ${client}\n`);
       }
       reply(req, res, json(error.status, { error: error.code, ...error.extra }));
