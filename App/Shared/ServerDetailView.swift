@@ -54,32 +54,21 @@ struct ServerDetailView: View {
             Section {
                 Button("Abmelden") { model.sessions.logout(serverID) }
                 Button("Server entfernen", role: .destructive) { confirmRemoval = true }
+                    .confirmationDialog("Server entfernen?", isPresented: $confirmRemoval, titleVisibility: .visible) {
+                        Button("Entfernen", role: .destructive) {
+                            model.removeServer(serverID)
+                            dismiss()
+                        }
+                        Button("Abbrechen", role: .cancel) {}
+                    } message: {
+                        Text("Workspaces, die damit abgleichen, bleiben auf diesem Gerät und hören auf abzugleichen.")
+                    }
             } footer: {
                 Text("Abmelden beendet nur den Abgleich, die Notizen bleiben hier. Weitere Accounts legt der Admin unter \(ServerAddress.admin(server.url)) an.")
             }
         }
         .formStyle(.grouped)
         .navigationTitle(ServerAddress.host(server.url))
-        .confirmationDialog("Server entfernen?", isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button("Entfernen", role: .destructive) {
-                model.removeServer(serverID)
-                dismiss()
-            }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("Workspaces, die damit abgleichen, bleiben auf diesem Gerät und hören auf abzugleichen.")
-        }
-        .confirmationDialog(
-            deletion.map { "„\($0.remote.name)“ auf dem Server löschen?" } ?? "",
-            isPresented: Binding(get: { deletion != nil }, set: { if !$0 { deletion = nil } }),
-            titleVisibility: .visible,
-            presenting: deletion
-        ) { pending in
-            Button("Auf dem Server löschen", role: .destructive) { delete(pending.remote) }
-            Button("Abbrechen", role: .cancel) {}
-        } message: { pending in
-            Text(warning(for: pending))
-        }
         .task(id: serverID) { await loadRemotes() }
     }
 
@@ -175,6 +164,17 @@ struct ServerDetailView: View {
             .menuIndicator(.hidden)
             .fixedSize()
             .accessibilityLabel("Mehr zu „\(remote.name)“")
+            .confirmationDialog(
+                "„\(remote.name)“ auf dem Server löschen?",
+                isPresented: Binding(get: { deletion?.id == remote.id }, set: { if !$0 { deletion = nil } }),
+                titleVisibility: .visible,
+                presenting: deletion
+            ) { pending in
+                Button("Auf dem Server löschen", role: .destructive) { delete(pending.remote) }
+                Button("Abbrechen", role: .cancel) {}
+            } message: { pending in
+                Text(warning(for: pending))
+            }
         }
         #if os(iOS)
         .swipeActions {

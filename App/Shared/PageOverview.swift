@@ -56,18 +56,6 @@ struct PageOverview: View {
             if dragging == nil { order = ids }
         }
         .onDisappear { commit() }
-        .confirmationDialog(
-            "Seite löschen?",
-            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Seite löschen", role: .destructive) {
-                if let pageID = pendingDelete { model.library.deletePage(noteID: noteID, pageID: pageID) }
-                pendingDelete = nil
-            }
-        } message: {
-            Text("Die Seite verschwindet aus der Notiz. Ausschnitte daraus zeigen danach nichts mehr.")
-        }
     }
 
     private func tile(_ page: InkPage, number: Int, paper: Paper, count: Int) -> some View {
@@ -107,6 +95,18 @@ struct PageOverview: View {
                 Label("Seite löschen", systemImage: "trash")
             }
             .disabled(count < 2)
+        }
+        .confirmationDialog(
+            "Seite löschen?",
+            isPresented: Binding(get: { pendingDelete == page.id }, set: { if !$0 { pendingDelete = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Seite löschen", role: .destructive) {
+                model.library.deletePage(noteID: noteID, pageID: page.id)
+                pendingDelete = nil
+            }
+        } message: {
+            Text("Die Seite verschwindet aus der Notiz. Ausschnitte daraus zeigen danach nichts mehr.")
         }
         .accessibilityElement(children: .combine)
         .accessibilityLabel("Seite \(number)")

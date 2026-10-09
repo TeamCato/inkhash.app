@@ -54,36 +54,6 @@ struct SidebarView: View {
             Button("Abbrechen", role: .cancel) { folderPrompt = nil }
             Button(folderPrompt?.action ?? "OK") { commitFolder() }
         }
-        .confirmationDialog(
-            "Ordner entfernen?",
-            isPresented: Binding(get: { pendingRemoval != nil }, set: { if !$0 { pendingRemoval = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("Ordner entfernen", role: .destructive) {
-                if let pendingRemoval { model.library.removeFolder(pendingRemoval) }
-                pendingRemoval = nil
-            }
-            Button("Abbrechen", role: .cancel) { pendingRemoval = nil }
-        } message: {
-            Text("Die Notizen darin bleiben erhalten und rücken eine Ebene nach oben.")
-        }
-        .confirmationDialog(
-            "Diese Notiz in den Papierkorb legen?",
-            isPresented: Binding(get: { pendingDelete != nil }, set: { if !$0 { pendingDelete = nil } }),
-            titleVisibility: .visible
-        ) {
-            Button("In den Papierkorb", role: .destructive) {
-                if let pendingDelete { model.delete(id: pendingDelete) }
-                pendingDelete = nil
-            }
-            Button("Abbrechen", role: .cancel) { pendingDelete = nil }
-        }
-        .confirmationDialog("Papierkorb leeren?", isPresented: $confirmEmptyTrash, titleVisibility: .visible) {
-            Button("Endgültig löschen", role: .destructive) { model.emptyTrash() }
-            Button("Abbrechen", role: .cancel) {}
-        } message: {
-            Text("Notizen, deren Löschung noch nicht abgeglichen ist, bleiben bis nach dem Abgleich liegen.")
-        }
         .sheet(isPresented: $newWorkspace) {
             NavigationStack {
                 WorkspaceEditor(workspace: nil)
@@ -258,6 +228,19 @@ struct SidebarView: View {
             Divider()
             Button("Ordner entfernen", systemImage: "folder.badge.minus", role: .destructive) { pendingRemoval = node.path }
         }
+        .confirmationDialog(
+            "Ordner entfernen?",
+            isPresented: Binding(get: { pendingRemoval == node.path }, set: { if !$0 { pendingRemoval = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Ordner entfernen", role: .destructive) {
+                model.library.removeFolder(node.path)
+                pendingRemoval = nil
+            }
+            Button("Abbrechen", role: .cancel) { pendingRemoval = nil }
+        } message: {
+            Text("Die Notizen darin bleiben erhalten und rücken eine Ebene nach oben.")
+        }
     }
 
     fileprivate func noteRow(_ record: NoteRecord) -> some View {
@@ -287,6 +270,7 @@ struct SidebarView: View {
         .swipeActions(edge: .trailing) { trailingSwipe(record) }
         .swipeActions(edge: .leading) { leadingSwipe(record) }
         .contextMenu { menu(for: record) }
+        .modifier(deleteConfirmation(for: record.id))
     }
 
     private func count(_ value: Int) -> some View {
@@ -315,6 +299,12 @@ struct SidebarView: View {
                     Spacer()
                     if model.section == .trash {
                         Button("Leeren") { confirmEmptyTrash = true }
+                            .confirmationDialog("Papierkorb leeren?", isPresented: $confirmEmptyTrash, titleVisibility: .visible) {
+                                Button("Endgültig löschen", role: .destructive) { model.emptyTrash() }
+                                Button("Abbrechen", role: .cancel) {}
+                            } message: {
+                                Text("Notizen, deren Löschung noch nicht abgeglichen ist, bleiben bis nach dem Abgleich liegen.")
+                            }
                             .buttonStyle(.plain)
                             .font(.system(size: 12))
                             .foregroundStyle(model.library.listing.trashCount == 0 ? Ink.muted : Ink.accent)
@@ -334,6 +324,7 @@ struct SidebarView: View {
                         .swipeActions(edge: .trailing) { trailingSwipe(item.record) }
                         .swipeActions(edge: .leading) { leadingSwipe(item.record) }
                         .contextMenu { menu(for: item.record) }
+                        .modifier(deleteConfirmation(for: item.id))
                 }
             }
             .listStyle(.sidebar)
@@ -348,6 +339,14 @@ struct SidebarView: View {
         case .favorites: return "Noch keine Favoriten."
         case .trash: return "Der Papierkorb ist leer."
         }
+    }
+
+    /// Attached per row so the iPad popover points at the note, not the middle of the sidebar.
+    private func deleteConfirmation(for id: UUID) -> DeleteConfirmation {
+        DeleteConfirmation(
+            isPresented: Binding(get: { pendingDelete == id }, set: { if !$0 { pendingDelete = nil } }),
+            confirm: { model.delete(id: id); pendingDelete = nil }
+        )
     }
 
     @ViewBuilder
@@ -533,5 +532,17 @@ struct WorkspaceSwitcher: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .accessibilityLabel("Workspace: \(model.registry.current.name)")
+    }
+}
+
+private struct DeleteConfirmation: ViewModifier {
+    @Binding var isPresented: Bool
+    var confirm: () -> Void
+
+    func body(content: Content) -> some View {
+        content.confirmationDialog("Diese Notiz in den Papierkorb legen?", isPresented: $isPresented, titleVisibility: .visible) {
+            Button("In den Papierkorb", role: .destructive, action: confirm)
+            Button("Abbrechen", role: .cancel) { isPresented = false }
+        }
     }
 }

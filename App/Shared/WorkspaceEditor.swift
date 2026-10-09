@@ -94,6 +94,13 @@ struct WorkspaceEditor: View {
             if let workspace, model.registry.workspaces.count > 1 {
                 Section {
                     Button("Vom Gerät entfernen", role: .destructive) { confirmRemoval = true }
+                    .confirmationDialog("Workspace vom Gerät entfernen?", isPresented: $confirmRemoval, titleVisibility: .visible) {
+                        Button("Entfernen", role: .destructive) {
+                            model.removeWorkspace(workspace.id)
+                            dismiss()
+                        }
+                        Button("Abbrechen", role: .cancel) {}
+                    }
                 } footer: {
                     Text(workspace.link == nil
                         ? "Die Notizen dieses Workspace liegen nur hier und wären danach weg."
@@ -118,13 +125,6 @@ struct WorkspaceEditor: View {
                 Button(workspace == nil ? "Anlegen" : "Sichern") { save() }
                     .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty)
             }
-        }
-        .confirmationDialog("Workspace vom Gerät entfernen?", isPresented: $confirmRemoval, titleVisibility: .visible) {
-            Button("Entfernen", role: .destructive) {
-                if let workspace { model.removeWorkspace(workspace.id) }
-                dismiss()
-            }
-            Button("Abbrechen", role: .cancel) {}
         }
         .onAppear(perform: load)
         .onChange(of: serverChoice) { _, _ in Task { await loadRemotes() } }
