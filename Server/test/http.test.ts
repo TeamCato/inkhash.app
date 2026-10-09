@@ -850,3 +850,187 @@ test("wrong current passwords lock the name like failed logins", async () => {
     assert.equal((await request(port, "POST", "/v1/session", { name: "ada", password: "secretsecret" }, null)).status, 429);
   });
 });
+
+const KEY_ID = "0b6f2c1e-5a4d-4e3f-9a8b-7c6d5e4f3a2b";
+
+function vaultBody(keyId = KEY_ID, wrapped = Buffer.alloc(60, 7).toString("base64")) {
+  return { keyId, kdf: { name: "pbkdf2-sha256", rounds: 600_000, salt: Buffer.alloc(16, 1).toString("base64") }, wrapped };
+}
+
+function sealedNote(id: string, sealed = Buffer.from(`cipher-${id}`).toString("base64"), deleted?: boolean) {
+  return { schemaVersion: 2, id, sealed, ...(deleted === undefined ? {} : { deleted }) };
+}
+
+test("health says the server keeps vaults", async () => {
+  await withServer(async (port) => {
+    const health = body<{ vault: boolean }>((await request(port, "GET", "/v1/health", undefined, null)).raw);
+    assert.equal(health.vault, true);
+  });
+});
+
+test("a vault is created once, rewrapped with its key, and never replaced by another key", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    assert.equal((await request(port, "GET", "/v1/vault", undefined, ada.token)).status, 404);
+    assert.equal((await request(port, "GET", "/v1/vault", undefined, null)).status, 401);
+
+    const created = await request(port, "PUT", "/v1/vault", vaultBody(), ada.token);
+    assert.equal(created.status, 201);
+    const vault = body<{ keyId: string; epoch: number; kdf: { rounds: number } }>(created.raw);
+    assert.equal(vault.keyId, KEY_ID);
+    assert.equal(vault.epoch, 0);
+
+    // A new passphrase for the same key.
+    const rewrapped = await request(port, "PUT", "/v1/vault", vaultBody(KEY_ID, Buffer.alloc(60, 9).toString("base64")), ada.token);
+    assert.equal(rewrapped.status, 200);
+    assert.equal(body<{ wrapped: string }>((await request(port, "GET", "/v1/vault", undefined, ada.token)).raw).wrapped, Buffer.alloc(60, 9).toString("base64"));
+
+    // Another device that raced gets the vault that is there.
+    const other = await request(port, "PUT", "/v1/vault", vaultBody("11111111-2222-4333-8444-555555555555"), ada.token);
+    assert.equal(other.status, 409);
+    assert.equal(body<{ error: string; vault: { keyId: string } }>(other.raw).vault.keyId, KEY_ID);
+
+    // Form only: the server cannot check more.
+    for (const bad of [
+      { ...vaultBody(), keyId: "nope" },
+      { ...vaultBody(), kdf: { name: "md5", rounds: 600_000, salt: "AAAA" } },
+      { ...vaultBody(), kdf: { name: "pbkdf2-sha256", rounds: 10, salt: "AAAA" } },
+      { ...vaultBody(), wrapped: "kein base64!" },
+      { ...vaultBody(), wrapped: "A".repeat(400) },
+    ]) {
+      assert.equal((await request(port, "PUT", "/v1/vault", bad, ada.token)).status, 400, JSON.stringify(bad));
+    }
+
+    // Each account has its own.
+    const bea = await addAccount(port, ada.token, "bea");
+    assert.equal((await request(port, "GET", "/v1/vault", undefined, bea.token)).status, 404);
+  });
+});
+
+test("a sealed account takes only sealed notes and encrypted blobs", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    const id = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    // Without a vault, sealed notes are refused.
+    const early = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: sealedNote(id) }, ada.token);
+    assert.equal(early.status, 400);
+    assert.equal(body<{ reason: string }>(early.raw).reason, "no vault");
+
+    await request(port, "PUT", "/v1/vault", vaultBody(), ada.token);
+    const plain = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: textNote(id) }, ada.token);
+    assert.equal(plain.status, 400);
+    assert.equal(body<{ reason: string }>(plain.raw).reason, "sealed");
+
+    const created = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: sealedNote(id) }, ada.token);
+    assert.equal(created.status, 201);
+    const stored = body<{ schemaVersion: number; revision: number; sealed: string; deletedAt: string | null }>(created.raw);
+    assert.equal(stored.schemaVersion, 2);
+    assert.equal(stored.revision, 1);
+    assert.equal(stored.deletedAt, null);
+    assert.deepEqual(body<unknown>((await request(port, "GET", `/v1/notes/${id}`, undefined, ada.token)).raw), stored);
+
+    // The same bytes again are a retry, other bytes on an old revision a conflict.
+    const retry = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: sealedNote(id) }, ada.token);
+    assert.equal(retry.status, 200);
+    assert.equal(body<{ revision: number }>(retry.raw).revision, 1);
+    const clash = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: sealedNote(id, "b3RoZXI=") }, ada.token);
+    assert.equal(clash.status, 409);
+    assert.equal(body<{ note: { sealed: string } }>(clash.raw).note.sealed, stored.sealed);
+
+    // `deleted: true` writes a tombstone without restoring in between; without it the note comes back.
+    const trashed = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 1, note: sealedNote(id, "dHJhc2g=", true) }, ada.token);
+    assert.equal(trashed.status, 200);
+    assert.ok(body<{ deletedAt: string | null }>(trashed.raw).deletedAt);
+    const changes = body<{ changes: { deleted: boolean; revision: number }[] }>((await request(port, "GET", "/v1/changes?after=0", undefined, ada.token)).raw);
+    assert.deepEqual(changes.changes.map((change) => [change.revision, change.deleted]), [[2, true]]);
+    const back = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 2, note: sealedNote(id, "YmFjaw==") }, ada.token);
+    assert.equal(body<{ deletedAt: string | null }>(back.raw).deletedAt, null);
+    const removed = await request(port, "DELETE", `/v1/notes/${id}?baseRevision=3`, undefined, ada.token);
+    assert.equal(body<{ sealed: string }>(removed.raw).sealed, "YmFjaw==");
+
+    for (const bad of [{ ...sealedNote(id), sealed: "" }, { ...sealedNote(id), sealed: "nicht base64" }, { ...sealedNote(id), deleted: "ja" }]) {
+      const answer = await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 4, note: bad }, ada.token);
+      assert.equal(answer.status, 400, JSON.stringify(bad));
+    }
+
+    // A blob named by its own hash is plain; any other name is taken as it is.
+    const bytes = Buffer.from("strokes");
+    const digest = createHash("sha256").update(bytes).digest("hex");
+    const refused = await request(port, "PUT", `/v1/blobs/${digest}`, bytes, ada.token);
+    assert.equal(refused.status, 400);
+    assert.equal(body<{ reason: string }>(refused.raw).reason, "sealed");
+    const name = "a".repeat(64);
+    assert.equal((await request(port, "PUT", `/v1/blobs/${name}`, Buffer.from("cipher"), ada.token)).status, 204);
+    assert.equal((await request(port, "GET", `/v1/blobs/${name}`, undefined, ada.token)).raw.toString(), "cipher");
+  });
+});
+
+test("once every note is sealed, plain blobs go, except the workspace picture", async () => {
+  await withServer(async (port, root) => {
+    const ada = await openAccount(port);
+    const id = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    const drawing = Buffer.from("plain strokes");
+    const picture = Buffer.from("plain picture");
+    const drawingSha = createHash("sha256").update(drawing).digest("hex");
+    const pictureSha = createHash("sha256").update(picture).digest("hex");
+    await request(port, "PUT", `/v1/blobs/${drawingSha}`, drawing, ada.token);
+    await request(port, "PUT", `/v1/blobs/${pictureSha}`, picture, ada.token);
+    await request(port, "PATCH", "/v1/workspaces/main", { icon: pictureSha }, ada.token);
+    await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: textNote(id) }, ada.token);
+    const blobs = join(root, "spaces", ada.account.id, "blobs");
+
+    await request(port, "PUT", "/v1/vault", vaultBody(), ada.token);
+    // A plain note is still there: nothing goes yet, and it can still be read for the move.
+    assert.equal((await request(port, "GET", `/v1/blobs/${drawingSha}`, undefined, ada.token)).status, 200);
+
+    assert.equal((await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 1, note: sealedNote(id) }, ada.token)).status, 200);
+    // The next request finds the workspace sealed and tidies up.
+    await request(port, "GET", "/v1/changes?after=0", undefined, ada.token);
+    assert.deepEqual(readdirSync(blobs).sort(), [pictureSha]);
+    assert.equal((await request(port, "GET", `/v1/blobs/${drawingSha}`, undefined, ada.token)).status, 404);
+
+    // A new, encrypted picture replaces the plain one, which goes too.
+    const sealedPicture = "b".repeat(64);
+    await request(port, "PUT", `/v1/blobs/${sealedPicture}`, Buffer.from("cipher picture"), ada.token);
+    assert.equal((await request(port, "PATCH", "/v1/workspaces/main", { icon: sealedPicture }, ada.token)).status, 200);
+    assert.deepEqual(readdirSync(blobs).sort(), [sealedPicture]);
+  });
+});
+
+test("resetting a vault needs the login password and starts the account's server copy over", async () => {
+  await withServer(async (port, root) => {
+    const ada = await openAccount(port);
+    const work = body<{ id: string }>((await request(port, "POST", "/v1/workspaces", { name: "Arbeit" }, ada.token)).raw);
+    await request(port, "PUT", "/v1/vault", vaultBody(), ada.token);
+    const id = "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10";
+    await request(port, "PUT", `/v1/notes/${id}`, { baseRevision: 0, note: sealedNote(id) }, ada.token);
+    await request(port, "PUT", `/v1/workspaces/${work.id}/notes/${id}`, { baseRevision: 0, note: sealedNote(id) }, ada.token);
+    await request(port, "PUT", `/v1/blobs/${"c".repeat(64)}`, Buffer.from("cipher"), ada.token);
+    await request(port, "PATCH", "/v1/workspaces/main", { icon: "c".repeat(64) }, ada.token);
+    const before = body<{ cursor: number }>((await request(port, "GET", "/v1/changes?after=0", undefined, ada.token)).raw).cursor;
+
+    const wrong = await request(port, "DELETE", "/v1/vault", { password: "falschfalsch" }, ada.token);
+    assert.equal(wrong.status, 403);
+    assert.equal((await request(port, "GET", "/v1/vault", undefined, ada.token)).status, 200);
+
+    assert.equal((await request(port, "DELETE", "/v1/vault", { password: "secretsecret" }, ada.token)).status, 204);
+    assert.equal((await request(port, "GET", "/v1/vault", undefined, ada.token)).status, 404);
+    assert.equal((await request(port, "GET", `/v1/notes/${id}`, undefined, ada.token)).status, 404);
+    assert.equal((await request(port, "GET", `/v1/workspaces/${work.id}/notes/${id}`, undefined, ada.token)).status, 404);
+    const after = body<{ cursor: number; changes: unknown[] }>((await request(port, "GET", "/v1/changes?after=0", undefined, ada.token)).raw);
+    assert.deepEqual(after.changes, []);
+    assert.ok(after.cursor >= before, "cursors never go back");
+    const main = body<{ workspaces: { id: string; icon: string | null }[] }>((await request(port, "GET", "/v1/workspaces", undefined, ada.token)).raw);
+    assert.equal(main.workspaces.find((workspace) => workspace.id === "main")?.icon, null);
+
+    // Kept on disk, and the next vault counts the reset.
+    const kept = readdirSync(join(root, "spaces", ada.account.id, "deleted"));
+    assert.equal(kept.length, 1);
+    assert.ok(kept[0]?.startsWith("vault-reset-"));
+    const next = await request(port, "PUT", "/v1/vault", vaultBody("22222222-3333-4444-8555-666666666666"), ada.token);
+    assert.equal(body<{ epoch: number }>(next.raw).epoch, 1);
+    // Without a vault there is nothing to reset.
+    const bea = await addAccount(port, ada.token, "bea");
+    assert.equal((await request(port, "DELETE", "/v1/vault", { password: "secretsecret" }, bea.token)).status, 404);
+  });
+});

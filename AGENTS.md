@@ -36,7 +36,8 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 
 ## Befehle
 
-- `make test` — Swift-Paket und Server
+- `make test` — Swift-Paket, Server und der Vertragstest zwischen beiden (`make contract-test`)
+- `make app-test` — App-Tests im iPad-Simulator (Editor, Bibliothek, Export)
 - `make server` — API auf `127.0.0.1:8787`, Daten in `.data/`. Ohne Accounts steht der Setup-Token für `/admin` im Log
 - `make server-lan` — bindet `0.0.0.0`
 - `make server-test` — Testserver aus `.test-env/env`: eigener Port, alle Interfaces, eigene Daten. Die Datei ist lokal und nicht eingecheckt

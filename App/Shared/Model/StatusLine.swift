@@ -23,6 +23,12 @@ final class StatusLine {
             return "Der Server antwortete mit \(code)."
         case is URLError:
             return "Server nicht erreichbar."
+        case is SealError:
+            return "Eine Notiz vom Server ließ sich nicht entschlüsseln."
+        case VaultError.wrongPassphrase:
+            return "Die Passphrase stimmt nicht."
+        case is VaultError:
+            return "Der Tresor ließ sich nicht öffnen."
         case let error as KeychainError:
             return "Die Anmeldung ließ sich nicht im Schlüsselbund sichern (\(error.status))."
         default:

@@ -6,7 +6,13 @@ import { dirname, join } from "node:path";
 import { test } from "node:test";
 import { fileURLToPath } from "node:url";
 
-import { Conflict, Store, StoreError, type Note } from "../store.js";
+import { Conflict, Store, StoreError, isSealed, type Note, type StoredNote } from "../store.js";
+
+/** A note the test stored as plain JSON. */
+function asPlain(note: StoredNote): Note {
+  assert.ok(!isSealed(note), "expected a plain note");
+  return note;
+}
 
 function textNote(id: string, markdown = "# Hallo\n", tags: string[] = []): Note {
   return {
@@ -34,14 +40,14 @@ test("create, update, conflict, and tombstone", () => {
     const [status, created] = store.putNote(noteId, 0, textNote(noteId, "# Hallo\n", ["eigen"]));
     assert.equal(status, 201);
     assert.equal(created.revision, 1);
-    assert.equal(created.markdown, "# Hallo\n");
-    assert.deepEqual(created.tags, ["eigen"]);
+    assert.equal(asPlain(created).markdown, "# Hallo\n");
+    assert.deepEqual(asPlain(created).tags, ["eigen"]);
     assert.notEqual(created.updatedAt, "2026-09-30T06:00:00Z");
 
     const updated = textNote(noteId, "zweiter text", ["eigen"]);
     const [, stored] = store.putNote(noteId, 1, updated);
     assert.equal(stored.revision, 2);
-    assert.equal(stored.markdown, "zweiter text");
+    assert.equal(asPlain(stored).markdown, "zweiter text");
 
     assert.throws(
       () => store.putNote(noteId, 1, textNote(noteId, "anderes gerät", ["eigen"])),
@@ -50,7 +56,7 @@ test("create, update, conflict, and tombstone", () => {
 
     const deleted = store.deleteNote(noteId, 2);
     assert.ok(deleted.deletedAt);
-    assert.equal(deleted.markdown, "zweiter text");
+    assert.equal(asPlain(deleted).markdown, "zweiter text");
     const changes = store.changes(0);
     assert.equal(changes.cursor, 3);
     assert.equal(changes.changes.length, 1, "one entry per note");
@@ -89,9 +95,9 @@ test("blob hash and fixture roundtrip", () => {
     const fixture = JSON.parse(readFileSync(fixturePath, "utf8")) as Note;
     const [status, stored] = store.putNote(fixture.id, 0, fixture);
     assert.equal(status, 201);
-    assert.equal(stored.transcript, "Reise #alpen");
-    assert.deepEqual(stored.tags, ["alpen"]);
-    assert.equal(stored.pages?.[0]?.blob, fixture.pages?.[0]?.blob);
+    assert.equal(asPlain(stored).transcript, "Reise #alpen");
+    assert.deepEqual(asPlain(stored).tags, ["alpen"]);
+    assert.equal(asPlain(stored).pages?.[0]?.blob, fixture.pages?.[0]?.blob);
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -246,11 +252,11 @@ test("folder and favorite are checked and old notes read without them", () => {
     delete legacy.folder;
     delete legacy.favorite;
     const [, created] = store.putNote(noteId, 0, legacy);
-    assert.equal(created.folder, "");
-    assert.equal(created.favorite, false);
+    assert.equal(asPlain(created).folder, "");
+    assert.equal(asPlain(created).favorite, false);
     const [, moved] = store.putNote(noteId, 1, { ...textNote(noteId), folder: "Reisen/Dänemark", favorite: true });
     assert.equal(moved.revision, 2);
-    assert.equal(store.getNote(noteId).folder, "Reisen/Dänemark");
+    assert.equal(asPlain(store.getNote(noteId)).folder, "Reisen/Dänemark");
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -310,8 +316,8 @@ test("elements of every kind round trip in a fixed key order", () => {
     ];
     const [status, stored] = store.putNote(B, 0, inkNote(B, sent));
     assert.equal(status, 201);
-    const elements = store.getNote(B).pages?.[0]?.elements;
-    assert.deepEqual(elements, stored.pages?.[0]?.elements);
+    const elements = asPlain(store.getNote(B)).pages?.[0]?.elements;
+    assert.deepEqual(elements, asPlain(stored).pages?.[0]?.elements);
     assert.deepEqual(elements, [
       {
         ...base(E1, "image"),
@@ -385,7 +391,7 @@ test("pages without elements are served with an empty list", () => {
   withRoot((root) => {
     const store = new Store(root);
     const [, created] = store.putNote(B, 0, inkNote(B));
-    assert.deepEqual(created.pages?.[0]?.elements, []);
+    assert.deepEqual(asPlain(created).pages?.[0]?.elements, []);
 
     // A note stored by a server before ADR 0028.
     const path = join(root, "notes", `${B}.json`);
@@ -393,7 +399,7 @@ test("pages without elements are served with an empty list", () => {
     for (const page of legacy.pages) delete page.elements;
     writeFileSync(path, JSON.stringify(legacy));
     const reopened = new Store(root);
-    assert.deepEqual(reopened.getNote(B).pages?.[0]?.elements, []);
+    assert.deepEqual(asPlain(reopened.getNote(B)).pages?.[0]?.elements, []);
     const [status, retried] = reopened.putNote(B, 0, inkNote(B, []));
     assert.equal(status, 200, "an empty list equals a missing one in the retry comparison");
     assert.equal(retried.revision, 1);
@@ -437,8 +443,8 @@ test("paper is checked, stored and part of the retry comparison", () => {
     assert.equal("paper" in plain, false);
 
     const [, cream] = store.putNote(noteId, 1, { ...textNote(noteId), paper: { color: "#faf5e8" } });
-    assert.deepEqual(cream.paper, { color: "#FAF5E8", pattern: "blank" });
-    assert.deepEqual(store.getNote(noteId).paper, { color: "#FAF5E8", pattern: "blank" });
+    assert.deepEqual(asPlain(cream).paper, { color: "#FAF5E8", pattern: "blank" });
+    assert.deepEqual(asPlain(store.getNote(noteId)).paper, { color: "#FAF5E8", pattern: "blank" });
 
     // A retry with the same paper is the stored note; another paper is a conflict.
     const [status, again] = store.putNote(noteId, 1, { ...textNote(noteId), paper: { color: "#FAF5E8", pattern: "blank" } });
@@ -448,7 +454,7 @@ test("paper is checked, stored and part of the retry comparison", () => {
 
     const inkId = "11111111-2222-4333-8444-555555555555";
     const [, lined] = store.putNote(inkId, 0, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines" } });
-    assert.deepEqual(lined.paper, { color: "#FDFDFC", pattern: "lines" });
+    assert.deepEqual(asPlain(lined).paper, { color: "#FDFDFC", pattern: "lines" });
 
     // Spacing (ADR 0047): a whole number in range, only with a pattern, and part of the content.
     const otherInk = "22222222-2222-4333-8444-555555555555";
@@ -468,8 +474,8 @@ test("paper is checked, stored and part of the retry comparison", () => {
     assert.equal(reason({ ...textNote(noteId), paper: { color: "#FAF5E8", spacing: 40 } }), "paper");
 
     const [, wide] = store.putNote(inkId, 1, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 48 } });
-    assert.deepEqual(wide.paper, { color: "#FDFDFC", pattern: "lines", spacing: 48 });
-    assert.deepEqual(store.getNote(inkId).paper, { color: "#FDFDFC", pattern: "lines", spacing: 48 });
+    assert.deepEqual(asPlain(wide).paper, { color: "#FDFDFC", pattern: "lines", spacing: 48 });
+    assert.deepEqual(asPlain(store.getNote(inkId)).paper, { color: "#FDFDFC", pattern: "lines", spacing: 48 });
     assert.throws(
       () => store.putNote(inkId, 1, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 40 } }),
       Conflict,
@@ -501,12 +507,12 @@ test("createdAt is checked, kept when left out, and part of the retry comparison
     assert.equal("createdAt" in plain, false);
 
     const [, dated] = store.putNote(noteId, 1, { ...textNote(noteId), createdAt: "2026-09-29T18:30:00Z" });
-    assert.equal(dated.createdAt, "2026-09-29T18:30:00Z");
+    assert.equal(asPlain(dated).createdAt, "2026-09-29T18:30:00Z");
 
     // A client that does not know the field keeps the stored date.
     const [, edited] = store.putNote(noteId, 2, { ...textNote(noteId, "# Neu\n") });
-    assert.equal(edited.createdAt, "2026-09-29T18:30:00Z");
-    assert.equal(store.getNote(noteId).createdAt, "2026-09-29T18:30:00Z");
+    assert.equal(asPlain(edited).createdAt, "2026-09-29T18:30:00Z");
+    assert.equal(asPlain(store.getNote(noteId)).createdAt, "2026-09-29T18:30:00Z");
 
     // A retry with the same date is the stored note; another date is a conflict.
     const [status, again] = store.putNote(noteId, 2, { ...textNote(noteId, "# Neu\n"), createdAt: "2026-09-29T18:30:00Z" });

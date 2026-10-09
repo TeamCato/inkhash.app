@@ -27,6 +27,15 @@ struct RootView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
+        // Over everything, also over the settings: syncing waits for it. See ADR 0052.
+        .sheet(isPresented: Binding(
+            get: { model.vaults.prompt != nil && !showSettings },
+            set: { if !$0, let server = model.vaults.prompt, model.vaults.key(for: server) == nil { model.vaults.postpone(server) } }
+        )) {
+            if let server = model.vaults.prompt {
+                VaultSheet(serverID: server)
+            }
+        }
         .onAppear { Task { await model.sync() } }
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.sync() } }

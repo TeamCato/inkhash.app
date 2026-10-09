@@ -71,9 +71,9 @@ export class StoreError extends Error {
 }
 
 export class Conflict extends StoreError {
-  readonly note: Note;
+  readonly note: StoredNote;
 
-  constructor(note: Note) {
+  constructor(note: StoredNote) {
     super(409, "conflict", { note });
     this.note = note;
   }
@@ -142,6 +142,33 @@ export interface Note {
   updatedAt: string;
   deletedAt: string | null;
 }
+
+/**
+ * A note the server cannot read: everything a person wrote lies encrypted in `sealed`.
+ * Revision, timestamps and the tombstone stay plain for syncing. See ADR 0052.
+ */
+export interface SealedNote {
+  schemaVersion: 2;
+  id: string;
+  revision: number;
+  updatedAt: string;
+  deletedAt: string | null;
+  /** Base64 of the device's ciphertext. The server only checks its form and length. */
+  sealed: string;
+}
+
+export type StoredNote = Note | SealedNote;
+
+export function isSealed(note: StoredNote): note is SealedNote {
+  return note.schemaVersion === 2;
+}
+
+/** Longest `sealed`, in characters. The JSON body limit stops longer ones anyway. */
+export const MAX_SEALED = 2_000_000;
+const BASE64_RE = /^[A-Za-z0-9+/]*={0,2}$/;
+
+/** Written once a sealed workspace has dropped its plain blobs. See ADR 0052. */
+const PURGED_MARKER = "plain-purged";
 
 export function canonicalId(value: unknown): string {
   if (typeof value !== "string" || !UUID_RE.test(value.toLowerCase())) {
@@ -382,7 +409,14 @@ export class Store {
   readonly root: string;
   readonly notes: string;
   readonly blobs: string;
+  /**
+   * The account has a vault: notes must come sealed, blobs encrypted. Set by `Accounts`
+   * on every request. See ADR 0052.
+   */
+  sealed = false;
   private readonly changesPath: string;
+  /** Notes stored as plain JSON. Once the account is sealed, they go up again encrypted. */
+  private readonly plain = new Set<string>();
   /** Latest log entry per note. Older entries of the same note carry no information for a client. */
   private readonly latest = new Map<string, ChangeEntry>();
   private head = 0;
@@ -417,32 +451,69 @@ export class Store {
     return { cursor, changes: page.map((entry) => ({ ...entry })), hasMore };
   }
 
-  getNote(noteId: string): Note {
+  getNote(noteId: string): StoredNote {
     const id = canonicalId(noteId);
     const note = this.readNote(id);
     if (!note) throw new StoreError(404, "not-found");
     return note;
   }
 
-  putNote(noteId: string, baseRevision: number, body: unknown): [number, Note] {
+  putNote(noteId: string, baseRevision: number, body: unknown): [number, StoredNote] {
     const id = canonicalId(noteId);
+    if (isRecord(body) && body.schemaVersion === 2) return this.putSealed(id, baseRevision, body);
+    if (this.sealed) throw new StoreError(400, "bad-request", { reason: "sealed" });
     const note = this.normalize(id, body);
     const existing = this.readNote(id);
     // A client from before ADR 0048 leaves the date out; the note keeps the one it has.
-    if (note.createdAt === undefined && existing?.createdAt !== undefined) note.createdAt = existing.createdAt;
+    if (note.createdAt === undefined && existing && !isSealed(existing) && existing.createdAt !== undefined) note.createdAt = existing.createdAt;
     if (!existing) {
       if (baseRevision !== 0) throw new StoreError(404, "not-found", { reason: "unknown note" });
       return [201, this.writeNew(note, 1, null)];
     }
     if (existing.revision !== baseRevision) {
       // A retry whose first attempt was stored but whose answer got lost.
-      if (existing.deletedAt === null && contentKey(existing) === contentKey(note)) return [200, existing];
+      if (!isSealed(existing) && existing.deletedAt === null && contentKey(existing) === contentKey(note)) return [200, existing];
       throw new Conflict(existing);
     }
     return [200, this.writeNew(note, existing.revision + 1, null)];
   }
 
-  deleteNote(noteId: string, baseRevision: number): Note {
+  /**
+   * A sealed note. `deleted: true` stores it as a tombstone, so notes in the trash can be
+   * resealed without coming back for a moment. A retry is the same `sealed` with the same
+   * tombstone state. See ADR 0052.
+   */
+  private putSealed(id: string, baseRevision: number, body: Record<string, unknown>): [number, SealedNote] {
+    if (!this.sealed) throw new StoreError(400, "bad-request", { reason: "no vault" });
+    if (canonicalId(String(body.id ?? "")) !== id) throw new StoreError(400, "bad-request", { reason: "id mismatch" });
+    const sealed = body.sealed;
+    if (typeof sealed !== "string" || sealed.length === 0 || sealed.length > MAX_SEALED || sealed.length % 4 !== 0 || !BASE64_RE.test(sealed)) {
+      throw new StoreError(400, "bad-request", { reason: "sealed" });
+    }
+    const deleted = body.deleted ?? false;
+    if (typeof deleted !== "boolean") throw new StoreError(400, "bad-request", { reason: "deleted" });
+    const existing = this.readNote(id);
+    if (!existing) {
+      if (baseRevision !== 0) throw new StoreError(404, "not-found", { reason: "unknown note" });
+      return [201, this.writeSealed(id, sealed, 1, deleted ? nowStamp() : null)];
+    }
+    if (existing.revision !== baseRevision) {
+      if (isSealed(existing) && existing.sealed === sealed && (existing.deletedAt !== null) === deleted) return [200, existing];
+      throw new Conflict(existing);
+    }
+    const deletedAt = deleted ? (existing.deletedAt ?? nowStamp()) : null;
+    return [200, this.writeSealed(id, sealed, existing.revision + 1, deletedAt)];
+  }
+
+  private writeSealed(id: string, sealed: string, revision: number, deletedAt: string | null): SealedNote {
+    const now = nowStamp();
+    const stored: SealedNote = { schemaVersion: 2, id, revision, updatedAt: deletedAt ?? now, deletedAt, sealed };
+    if (deletedAt === null) stored.updatedAt = now;
+    this.commit(stored);
+    return stored;
+  }
+
+  deleteNote(noteId: string, baseRevision: number): StoredNote {
     const id = canonicalId(noteId);
     const existing = this.readNote(id);
     if (!existing) throw new StoreError(404, "not-found");
@@ -455,10 +526,18 @@ export class Store {
     return existing;
   }
 
+  /**
+   * Plain accounts name a blob by its SHA-256. Sealed ones by a name only the devices can make;
+   * a blob named by its own hash is plain and refused there. See ADR 0052.
+   */
   putBlob(digest: string, data: Buffer): void {
     if (!SHA_RE.test(digest)) throw new StoreError(400, "bad-request", { reason: "invalid blob" });
     const actual = createHash("sha256").update(data).digest("hex");
-    if (actual !== digest) throw new StoreError(400, "bad-request", { reason: "hash mismatch" });
+    if (this.sealed) {
+      if (actual === digest) throw new StoreError(400, "bad-request", { reason: "sealed" });
+    } else if (actual !== digest) {
+      throw new StoreError(400, "bad-request", { reason: "hash mismatch" });
+    }
     const path = join(this.blobs, digest);
     if (existsSync(path)) return;
     atomicWrite(path, data);
@@ -473,6 +552,57 @@ export class Store {
     const path = join(this.blobs, digest);
     if (!existsSync(path)) throw new StoreError(404, "not-found");
     return readFileSync(path);
+  }
+
+  /** How many notes still lie here as plain JSON. */
+  get plainCount(): number {
+    return this.plain.size;
+  }
+
+  /** True once `purgePlain` has run here. */
+  get purged(): boolean {
+    return existsSync(join(this.root, PURGED_MARKER));
+  }
+
+  /**
+   * Deletes every plain blob, recognised by a name that is its own SHA-256, except those in
+   * `keep`. Only once all notes are sealed, and only once per store. See ADR 0052.
+   */
+  purgePlain(keep: ReadonlySet<string>): number {
+    if (!this.sealed || this.plain.size > 0 || this.purged) return 0;
+    let removed = 0;
+    for (const name of readdirSync(this.blobs)) {
+      if (!SHA_RE.test(name) || keep.has(name)) continue;
+      const path = join(this.blobs, name);
+      if (createHash("sha256").update(readFileSync(path)).digest("hex") === name) {
+        rmSync(path, { force: true });
+        removed += 1;
+      }
+    }
+    atomicWrite(join(this.root, PURGED_MARKER), Buffer.from(`${nowStamp()}\n`));
+    return removed;
+  }
+
+  /** Removes a blob if it is plain. For a workspace picture that was replaced. */
+  dropPlainBlob(digest: string): void {
+    if (!SHA_RE.test(digest)) return;
+    const path = join(this.blobs, digest);
+    if (existsSync(path) && createHash("sha256").update(readFileSync(path)).digest("hex") === digest) rmSync(path, { force: true });
+  }
+
+  /**
+   * Moves notes and blobs to `target` and starts empty. The change log stays, so cursors keep
+   * growing and no device skips a change. For resetting a vault, see ADR 0052.
+   */
+  wipe(target: string): void {
+    mkdirSync(target, { recursive: true, mode: DIR_MODE });
+    for (const [path, name] of [[this.notes, "notes"], [this.blobs, "blobs"]] as const) {
+      if (existsSync(path)) renameSync(path, join(target, name));
+      mkdirSync(path, { recursive: true, mode: DIR_MODE });
+    }
+    rmSync(join(this.root, PURGED_MARKER), { force: true });
+    this.latest.clear();
+    this.plain.clear();
   }
 
   private normalize(noteId: string, body: unknown): Note {
@@ -600,12 +730,18 @@ export class Store {
   }
 
   /** The note file first, then the log. A crash in between is repaired by `load`. */
-  private commit(note: Note): void {
+  private commit(note: StoredNote): void {
     atomicWrite(this.notePath(note.id), Buffer.from(JSON.stringify(note, null, 2)));
+    this.track(note);
     this.append(note);
   }
 
-  private append(note: Note): void {
+  private track(note: StoredNote): void {
+    if (isSealed(note)) this.plain.delete(note.id);
+    else this.plain.add(note.id);
+  }
+
+  private append(note: StoredNote): void {
     const entry: ChangeEntry = {
       cursor: this.head + 1,
       noteId: note.id,
@@ -650,7 +786,7 @@ export class Store {
       if (!name.endsWith(".json")) continue;
       const id = name.slice(0, -".json".length);
       if (!UUID_RE.test(id)) continue;
-      let note: Note | null;
+      let note: StoredNote | null;
       try {
         note = this.readNote(id);
       } catch {
@@ -658,6 +794,7 @@ export class Store {
       }
       if (!note) continue;
       onDisk.add(id);
+      this.track(note);
       const logged = this.latest.get(id);
       const deleted = note.deletedAt !== null;
       if (!logged || logged.revision !== note.revision || logged.deleted !== deleted) this.append(note);
@@ -706,10 +843,12 @@ export class Store {
     return entries;
   }
 
-  private readNote(noteId: string): Note | null {
+  private readNote(noteId: string): StoredNote | null {
     const path = this.notePath(noteId);
     if (!existsSync(path)) return null;
-    const note = JSON.parse(readFileSync(path, "utf8")) as Note;
+    const stored = JSON.parse(readFileSync(path, "utf8")) as StoredNote;
+    if (isSealed(stored)) return stored;
+    const note = stored;
     // Notes stored before folders existed.
     note.folder ??= "";
     note.favorite ??= false;

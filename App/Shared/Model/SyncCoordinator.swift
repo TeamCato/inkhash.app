@@ -2,11 +2,13 @@ import Foundation
 import InkhashCore
 
 /// When and what to sync: waits for a pause in editing, then syncs the look and order of the
-/// workspaces and every linked library. See ADR 0017, 0020, 0043 and PITFALLS P-053.
+/// workspaces and every linked library, all through the vault key of their server.
+/// See ADR 0017, 0020, 0043, 0052 and PITFALLS P-053.
 @MainActor
 final class SyncCoordinator {
     private let registry: WorkspaceRegistry
     private let sessions: ServerSessions
+    private let vaults: VaultSessions
     private let library: NoteLibrary
     private let status: StatusLine
     private var waiting: Task<Void, Never>?
@@ -15,9 +17,10 @@ final class SyncCoordinator {
     /// Called after each round, once the library is read again.
     var finished: () -> Void = {}
 
-    init(registry: WorkspaceRegistry, sessions: ServerSessions, library: NoteLibrary, status: StatusLine) {
+    init(registry: WorkspaceRegistry, sessions: ServerSessions, vaults: VaultSessions, library: NoteLibrary, status: StatusLine) {
         self.registry = registry
         self.sessions = sessions
+        self.vaults = vaults
         self.library = library
         self.status = status
     }
@@ -33,7 +36,16 @@ final class SyncCoordinator {
     /// What the status line says while nothing happens.
     var statusAtRest: String {
         guard let link = registry.current.link, let server = registry.server(link.server) else { return StatusLine.localOnly }
-        return sessions.isSignedIn(server.id) ? "" : "Abgleich mit \(ServerAddress.host(server.url)) ruht."
+        guard sessions.isSignedIn(server.id) else { return "Abgleich mit \(ServerAddress.host(server.url)) ruht." }
+        return vaults.key(for: server.id) == nil ? Self.waitingForVault(vaults.state(of: server.id)) : ""
+    }
+
+    static func waitingForVault(_ state: VaultState) -> String {
+        switch state {
+        case .serverTooOld: "Der Server kann noch nicht verschlüsseln. Der Abgleich ruht bis zum Update."
+        case .failed(let reason): reason
+        default: "Der Abgleich wartet auf den Tresor."
+        }
     }
 
     /// Waits for a pause in editing, then syncs. A new edit only restarts the wait: cancelling
@@ -64,16 +76,23 @@ final class SyncCoordinator {
     }
 
     private func syncOnce() async {
+        await checkVaults()
         await syncLooks()
         for workspace in registry.workspaces {
             guard let link = workspace.link, let entry = registry.server(link.server),
                   let client = sessions.client(for: link.server, workspace: link.remote) else { continue }
             let isCurrent = workspace.id == registry.current.id
+            guard let key = vaults.key(for: link.server) else {
+                if isCurrent { status.message = Self.waitingForVault(vaults.state(of: link.server)) }
+                continue
+            }
             let store = registry.store(for: workspace.id)
             do {
-                // Binding is idempotent. A different account or workspace on the server starts over.
-                try Library.bind(store, to: Workspaces.bindingKey(accountID: entry.accountID, remote: link.remote))
-                let report = try await Syncer.sync(store: store, transport: client) { [weak self] note, meta in
+                // Binding is idempotent. A different account or workspace on the server, or a reset
+                // vault, starts over.
+                try Library.bind(store, to: Workspaces.bindingKey(accountID: entry.accountID, remote: link.remote, epoch: key.epoch))
+                let transport = SealedTransport(wire: client, sealer: Sealer(key))
+                let report = try await Syncer.sync(store: store, transport: transport, sealedWith: key.keyId) { [weak self] note, meta in
                     guard let self, workspace.id == self.registry.current.id else { return }
                     self.library.synced(note, meta: meta)
                 }
@@ -89,14 +108,23 @@ final class SyncCoordinator {
         if !isEnabled { status.message = statusAtRest }
     }
 
+    /// Each linked server's vault is checked until it is open. See ADR 0052.
+    private func checkVaults() async {
+        let linked = Set(registry.workspaces.compactMap { $0.link?.server })
+        for server in linked where sessions.isSignedIn(server) && vaults.key(for: server) == nil {
+            await vaults.check(server)
+        }
+    }
+
     /// Look and order of workspaces, per server, before the notes. See ADR 0043.
     private func syncLooks() async {
         let linked = Set(registry.workspaces.compactMap { $0.link?.server })
         for server in registry.servers.map(\.id) where linked.contains(server) {
-            guard let client = sessions.client(for: server) else { continue }
+            guard let client = sessions.client(for: server), let key = vaults.key(for: server) else { continue }
             let snapshot = registry.setup
+            let transport = SealedLooks(inner: client, sealer: Sealer(key), icons: snapshot.workspaces.compactMap(\.icon))
             do {
-                let synced = try await LookSyncer.sync(snapshot, server: server, base: registry.base, transport: client)
+                let synced = try await LookSyncer.sync(snapshot, server: server, base: registry.base, transport: transport)
                 registry.adopt(synced, since: snapshot)
                 reportDeleted(before: snapshot, after: registry.setup)
             } catch APIError.unauthorized {

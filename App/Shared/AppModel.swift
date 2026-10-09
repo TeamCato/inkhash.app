@@ -46,6 +46,7 @@ enum WorkspaceTarget: Hashable {
 final class AppModel {
     let registry: WorkspaceRegistry
     let sessions: ServerSessions
+    let vaults: VaultSessions
     let library: NoteLibrary
     @ObservationIgnored private let syncer: SyncCoordinator
     private let statusLine: StatusLine
@@ -92,11 +93,13 @@ final class AppModel {
             }
         }
         let sessions = ServerSessions(registry: registry, status: status)
+        let vaults = VaultSessions(sessions: sessions, status: status)
         let library = NoteLibrary(registry: registry, status: status)
-        let syncer = SyncCoordinator(registry: registry, sessions: sessions, library: library, status: status)
+        let syncer = SyncCoordinator(registry: registry, sessions: sessions, vaults: vaults, library: library, status: status)
         self.statusLine = status
         self.registry = registry
         self.sessions = sessions
+        self.vaults = vaults
         self.library = library
         self.syncer = syncer
         library.changed = { [weak syncer] in syncer?.schedule() }
@@ -413,11 +416,39 @@ final class AppModel {
         return server
     }
 
+    /// Signs out. The vault key leaves this device with the session. See ADR 0052.
+    func logout(_ server: UUID) {
+        sessions.logout(server)
+        vaults.forget(server)
+        status = syncer.statusAtRest
+    }
+
     /// Forgets a server. Workspaces linked to it stay on this device and stop syncing.
     func removeServer(_ server: UUID) {
         sessions.logout(server)
+        vaults.forget(server)
         registry.removeServer(server)
         status = syncer.statusAtRest
+    }
+
+    // MARK: Vault, ADR 0052
+
+    /// Creates, opens or resets a vault, then syncs. Nil on success, else why not.
+    func createVault(on server: UUID, passphrase: String) async -> String? {
+        await afterVault(await vaults.create(server, passphrase: passphrase))
+    }
+
+    func unlockVault(on server: UUID, passphrase: String) async -> String? {
+        await afterVault(await vaults.unlock(server, passphrase: passphrase))
+    }
+
+    func resetVault(on server: UUID, password: String, passphrase: String) async -> String? {
+        await afterVault(await vaults.reset(server, password: password, passphrase: passphrase))
+    }
+
+    private func afterVault(_ problem: String?) async -> String? {
+        if problem == nil { await sync() }
+        return problem
     }
 
     /// The server of the current workspace, while its session has expired.

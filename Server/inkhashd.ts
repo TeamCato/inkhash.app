@@ -196,7 +196,7 @@ const ROUTES: Route[] = [
     method: "GET",
     pattern: /^\/v1\/health$/,
     access: "open",
-    handle: (ctx) => json(200, { ok: true, registration: ctx.accounts.registration(), version: serverVersion() }),
+    handle: (ctx) => json(200, { ok: true, registration: ctx.accounts.registration(), version: serverVersion(), vault: true }),
   },
   {
     method: "POST",
@@ -229,6 +229,34 @@ const ROUTES: Route[] = [
     access: "session",
     handle: (ctx) => {
       ctx.accounts.deleteAccount(accountOf(ctx), ctx.params[0] ?? "");
+      return { status: 204 };
+    },
+  },
+  {
+    method: "GET",
+    pattern: /^\/v1\/vault$/,
+    access: "session",
+    handle: (ctx) => {
+      const vault = ctx.accounts.vault(accountOf(ctx));
+      if (!vault) throw new StoreError(404, "no-vault");
+      return json(200, vault);
+    },
+  },
+  {
+    method: "PUT",
+    pattern: /^\/v1\/vault$/,
+    access: "session",
+    handle: async (ctx) => {
+      const [status, vault] = ctx.accounts.putVault(accountOf(ctx), await readJson(ctx));
+      return json(status, vault);
+    },
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/v1\/vault$/,
+    access: "session",
+    handle: async (ctx) => {
+      await ctx.accounts.resetVault(accountOf(ctx), await readJson(ctx), ctx.client);
       return { status: 204 };
     },
   },
@@ -458,7 +486,9 @@ async function route(
     if (error instanceof StoreError) {
       // For fail2ban. Never the name, the password or a token, see P-017.
       const signIn = /^\/v1\/(setup|session)$/.test(url.pathname) && method === "POST" && (error.status === 401 || error.status === 429);
-      const passwordChange = url.pathname === "/v1/password" && method === "PUT" && (error.status === 403 || error.status === 429);
+      const passwordChange =
+        ((url.pathname === "/v1/password" && method === "PUT") || (url.pathname === "/v1/vault" && method === "DELETE")) &&
+        (error.status === 403 || error.status === 429);
       if (signIn || passwordChange) {
         process.stderr.write(`auth failed ${url.pathname} ${error.status} from ${client}\n`);
       }

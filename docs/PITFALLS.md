@@ -347,3 +347,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Ursache.** `NoteLibrary.updateMarkdown` setzte `conflict = false` und löschte die gespeicherte Fassung des Servers, ohne die Revision des Servers zu übernehmen. Der nächste PUT lief mit der alten `baseRevision` wieder in 409.
 **Wache.** Text geht wie jede andere Änderung durch `NoteLibrary.change`, das den Konflikt stehen lässt. Gelöst wird nur über `resolveConflict` (ADR 0049). Test `NoteLibraryTests.testTypingKeepsTheConflict`.
 
+## P-058 · Zwei Seiten, ein Vertrag, kein gemeinsamer Test
+
+**Symptom.** Server-Tests und Swift-Tests sind grün, trotzdem lehnt der Server, was die App schickt, oder die App versteht seine Antwort nicht. Bei verschlüsselten Notizen fällt das erst auf einem zweiten Gerät auf.
+**Ursache.** Jede Seite testete gegen ihr eigenes Bild des Vertrags: der Server mit JSON von Hand, die App mit einem Fake-Transport.
+**Wache.** `make test` startet den echten Server auf einem freien Port und lässt `ContractTests` mit `APIClient`, `SealedTransport` und `SealedLooks` dagegen laufen (`tools/contract-test.sh`): Umstieg auf den Tresor, zweites Gerät, Konflikt, Retry, Bild, Passphrase, Reset. Neue Routen bekommen dort einen Fall.
+

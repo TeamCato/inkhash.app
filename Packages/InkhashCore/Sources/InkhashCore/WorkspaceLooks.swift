@@ -7,6 +7,13 @@ public protocol WorkspaceTransport: Sendable {
     func orderWorkspaces(ids: [String]) async throws -> RemoteWorkspaceList
     func putIcon(workspace: String, sha256: String, data: Data) async throws
     func fetchIcon(workspace: String, sha256: String) async throws -> Data
+    /// True if the server holds this look in a form that has to go up again, e.g. a plain
+    /// picture from before the vault. See ADR 0052.
+    func needsReupload(_ remote: RemoteWorkspace) -> Bool
+}
+
+extension WorkspaceTransport {
+    public func needsReupload(_ remote: RemoteWorkspace) -> Bool { false }
 }
 
 extension APIClient: WorkspaceTransport {
@@ -44,8 +51,16 @@ public enum LookSyncer {
         for index in setup.workspaces.indices {
             let workspace = setup.workspaces[index]
             guard let link = workspace.link, link.server == server, let remote = remotes[link.remote] else { continue }
+            // A plain picture from before the vault: take the look as the server has it, then put
+            // it up again sealed.
+            if transport.needsReupload(remote), !workspace.lookPending {
+                try await adopt(remote, at: index, into: &setup, base: base, transport: transport)
+                setup.workspaces[index].lookPending = true
+            }
+            let current = setup.workspaces[index]
             // A look nobody has set on the server yet comes from the first device that syncs.
-            if workspace.lookPending || remote.updatedAt == nil {
+            if current.lookPending || remote.updatedAt == nil {
+                let workspace = current
                 if let icon = workspace.icon {
                     let data = try Data(contentsOf: Workspaces.iconURL(icon, base: base))
                     try await transport.putIcon(workspace: remote.id, sha256: icon, data: data)
@@ -60,15 +75,7 @@ public enum LookSyncer {
                 }
                 setup.workspaces[index].lookPending = false
             } else {
-                setup.workspaces[index].name = remote.name
-                if let symbol = remote.symbol { setup.workspaces[index].symbol = symbol }
-                if let icon = remote.icon, icon != workspace.icon,
-                   !FileManager.default.fileExists(atPath: Workspaces.iconURL(icon, base: base).path) {
-                    let data = try await transport.fetchIcon(workspace: remote.id, sha256: icon)
-                    guard sha256Hex(data) == icon else { throw APIError.invalidResponse }
-                    try Workspaces.saveIcon(data, base: base)
-                }
-                setup.workspaces[index].icon = remote.icon
+                try await adopt(remote, at: index, into: &setup, base: base, transport: transport)
             }
         }
 
@@ -90,5 +97,18 @@ public enum LookSyncer {
             for (slot, workspace) in zip(linked, sorted) { setup.workspaces[slot] = workspace }
         }
         return setup
+    }
+
+    /// Takes name, symbol and picture of `remote` for the workspace at `index`.
+    private static func adopt(_ remote: RemoteWorkspace, at index: Int, into setup: inout DeviceSetup, base: URL, transport: WorkspaceTransport) async throws {
+        setup.workspaces[index].name = remote.name
+        if let symbol = remote.symbol { setup.workspaces[index].symbol = symbol }
+        if let icon = remote.icon, icon != setup.workspaces[index].icon,
+           !FileManager.default.fileExists(atPath: Workspaces.iconURL(icon, base: base).path) {
+            let data = try await transport.fetchIcon(workspace: remote.id, sha256: icon)
+            guard sha256Hex(data) == icon else { throw APIError.invalidResponse }
+            try Workspaces.saveIcon(data, base: base)
+        }
+        setup.workspaces[index].icon = remote.icon
     }
 }

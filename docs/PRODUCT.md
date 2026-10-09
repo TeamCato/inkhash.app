@@ -55,6 +55,8 @@ Auf iPad und iPhone liegen die Notizen im iCloud-Backup des Geräts, wenn es ein
 
 Es gibt keine eigene Cloud. Die Apps sprechen nur mit der API, idealerweise ein einzelner Container. Der Server speichert Notizen, liefert sie aus und gleicht Geräte ab. Wer ihn erreicht, braucht einen Account: Name und Passwort, ohne E-Mail. Beim ersten Start schreibt der Server einen einmaligen Setup-Token in sein Log. Damit legt man auf der Seite `/admin` im Browser den Admin an, danach gilt der Token nicht mehr. Weitere Accounts legt nur der Admin dort an, mit Name und Startpasswort. Die App meldet sich nur an. Jeder Account hat seine eigenen Notizen.
 
+Was zum Server geht, ist Ende-zu-Ende verschlüsselt. Jeder Account hat einen Tresor, den eine Passphrase öffnet; sie bleibt auf den Geräten, der Server und sein Admin kennen sie nicht. Beim ersten Anmelden legt man sie fest, auf jedem weiteren Gerät gibt man sie einmal ein. Lesbar bleiben für den Server nur Account-Namen, Namen und Symbole der Workspaces und wann sich etwas ändert. Siehe ADR 0052.
+
 Mit Server gleicht jeder Workspace eines Geräts mit genau einem Workspace eines Accounts ab. iCloud und jedes zweite Sync-Ziel sind ausgeschlossen. Sicherung heißt mit Server: das Datenverzeichnis des Servers kopieren. Ohne Server sichern das Geräte-Backup und der Export.
 
 ## Name

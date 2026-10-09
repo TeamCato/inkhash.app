@@ -282,8 +282,11 @@ public enum Workspaces {
 
     /// What a workspace's library is bound to. `main` keeps the bare account id that
     /// libraries before workspaces wrote, so they continue without uploading everything again.
-    public static func bindingKey(accountID: String, remote: String) -> String {
-        remote == APIClient.mainWorkspace ? accountID : accountID + "/" + remote
+    /// `epoch` counts resets of the account's vault: after one, the server holds none of the old
+    /// notes, so every library binds anew and sends all its notes again. See ADR 0052.
+    public static func bindingKey(accountID: String, remote: String, epoch: Int = 0) -> String {
+        let base = remote == APIClient.mainWorkspace ? accountID : accountID + "/" + remote
+        return epoch > 0 ? base + "#\(epoch)" : base
     }
 
     private static func adoptLibrary(base: URL, into setup: DeviceSetup) throws {

@@ -351,7 +351,7 @@ final class WorkspaceTests: XCTestCase {
     }
 }
 
-private actor FakeWorkspaceServer: WorkspaceTransport {
+actor FakeWorkspaceServer: WorkspaceTransport {
     var workspaces: [RemoteWorkspace]
     var ordered: Bool?
     var looks: [String: WorkspaceLook] = [:]

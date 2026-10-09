@@ -100,6 +100,13 @@ public protocol NoteTransport: Sendable {
     func deleteNote(id: UUID, baseRevision: Int) async throws -> Note
     func putBlob(sha256: String, data: Data) async throws
     func fetchBlob(sha256: String) async throws -> Data
+    /// Notes this transport fetched that still lie plain on the server and should go up again
+    /// sealed. Empty for transports without a vault. See ADR 0052.
+    func unsealedNotes() async -> Set<UUID>
+}
+
+extension NoteTransport {
+    public func unsealedNotes() async -> Set<UUID> { [] }
 }
 
 public enum APIError: Error, Equatable {
@@ -111,6 +118,10 @@ public enum APIError: Error, Equatable {
     case invalidResponse
     /// The current password given to change it was wrong. The session is still good.
     case wrongPassword
+    /// Like `conflict`, for a sealed note the caller has to open itself.
+    case sealedConflict(SealedNote)
+    /// Another device created the account's vault first. See ADR 0052.
+    case vaultExists(VaultRecord)
 }
 
 @MainActor
@@ -121,14 +132,30 @@ public enum Syncer {
     /// The device keeps editing while this waits for the server. Every write here therefore starts
     /// from what the store holds at that moment, and `onSave` hears of it right away, so a copy of
     /// the notes elsewhere never writes an old revision back. See PITFALLS P-053.
+    ///
+    /// With `sealedWith`, the key of the account's vault, a library that has not finished moving to
+    /// that key reads every note again, and what still lies plain on the server goes up sealed.
+    /// Once nothing plain is left, the library remembers the key. See ADR 0052.
     public static func sync(
         store: LocalStore,
         transport: any NoteTransport,
+        sealedWith key: String? = nil,
         onSave: @escaping @MainActor (Note, LocalMeta) -> Void = { _, _ in }
     ) async throws -> SyncReport {
         let writer = Writer(store: store, onSave: onSave)
         var report = SyncReport(pushed: 0, pulled: 0, conflicts: 0)
+        if let key, store.sealedKey() != key {
+            try store.setCursor(0)
+        }
         try await pull(into: &report, writer: writer, transport: transport)
+        let unsealed = await transport.unsealedNotes()
+        for id in unsealed {
+            guard let note = try store.note(id: id) else { continue }
+            let meta = try store.meta(for: id)
+            if !meta.dirty && !meta.conflict {
+                try writer.save(note, meta: LocalMeta(dirty: true, conflict: false))
+            }
+        }
         let dirty = try store.list().filter { $0.meta.dirty && !$0.meta.conflict }.map(\.note.id)
         for id in dirty {
             // Read again: an earlier push in this loop may have taken long enough for an edit.
@@ -136,7 +163,7 @@ public enum Syncer {
             let meta = try store.meta(for: id)
             guard meta.dirty, !meta.conflict else { continue }
             do {
-                if let saved = try await push(note, writer: writer, transport: transport) {
+                if let saved = try await push(note, reseal: unsealed.contains(id), writer: writer, transport: transport) {
                     try writer.saveAfterPush(saved, pushed: note)
                     report.pushed += 1
                 }
@@ -153,6 +180,9 @@ public enum Syncer {
         }
         // The push is itself a change. A second pull advances the cursor past it.
         try await pull(into: &report, writer: writer, transport: transport)
+        if let key, report.rejected.isEmpty, await transport.unsealedNotes().isEmpty {
+            try store.setSealedKey(key)
+        }
         return report
     }
 
@@ -219,9 +249,11 @@ public enum Syncer {
         }
     }
 
-    private static func push(_ note: Note, writer: Writer, transport: any NoteTransport) async throws -> Note? {
+    /// `reseal`: the note lies plain on the server. A deleted one then goes up whole, sealed and
+    /// marked deleted, instead of as a bare tombstone over the plain content.
+    private static func push(_ note: Note, reseal: Bool, writer: Writer, transport: any NoteTransport) async throws -> Note? {
         let store = writer.store
-        if note.deletedAt != nil {
+        if note.deletedAt != nil, !(reseal && note.revision > 0) {
             if note.revision == 0 {
                 // Never reached the server. It stays in the trash on this device only.
                 try writer.save(note, meta: .clean)

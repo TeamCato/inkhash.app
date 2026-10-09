@@ -1,4 +1,4 @@
-.PHONY: icon test app-test server server-lan server-test server-package generate mac ipad iphone ipad-device import-spike
+.PHONY: icon test contract-test app-test server server-lan server-test server-package generate mac ipad iphone ipad-device import-spike
 
 PORT ?= 8787
 
@@ -6,6 +6,13 @@ test:
 	swift test --package-path Packages/InkhashCore
 	@test -d Server/node_modules || npm --prefix Server ci
 	npm --prefix Server test
+	tools/contract-test.sh
+
+# The Swift client against the real server on a free port. Part of `make test`. See ADR 0052.
+contract-test:
+	@test -d Server/node_modules || npm --prefix Server ci
+	npm --prefix Server run build
+	tools/contract-test.sh
 
 server:
 	@test -d Server/node_modules || npm --prefix Server ci

@@ -93,6 +93,48 @@ function toWorkspace(stored: StoredWorkspace): Workspace {
   };
 }
 
+/** What the server keeps of an account's vault: the key, wrapped with a passphrase it never sees. See ADR 0052. */
+export interface Vault {
+  keyId: string;
+  kdf: { name: string; rounds: number; salt: string };
+  wrapped: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+const KDF_NAMES = ["pbkdf2-sha256"];
+const MIN_KDF_ROUNDS = 100_000;
+const MAX_KDF_ROUNDS = 10_000_000;
+const BASE64_RE = /^[A-Za-z0-9+/]+={0,2}$/;
+
+function base64Field(value: unknown, reason: string, max: number): string {
+  if (typeof value !== "string" || value.length < 4 || value.length > max || value.length % 4 !== 0 || !BASE64_RE.test(value)) {
+    throw new StoreError(400, "bad-request", { reason });
+  }
+  return value;
+}
+
+/** Checks the form of a vault a device sends. The server cannot check more. */
+function vaultBody(body: unknown): Pick<Vault, "keyId" | "kdf" | "wrapped"> {
+  if (!isRecord(body) || !isRecord(body.kdf)) throw new StoreError(400, "bad-request", { reason: "vault" });
+  let keyId: string;
+  try {
+    keyId = canonicalId(body.keyId);
+  } catch {
+    throw new StoreError(400, "bad-request", { reason: "keyId" });
+  }
+  const { name, rounds, salt } = body.kdf;
+  if (typeof name !== "string" || !KDF_NAMES.includes(name)) throw new StoreError(400, "bad-request", { reason: "kdf" });
+  if (typeof rounds !== "number" || !Number.isInteger(rounds) || rounds < MIN_KDF_ROUNDS || rounds > MAX_KDF_ROUNDS) {
+    throw new StoreError(400, "bad-request", { reason: "kdf" });
+  }
+  return {
+    keyId,
+    kdf: { name, rounds, salt: base64Field(salt, "kdf", 64) },
+    wrapped: base64Field(body.wrapped, "wrapped", 256),
+  };
+}
+
 interface Identity {
   id: string;
   name: string;
@@ -443,6 +485,105 @@ export class Accounts {
     this.endSessions(accountId, token);
   }
 
+  /** The account's vault and how often it was reset, or null without one. See ADR 0052. */
+  vault(accountId: string): (Vault & { epoch: number }) | null {
+    const path = this.vaultPath(accountId);
+    if (!existsSync(path)) return null;
+    return { ...(JSON.parse(readFileSync(path, "utf8")) as Vault), epoch: this.vaultEpoch(accountId) };
+  }
+
+  /**
+   * Creates the vault, or with the same `keyId` replaces its wrapping: a new passphrase for the
+   * same key. Another `keyId` is 409 `vault-exists` with the vault there, so a second device
+   * that raced to create one opens the first one instead.
+   */
+  putVault(accountId: string, body: unknown): [number, Vault & { epoch: number }] {
+    const next = vaultBody(body);
+    const existing = this.vault(accountId);
+    if (existing && existing.keyId !== next.keyId) throw new StoreError(409, "vault-exists", { vault: existing });
+    const now = nowStamp();
+    const stored: Vault = { ...next, createdAt: existing?.createdAt ?? now, updatedAt: now };
+    atomicWrite(this.vaultPath(accountId), Buffer.from(JSON.stringify(stored, null, 2)));
+    // From now on every workspace of the account takes only sealed notes.
+    for (const workspace of this.workspaces(accountId).workspaces) this.workspaceStore(accountId, workspace.id);
+    return [existing ? 200 : 201, { ...stored, epoch: this.vaultEpoch(accountId) }];
+  }
+
+  /**
+   * For a forgotten passphrase: with the login password, every note and blob of the account
+   * moves to `deleted/vault-reset-<time>/`, the vault goes and `epoch` counts up. Pictures of
+   * the workspaces go with their blobs. See ADR 0052.
+   */
+  async resetVault(accountId: string, body: unknown, client: string): Promise<void> {
+    const key = clientKey(client);
+    if (this.clients.blocked(key)) throw slowDown();
+    if (!isRecord(body) || typeof body.password !== "string") throw new StoreError(400, "bad-request", { reason: "password" });
+    const password = body.password;
+    const name = this.identityById(accountId).name;
+    if (this.names.blocked(name)) throw slowDown();
+    await this.limitHashing(key, async () => {
+      const identity = this.identityById(accountId);
+      if (!(await this.verifyPassword(password, identity.passwordHash))) {
+        this.names.fail(identity.name);
+        this.clients.fail(key);
+        throw new StoreError(403, "wrong-password");
+      }
+      this.names.clear(identity.name);
+    });
+    if (!existsSync(this.vaultPath(accountId))) throw new StoreError(404, "not-found", { reason: "no vault" });
+    const target = join(this.spaceOf(accountId), "deleted", `vault-reset-${nowStamp().replace(/[:]/g, "-")}`);
+    for (const workspace of this.workspaces(accountId).workspaces) {
+      this.workspaceStore(accountId, workspace.id).wipe(join(target, workspace.id));
+    }
+    this.clearIcons(accountId);
+    rmSync(this.vaultPath(accountId), { force: true });
+    atomicWrite(join(this.spaceOf(accountId), "vault-epoch.txt"), Buffer.from(`${this.vaultEpoch(accountId) + 1}\n`));
+    for (const workspace of this.workspaces(accountId).workspaces) this.workspaceStore(accountId, workspace.id);
+  }
+
+  private vaultPath(accountId: string): string {
+    return join(this.spaceOf(accountId), "vault.json");
+  }
+
+  private vaultEpoch(accountId: string): number {
+    const path = join(this.spaceOf(accountId), "vault-epoch.txt");
+    if (!existsSync(path)) return 0;
+    const value = Number(readFileSync(path, "utf8").trim());
+    return Number.isInteger(value) && value >= 0 ? value : 0;
+  }
+
+  /** After a reset the pictures' blobs are gone; the looks keep name and symbol. */
+  private clearIcons(accountId: string): void {
+    const main = this.readMainLook(accountId);
+    if (main.icon !== undefined) {
+      const { icon: _icon, ...rest } = main;
+      atomicWrite(join(this.spaceOf(accountId), "main.json"), Buffer.from(JSON.stringify(rest, null, 2)));
+    }
+    const list = this.readWorkspaces(accountId);
+    if (list.some((workspace) => workspace.icon !== undefined)) {
+      this.writeWorkspaces(
+        accountId,
+        list.map(({ icon: _icon, ...rest }) => rest),
+      );
+    }
+  }
+
+  /** The current picture of a workspace, kept when plain blobs are purged. */
+  private iconOf(accountId: string, workspaceId: string): string | undefined {
+    if (workspaceId === MAIN_WORKSPACE) return this.readMainLook(accountId).icon;
+    return this.readWorkspaces(accountId).find((workspace) => workspace.id === workspaceId)?.icon;
+  }
+
+  /** Every request tells the store whether the account is sealed, and finishes the move once all notes are. */
+  private prepare(store: Store, accountId: string, workspaceId: string): Store {
+    store.sealed = existsSync(this.vaultPath(accountId));
+    if (store.sealed && store.plainCount === 0 && !store.purged) {
+      const icon = this.iconOf(accountId, workspaceId);
+      store.purgePlain(new Set(icon ? [icon] : []));
+    }
+    return store;
+  }
+
   /**
    * Failures are counted after the hash, so without a bound a burst of requests would all
    * reach PBKDF2 before the first one counts. Beyond the bound the answer is 429 at once.
@@ -558,6 +699,11 @@ export class Accounts {
     if (change.icon !== undefined && !store.hasBlob(change.icon)) {
       throw new StoreError(400, "bad-request", { reason: "icon" });
     }
+    // A sealed account's old plain picture goes once a device replaced or removed it. See ADR 0052.
+    const previous = this.iconOf(accountId, workspaceId === MAIN_WORKSPACE ? MAIN_WORKSPACE : canonicalId(workspaceId));
+    if (store.sealed && previous !== undefined && (removesIcon || (change.icon !== undefined && change.icon !== previous))) {
+      store.dropPlainBlob(previous);
+    }
     const apply = (look: Look): Look => {
       const next: Look = { ...look, ...change, updatedAt: nowStamp() };
       if (removesIcon) delete next.icon;
@@ -645,7 +791,7 @@ export class Accounts {
   workspaceStore(accountId: string, workspaceId: string): Store {
     if (workspaceId === MAIN_WORKSPACE) {
       if (this.mainDeleted(accountId)) throw new StoreError(404, "not-found", { reason: "unknown workspace" });
-      return this.storeFor(accountId);
+      return this.prepare(this.storeFor(accountId), accountId, MAIN_WORKSPACE);
     }
     const id = canonicalId(workspaceId);
     if (!this.readWorkspaces(accountId).some((workspace) => workspace.id === id)) {
@@ -653,10 +799,10 @@ export class Accounts {
     }
     const key = `${canonicalId(accountId)}/${id}`;
     const cached = this.stores.get(key);
-    if (cached) return cached;
+    if (cached) return this.prepare(cached, accountId, id);
     const store = new Store(join(this.spaceOf(accountId), "workspaces", id));
     this.stores.set(key, store);
-    return store;
+    return this.prepare(store, accountId, id);
   }
 
   private spaceOf(accountId: string): string {

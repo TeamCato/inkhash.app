@@ -10,6 +10,8 @@ public struct ServerHealth: Codable, Equatable, Sendable {
     public var registration: RegistrationMode
     /// The server's release, e.g. `0.4.0`. Nil for servers that do not tell yet.
     public var version: String?
+    /// True for servers that keep vaults (ADR 0052). Older servers leave it out.
+    public var vault: Bool?
 }
 
 public struct ServerAccount: Codable, Equatable, Sendable {
@@ -204,6 +206,65 @@ public struct APIClient: NoteTransport, Sendable {
         try await send(url: try endpoint("\(notePrefix)/blobs/\(sha256)"), method: "GET", body: nil, contentType: nil)
     }
 
+    // MARK: Vault, ADR 0052
+
+    /// The account's vault, or nil while it has none.
+    public func vault() async throws -> VaultRecord? {
+        do {
+            let data = try await send(url: try endpoint("/v1/vault"), method: "GET", body: nil, contentType: nil)
+            return try InkhashJSON.decode(VaultRecord.self, from: data)
+        } catch APIError.notFound {
+            return nil
+        }
+    }
+
+    /// Creates the vault, or rewraps it under the same key. Another key there is `vaultExists`.
+    public func putVault(_ record: VaultRecord) async throws -> VaultRecord {
+        var sent = record
+        sent.epoch = nil
+        let data = try await send(url: try endpoint("/v1/vault"), method: "PUT", body: try InkhashJSON.encode(sent), contentType: "application/json")
+        return try InkhashJSON.decode(VaultRecord.self, from: data)
+    }
+
+    /// Resets the vault with the login password: the account's notes on the server are moved away.
+    public func resetVault(password: String) async throws {
+        do {
+            _ = try await send(
+                url: try endpoint("/v1/vault"), method: "DELETE",
+                body: try InkhashJSON.encode(["password": password]), contentType: "application/json"
+            )
+        } catch let APIError.badStatus(code, body) where code == 403 && body.contains("wrong-password") {
+            throw APIError.wrongPassword
+        }
+    }
+
+    // MARK: Notes as they lie on the server
+
+    public func fetchWire(id: UUID) async throws -> WireNote {
+        let data = try await send(url: try endpoint("\(notePrefix)/notes/\(id.uuidString.lowercased())"), method: "GET", body: nil, contentType: nil)
+        return try InkhashJSON.decode(WireNote.self, from: data)
+    }
+
+    public func putSealed(_ upload: SealedUpload, baseRevision: Int) async throws -> WireNote {
+        struct Body: Encodable {
+            var baseRevision: Int
+            var note: SealedUpload
+        }
+        let data = try await send(
+            url: try endpoint("\(notePrefix)/notes/\(upload.id.uuidString.lowercased())"),
+            method: "PUT",
+            body: try InkhashJSON.encode(Body(baseRevision: baseRevision, note: upload)),
+            contentType: "application/json"
+        )
+        return try InkhashJSON.decode(WireNote.self, from: data)
+    }
+
+    public func deleteWire(id: UUID, baseRevision: Int) async throws -> WireNote {
+        let url = try endpoint("\(notePrefix)/notes/\(id.uuidString.lowercased())", query: [URLQueryItem(name: "baseRevision", value: String(baseRevision))])
+        let data = try await send(url: url, method: "DELETE", body: nil, contentType: nil)
+        return try InkhashJSON.decode(WireNote.self, from: data)
+    }
+
     public func probe() async throws -> ServerHealth {
         let health = try await self.health()
         if !token.isEmpty {
@@ -264,11 +325,18 @@ public struct APIClient: NoteTransport, Sendable {
         if http.statusCode == 404 { throw APIError.notFound }
         if http.statusCode == 429 { throw APIError.slowDown }
         if http.statusCode == 409 {
-            struct ConflictEnvelope: Decodable { var note: Note }
+            struct ConflictEnvelope: Decodable { var note: WireNote }
+            struct VaultEnvelope: Decodable { var vault: VaultRecord }
             if let envelope = try? InkhashJSON.decode(ConflictEnvelope.self, from: data) {
-                throw APIError.conflict(envelope.note)
+                switch envelope.note {
+                case .plain(let note): throw APIError.conflict(note)
+                case .sealed(let sealed): throw APIError.sealedConflict(sealed)
+                }
             }
-            throw APIError.badStatus(409, "")
+            if let envelope = try? InkhashJSON.decode(VaultEnvelope.self, from: data) {
+                throw APIError.vaultExists(envelope.vault)
+            }
+            throw APIError.badStatus(409, String(data: data, encoding: .utf8) ?? "")
         }
         guard (200...299).contains(http.statusCode) else {
             throw APIError.badStatus(http.statusCode, String(data: data, encoding: .utf8) ?? "")

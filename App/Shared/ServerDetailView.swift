@@ -50,10 +50,11 @@ struct ServerDetailView: View {
                         .foregroundStyle(.orange)
                 }
             }
+            VaultSection(serverID: serverID)
             onServer
             Section {
                 NavigationLink("Passwort ändern") { PasswordChangeView(serverID: serverID) }
-                Button("Abmelden") { model.sessions.logout(serverID) }
+                Button("Abmelden") { model.logout(serverID) }
                 Button("Server entfernen", role: .destructive) { confirmRemoval = true }
                     .confirmationDialog("Server entfernen?", isPresented: $confirmRemoval, titleVisibility: .visible) {
                         Button("Entfernen", role: .destructive) {

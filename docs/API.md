@@ -12,10 +12,13 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 
 | Methode | Pfad | Bedeutung |
 | --- | --- | --- |
-| GET | `/v1/health` | `{ "ok": true, "registration": "setup" \| "closed", "version" }`, ohne Sitzung. `version` ist das Release des Servers, z. B. `0.5.0`; Server vor 0.5.0 lassen es weg |
+| GET | `/v1/health` | `{ "ok": true, "registration": "setup" \| "closed", "version", "vault": true }`, ohne Sitzung. `version` ist das Release des Servers, z. B. `0.5.0`; Server vor 0.5.0 lassen es weg. `vault` sagen Server, die Tresore führen (ADR 0052); die App gleicht nur mit ihnen ab |
 | POST | `/v1/setup` | `{ "setupToken", "name", "password" }` → 201 `{ "token", "account": { "id", "name", "admin": true } }`, ohne Sitzung |
 | POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
 | DELETE | `/v1/session` | Sitzung beenden |
+| GET | `/v1/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
+| PUT | `/v1/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neue Passphrase). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
+| DELETE | `/v1/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts wandern nach `deleted/vault-reset-<zeit>/`, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
 | PUT | `/v1/password` | `{ "current", "password" }` → 204. Das eigene Passwort ändern. Die anderen Sitzungen des Accounts enden, die fragende bleibt (ADR 0050) |
 | GET | `/v1/accounts` | nur Admin: `{ "accounts": [{ "id", "name", "admin", "createdAt" }], "me" }`, nach Name; `me` ist der fragende Account |
 | POST | `/v1/accounts` | nur Admin: `{ "name", "password" }` → 201 `{ "id", "name", "admin": false, "createdAt" }`. Keine Sitzung für den neuen Account |
@@ -59,6 +62,24 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
 `PUT /v1/password` antwortet bei falschem `current` mit 403 `wrong-password`, nicht mit 401: die Sitzung bleibt gültig. Fehlversuche zählen wie beim Anmelden für Name und Adresse, danach 429 `slow-down`. Das neue Passwort hat 8–200 Zeichen, sonst 400.
 
 `POST /v1/setup` antwortet mit 401 bei falschem Setup-Token, 403 `setup-done`, wenn es schon einen Account gibt, und 429 `slow-down` nach zu vielen Fehlversuchen. Alle Routen unter `/v1/accounts` antworten ohne Sitzung mit 401, mit der Sitzung eines Accounts, der kein Admin ist, mit 403 `forbidden`, für eine unbekannte ID mit 404. Den letzten Admin zu löschen oder ihm die Rechte zu nehmen ist 400 mit `reason: "last admin"`. Siehe ADR 0046. 409 `name-taken`, wenn der Name schon da ist. Der Name ist 2–32 Zeichen, klein, aus Buchstaben, Ziffern, `.`, `_`, `-`, und beginnt und endet mit Buchstabe oder Ziffer. Das Passwort hat 8–200 Zeichen. `403 setup-done` kommt vor jeder Prüfung des Bodys.
+
+## Tresor und verschlüsselte Notizen
+
+Siehe ADR 0052. Der Tresor hält den Schlüssel des Accounts, verpackt mit einer Passphrase, die nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl der Resets. `DELETE /v1/vault` antwortet bei falschem Passwort mit 403 `wrong-password` und zählt Fehlversuche wie das Anmelden; ohne Tresor 404.
+
+Hat ein Account einen Tresor, nehmen alle seine Workspaces nur verschlüsselte Notizen an:
+
+```json
+{ "schemaVersion": 2, "id": "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10", "sealed": "AXk3…", "deleted": false }
+```
+
+So geht sie beim `PUT` hin. Zurück kommt `{ "schemaVersion": 2, "id", "revision", "updatedAt", "deletedAt", "sealed" }`, auch in Konflikten (409) und in `GET`. `sealed` ist Base64 mit Länge durch vier teilbar, höchstens 2 000 000 Zeichen, sonst 400 `reason: "sealed"`. `deleted: true` speichert die Notiz als Grabstein (`deletedAt` bleibt oder wird gesetzt); fehlt es oder ist es `false`, ist sie danach nicht gelöscht. Der Retry-Vergleich gilt für dasselbe `sealed` mit demselben Grabstein-Zustand. `DELETE` funktioniert wie bei Klartext-Notizen.
+
+Eine Notiz mit `schemaVersion: 1` ist dann 400 `reason: "sealed"`. Ohne Tresor ist eine Notiz mit `schemaVersion: 2` 400 `reason: "no vault"`. Klartext-Notizen von vorher bleiben lesbar, bis ein Gerät sie verschlüsselt neu schreibt.
+
+Blobs eines Accounts mit Tresor heißen nach dem HMAC, den nur die Geräte bilden können, nicht nach ihrem SHA-256. Der Server prüft dann den Hash nicht, lehnt aber einen Blob ab, dessen Name sein eigener SHA-256 ist: Das wäre Klartext (400 `reason: "sealed"`). Hat ein Workspace keine Klartext-Notiz mehr, löscht der Server dort beim nächsten Zugriff einmal alle Klartext-Blobs außer dem aktuellen Bild des Workspace. Ein ersetztes oder entferntes Klartext-Bild löscht `PATCH` gleich mit.
+
+Der Inhalt in `sealed` ist für den Server ohne Bedeutung. Für die Geräte: Byte `0x01`, dann 12 Byte Nonce, Chiffrat und 16 Byte Tag von AES-256-GCM über die zlib-gepackte Notiz als JSON (ohne `revision`, `updatedAt`, `deletedAt`), mit `inkhash-note-v1:<id>` als zusätzlichen Daten. Blobs ebenso, ohne zlib, mit `inkhash-blob-v1:<name>`.
 
 ## Notiz
 

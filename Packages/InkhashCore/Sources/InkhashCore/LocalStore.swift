@@ -105,6 +105,18 @@ public final class LocalStore {
         try write(Data(account.utf8), to: root.appendingPathComponent("account.txt"))
     }
 
+    /// The vault key this library finished moving to, or nil. See ADR 0052.
+    public func sealedKey() -> String? {
+        let url = root.appendingPathComponent("sealed.txt")
+        guard let text = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    public func setSealedKey(_ key: String) throws {
+        try write(Data(key.utf8), to: root.appendingPathComponent("sealed.txt"))
+    }
+
     /// Folders kept on this device even while no note lies in them. Notes carry their own folder.
     public func keptFolders() -> [String] {
         let url = root.appendingPathComponent("folders.json")
