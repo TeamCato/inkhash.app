@@ -60,15 +60,22 @@ enum NoteDocument {
         let style = NSMutableParagraphStyle()
         style.firstLineHeadIndent = gutter
         style.headIndent = gutter
-        style.lineSpacing = 2
-        switch type {
-        case .heading1: style.paragraphSpacingBefore = 22
-        case .heading2: style.paragraphSpacingBefore = 16
-        case .heading3: style.paragraphSpacingBefore = 12
-        case .code: style.paragraphSpacingBefore = 2
-        default: style.paragraphSpacingBefore = 6
-        }
+        style.lineSpacing = EditorFont.lineSpacing(for: type)
+        style.paragraphSpacingBefore = EditorFont.scaled(spacingBefore(type))
         return style
+    }
+
+    /// Space above a paragraph at the default text size. List items stay close to each other;
+    /// the line spacing of the paragraph before adds to it.
+    private static func spacingBefore(_ type: BlockType) -> CGFloat {
+        switch type {
+        case .heading1: return 28
+        case .heading2: return 22
+        case .heading3: return 16
+        case .bullet, .numbered, .checkbox: return 4
+        case .code: return 2
+        default: return 10
+        }
     }
 
     /// Inner margin of a table cell.
@@ -101,7 +108,7 @@ enum NoteDocument {
             }
         }
         style.defaultTabInterval = (edges.last ?? 0) / CGFloat(columns)
-        style.paragraphSpacingBefore = header ? 10 : 0
+        style.paragraphSpacingBefore = header ? EditorFont.scaled(10) : 0
         style.paragraphSpacing = 0
         style.lineSpacing = 2
         style.lineHeightMultiple = 1.25
@@ -278,8 +285,8 @@ final class MarkerLayoutManager: NSLayoutManager {
         let atEnd = NSMaxRange(glyphsToShow) >= numberOfGlyphs
         let fragment = extraLineFragmentRect
         if atEnd, trailing.hasMarker, fragment.height > 0 {
-            let font = EditorFont.font(size: EditorFont.size(for: trailing.type), bold: false, italic: false, code: false)
-            let baseline = fragment.maxY - abs(font.descender) - 2
+            let font = EditorFont.font(for: trailing.type, bold: false, italic: false, code: false)
+            let baseline = fragment.maxY - abs(font.descender) - EditorFont.lineSpacing(for: trailing.type)
             drawMarker(trailing, number: number(endingAt: ns.length, in: storage), baseline: baseline, origin: origin)
         }
     }
@@ -304,12 +311,12 @@ final class MarkerLayoutManager: NSLayoutManager {
         let y = origin.y + baseline
         switch style.type {
         case .bullet:
-            draw("•", font: EditorFont.font(size: size, bold: false, italic: false, code: false), color: RichText.inkColor, right: right, baseline: y)
+            draw("•", font: EditorFont.font(for: style.type, bold: false, italic: false, code: false), color: RichText.inkColor, right: right, baseline: y)
         case .numbered:
-            draw("\(number).", font: EditorFont.font(size: size * 0.85, bold: false, italic: false, code: false), color: Self.mutedColor, right: right, baseline: y)
+            draw("\(number).", font: EditorFont.font(size: size * 0.85, serif: false, bold: false, italic: false, code: false), color: Self.mutedColor, right: right, baseline: y)
         case .checkbox:
-            let side: CGFloat = 16
-            let font = EditorFont.font(size: size, bold: false, italic: false, code: false)
+            let side = EditorFont.scaled(16)
+            let font = EditorFont.font(for: style.type, bold: false, italic: false, code: false)
             let rect = CGRect(x: right - side, y: y - font.xHeight / 2 - side / 2, width: side, height: side)
             drawCheckbox(checked: style.checked, in: rect)
         default:

@@ -364,15 +364,16 @@ final class EditorEngine {
         let current = InlineSelection.read(host.storage, range: range, typing: host.typing)
         if range.length == 0 {
             var typing = host.typing
-            let font = (typing[.font] as? PlatformFont) ?? EditorFont.font(size: 18, bold: false, italic: false, code: false)
+            let serif = RichText.isHeading(style(of: paragraph(at: range.location)).type)
+            let font = (typing[.font] as? PlatformFont) ?? EditorFont.font(for: .paragraph, bold: false, italic: false, code: false)
             switch action {
             case .toggleBold:
-                typing[.font] = EditorFont.font(size: font.pointSize, bold: !current.bold, italic: current.italic, code: current.code)
+                typing[.font] = EditorFont.font(size: font.pointSize, serif: serif, bold: !current.bold, italic: current.italic, code: current.code)
             case .toggleItalic:
-                typing[.font] = EditorFont.font(size: font.pointSize, bold: current.bold, italic: !current.italic, code: current.code)
+                typing[.font] = EditorFont.font(size: font.pointSize, serif: serif, bold: current.bold, italic: !current.italic, code: current.code)
             case .toggleCode:
                 if current.code { typing.removeValue(forKey: .inkhashCode) } else { typing[.inkhashCode] = true }
-                typing[.font] = EditorFont.font(size: font.pointSize, bold: false, italic: false, code: !current.code)
+                typing[.font] = EditorFont.font(size: font.pointSize, serif: serif, bold: false, italic: false, code: !current.code)
             case .setLink:
                 break
             }
@@ -384,13 +385,14 @@ final class EditorEngine {
         edit(range, replacement: nil) {
             switch action {
             case .toggleBold, .toggleItalic:
+                // The family follows the paragraph type; `restyle` below sets it.
                 storage.enumerateAttribute(.font, in: range) { value, run, _ in
-                    let font = (value as? PlatformFont) ?? EditorFont.font(size: 18, bold: false, italic: false, code: false)
+                    let font = (value as? PlatformFont) ?? EditorFont.font(for: .paragraph, bold: false, italic: false, code: false)
                     let italic = RichText.isItalic(font)
                     let bold = RichText.isBold(font)
                     let next = action == .toggleBold
-                        ? EditorFont.font(size: font.pointSize, bold: !current.bold, italic: italic, code: false)
-                        : EditorFont.font(size: font.pointSize, bold: bold, italic: !current.italic, code: false)
+                        ? EditorFont.font(size: font.pointSize, serif: false, bold: !current.bold, italic: italic, code: false)
+                        : EditorFont.font(size: font.pointSize, serif: false, bold: bold, italic: !current.italic, code: false)
                     storage.addAttribute(.font, value: next, range: run)
                 }
             case .toggleCode:
@@ -608,7 +610,6 @@ final class EditorEngine {
             // An excerpt whose attachment was deleted is an ordinary line again.
             if currentStyle.type == .excerpt, !hasExcerpt(current) { currentStyle = .paragraph }
             let heading = RichText.isHeading(currentStyle.type)
-            let size = EditorFont.size(for: currentStyle.type)
             storage.addAttributes(currentStyle.attributes, range: current)
             if currentStyle.type == .code {
                 storage.addAttribute(.inkhashCode, value: true, range: current)
@@ -618,7 +619,7 @@ final class EditorEngine {
                 let code = attributes[.inkhashCode] != nil
                 let bold = heading || (font.map(RichText.isBold) ?? false)
                 let italic = font.map(RichText.isItalic) ?? false
-                storage.addAttribute(.font, value: EditorFont.font(size: size, bold: bold && !code, italic: italic && !code, code: code), range: run)
+                storage.addAttribute(.font, value: EditorFont.font(for: currentStyle.type, bold: bold && !code, italic: italic && !code, code: code), range: run)
             }
             RichText.highlightMarkers(in: storage, range: content(of: current), type: currentStyle.type)
         }
@@ -626,6 +627,15 @@ final class EditorEngine {
         for current in paragraphs(in: range) where current.length > 0 && style(of: current).type == .tableRow {
             layoutTable(around: current.location)
         }
+    }
+
+    /// The text size changed: every paragraph gets fonts and spacing for the new size. See ADR 0053.
+    func textSizeChanged() {
+        restyle(NSRange(location: 0, length: ns.length))
+        applyTypingForCursor()
+        host.contentChanged()
+        session?.relayout()
+        updateState()
     }
 
     /// Typing attributes follow the paragraph the cursor is in, not the character before it.

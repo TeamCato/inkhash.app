@@ -125,7 +125,7 @@ struct TextExcerptCard: View {
                     .foregroundStyle(Ink.muted)
                 inline(block.spans).strikethrough(block.checked, color: Ink.muted)
             }
-            .font(.system(size: 14, design: .serif))
+            .font(.system(size: 14))
         case .code:
             Text(block.plain)
                 .font(.system(size: 12, design: .monospaced))
@@ -138,11 +138,11 @@ struct TextExcerptCard: View {
                     inline(cell).frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
-            .font(.system(size: 13, design: .serif))
+            .font(.system(size: 13))
         case .excerpt:
             Label(block.plain, systemImage: "scribble").font(.system(size: 13)).foregroundStyle(Ink.muted)
         case .paragraph:
-            inline(block.spans).font(.system(size: 14, design: .serif))
+            inline(block.spans).font(.system(size: 14))
         }
     }
 
@@ -151,7 +151,7 @@ struct TextExcerptCard: View {
             Text(marker).foregroundStyle(Ink.muted)
             inline(block.spans)
         }
-        .font(.system(size: 14, design: .serif))
+        .font(.system(size: 14))
     }
 
     private static func inline(_ spans: [InlineSpan]) -> Text {

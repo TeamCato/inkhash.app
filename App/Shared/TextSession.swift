@@ -56,6 +56,11 @@ final class TextSession {
         version += 1
     }
 
+    /// The text kept its content but not its height, as after a change of the text size.
+    func relayout() {
+        version += 1
+    }
+
     func update(_ next: EditorState) {
         if state != next { state = next }
         if next.noteQuery == nil { noteIndex = 0 }

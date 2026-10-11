@@ -248,6 +248,9 @@ struct IOSNoteText: UIViewRepresentable {
         context.coordinator.engine = engine
         session.engine = engine
         view.installCheckboxTap()
+        view.registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { (view: InkNoteTextView, _: UITraitCollection) in
+            view.engine?.textSizeChanged()
+        }
         DispatchQueue.main.async {
             view.becomeFirstResponder()
             engine.updateState()
@@ -335,6 +338,35 @@ final class InkNoteTextView: UITextView, EditorHost {
     override func deleteBackward() {
         if engine?.backspaceAtStart() == true { return }
         super.deleteBackward()
+    }
+
+    /// UIKit spans the caret over the whole line fragment, with the space above a paragraph and the
+    /// line spacing below it. It belongs on the text: from the top of the used line, as high as the font.
+    override func caretRect(for position: UITextPosition) -> CGRect {
+        var rect = super.caretRect(for: position)
+        let index = offset(from: beginningOfDocument, to: position)
+        let length = storage.length
+        let attributes = index > 0 && index <= length && character(at: index - 1) != 0x0A
+            ? storage.attributes(at: index - 1, effectiveRange: nil)
+            : (index < length ? storage.attributes(at: index, effectiveRange: nil) : typingAttributes)
+        guard let font = attributes[.font] as? UIFont else { return rect }
+        let line: CGRect
+        if index >= length, !layoutManager.extraLineFragmentRect.isEmpty {
+            line = layoutManager.extraLineFragmentUsedRect
+        } else if layoutManager.numberOfGlyphs > 0 {
+            let point = CGPoint(x: rect.minX - textContainerInset.left, y: rect.midY - textContainerInset.top)
+            let glyph = layoutManager.glyphIndex(for: point, in: textContainer)
+            line = layoutManager.lineFragmentUsedRect(forGlyphAt: glyph, effectiveRange: nil)
+        } else {
+            return rect
+        }
+        rect.origin.y = line.minY + textContainerInset.top
+        rect.size.height = font.lineHeight
+        return rect
+    }
+
+    private func character(at index: Int) -> unichar {
+        (storage.string as NSString).character(at: index)
     }
 
     /// UIKit caps the container at the view's height; the text must lay out in full to be measured.

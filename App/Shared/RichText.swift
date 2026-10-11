@@ -39,25 +39,69 @@ struct InlineSelection: Equatable {
     }
 }
 
+/// Headings in the system serif, everything else in the system sans. On iOS sizes follow Dynamic Type. See ADR 0053.
 enum EditorFont {
-    static func size(for type: BlockType) -> CGFloat {
+    /// Size at the default text size. Body is 17 like the system's body style.
+    static func baseSize(for type: BlockType) -> CGFloat {
         switch type {
         case .heading1: return 30
         case .heading2: return 24
         case .heading3: return 20
         case .code: return 15
         case .tableRow: return 16
-        default: return 18
+        default: return 17
         }
     }
 
-    static func font(size: CGFloat, bold: Bool, italic: Bool, code: Bool) -> PlatformFont {
+    static func size(for type: BlockType) -> CGFloat {
+        scaled(baseSize(for: type))
+    }
+
+    /// A length that grows with the text size the person chose. The Mac has no Dynamic Type.
+    static func scaled(_ value: CGFloat) -> CGFloat {
+        #if os(macOS)
+        value
+        #else
+        UIFontMetrics(forTextStyle: .body).scaledValue(for: value)
+        #endif
+    }
+
+    /// Line height as a multiple of the size: airy for reading, tight for headings.
+    static func lineHeightFactor(for type: BlockType) -> CGFloat {
+        switch type {
+        case .heading1, .heading2, .heading3: return 1.2
+        case .code: return 1.4
+        default: return 1.5
+        }
+    }
+
+    /// Space below each line that brings the font's own line height up to `lineHeightFactor`.
+    /// Line spacing, not a line height multiple: that would put the space above the glyphs and
+    /// stretch the caret and the markers with it.
+    static func lineSpacing(for type: BlockType) -> CGFloat {
+        let font = font(for: type, bold: false, italic: false, code: type == .code)
+        return max(0, (font.pointSize * lineHeightFactor(for: type) - lineHeight(of: font)).rounded())
+    }
+
+    static func lineHeight(of font: PlatformFont) -> CGFloat {
+        #if os(macOS)
+        font.ascender - font.descender + font.leading
+        #else
+        font.lineHeight
+        #endif
+    }
+
+    static func font(for type: BlockType, bold: Bool, italic: Bool, code: Bool) -> PlatformFont {
+        font(size: size(for: type), serif: RichText.isHeading(type), bold: bold, italic: italic, code: code)
+    }
+
+    static func font(size: CGFloat, serif: Bool, bold: Bool, italic: Bool, code: Bool) -> PlatformFont {
         if code {
             return PlatformFont.monospacedSystemFont(ofSize: size, weight: .regular)
         }
         #if os(macOS)
         let preferred = NSFontDescriptor.preferredFontDescriptor(forTextStyle: .body)
-        let base = preferred.withDesign(.serif) ?? preferred
+        let base = serif ? (preferred.withDesign(.serif) ?? preferred) : preferred
         var traits = NSFontDescriptor.SymbolicTraits()
         if bold { traits.insert(.bold) }
         if italic { traits.insert(.italic) }
@@ -65,7 +109,7 @@ enum EditorFont {
             ?? .systemFont(ofSize: size, weight: bold ? .semibold : .regular)
         #else
         let preferred = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
-        let base = preferred.withDesign(.serif) ?? preferred
+        let base = serif ? (preferred.withDesign(.serif) ?? preferred) : preferred
         var traits = UIFontDescriptor.SymbolicTraits()
         if bold { traits.insert(.traitBold) }
         if italic { traits.insert(.traitItalic) }
@@ -84,14 +128,13 @@ enum RichText {
     }
 
     static func attributed(_ spans: [InlineSpan], type: BlockType) -> NSAttributedString {
-        let size = EditorFont.size(for: type)
         let heading = isHeading(type)
         let result = NSMutableAttributedString()
         defer { highlightMarkers(in: result, type: type) }
         let source = spans.isEmpty ? [InlineSpan(text: "")] : spans
         for span in source {
             var attributes: [NSAttributedString.Key: Any] = [
-                .font: EditorFont.font(size: size, bold: span.bold || heading, italic: span.italic, code: span.code || type == .code),
+                .font: EditorFont.font(for: type, bold: span.bold || heading, italic: span.italic, code: span.code || type == .code),
                 .foregroundColor: inkColor,
             ]
             if span.code || type == .code {
@@ -104,7 +147,7 @@ enum RichText {
         }
         if result.length == 0 {
             result.append(NSAttributedString(string: "", attributes: [
-                .font: EditorFont.font(size: size, bold: heading, italic: false, code: type == .code),
+                .font: EditorFont.font(for: type, bold: heading, italic: false, code: type == .code),
                 .foregroundColor: inkColor,
             ]))
         }
@@ -161,7 +204,7 @@ enum RichText {
 
     static func typingAttributes(for type: BlockType) -> [NSAttributedString.Key: Any] {
         var attributes: [NSAttributedString.Key: Any] = [
-            .font: EditorFont.font(size: EditorFont.size(for: type), bold: isHeading(type), italic: false, code: type == .code),
+            .font: EditorFont.font(for: type, bold: isHeading(type), italic: false, code: type == .code),
             .foregroundColor: inkColor,
         ]
         if type == .code { attributes[.inkhashCode] = true }

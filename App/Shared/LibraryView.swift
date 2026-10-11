@@ -110,7 +110,7 @@ struct TrashedNoteView: View {
                 // Deleted here, changed elsewhere meanwhile: neither side wins on its own. See ADR 0005.
                 VStack(spacing: 8) {
                     Text("Auf einem anderen Gerät wurde sie inzwischen geändert.")
-                        .font(.system(size: 14, design: .serif))
+                        .font(.system(size: 14))
                     HStack {
                         Button("Trotzdem löschen") { model.resolveConflict(id: record.id, choice: .mine) }
                             .inkButton()

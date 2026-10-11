@@ -10,7 +10,7 @@ struct ConflictBanner: View {
     var body: some View {
         HStack(spacing: 12) {
             Text("Auf dem Server liegt eine andere Fassung.")
-                .font(.system(size: 14, design: .serif))
+                .font(.system(size: 14))
             Spacer(minLength: 8)
             Button("Vergleichen") { comparing = true }
                 .inkButton()
@@ -139,7 +139,7 @@ private struct VersionColumn: View {
                         }
                         ForEach(Array(shownLines.enumerated()), id: \.offset) { _, line in
                             Text(line.text.isEmpty ? " " : line.text)
-                                .font(.system(size: 14, design: .serif))
+                                .font(.system(size: 14))
                                 .frame(maxWidth: .infinity, alignment: .leading)
                                 .padding(.horizontal, 6)
                                 .padding(.vertical, 1)
