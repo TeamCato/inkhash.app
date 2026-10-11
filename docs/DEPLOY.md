@@ -114,7 +114,7 @@ Nur Proxys eintragen, die man selbst betreibt. Wer in der Liste steht, darf dem 
 
 ## Was der Betreiber sieht
 
-Ab Server 0.6.0 sind Notizen Ende-zu-Ende verschlüsselt (ADR 0052). Die App legt beim ersten Start einen Tresor pro Account an, geschützt mit einer Passphrase, die nur die Geräte kennen, und schreibt alle Notizen verschlüsselt neu. Danach liegen im Datenverzeichnis keine lesbaren Inhalte mehr. Ältere Server gleichen mit der App nicht mehr ab, bis sie aktualisiert sind.
+Ab Server 0.7.0 sind Notizen Ende-zu-Ende verschlüsselt (ADR 0052). Die App legt beim ersten Start einen Tresor pro Account an, geschützt mit einer Passphrase, die nur die Geräte kennen, und schreibt alle Notizen verschlüsselt neu. Danach liegen im Datenverzeichnis keine lesbaren Inhalte mehr. Ältere Server gleichen mit der App nicht mehr ab, bis sie aktualisiert sind.
 
 Was der Betreiber weiterhin sieht: Account-Namen, Namen und Symbole der Workspaces, wie viele Notizen es gibt, wann sie sich ändern, wie groß sie sind und ob sie im Papierkorb liegen. Titel, Text, Ordner, Schlagwörter, Handschrift, Fotos und Workspace-Bilder sieht er nicht.
 
