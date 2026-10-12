@@ -238,6 +238,34 @@ public struct APIClient: NoteTransport, Sendable {
         }
     }
 
+    // MARK: Pairing, ADR 0054
+
+    private struct PairingBody: Codable {
+        var sealed: String
+    }
+
+    /// Leaves the sealed account key on the server for five minutes, replacing an open pairing.
+    public func offerPairing(_ id: UUID, sealed: String) async throws {
+        _ = try await send(
+            url: try endpoint("/v1/vault/pairings/\(id.uuidString.lowercased())"), method: "PUT",
+            body: try InkhashJSON.encode(PairingBody(sealed: sealed)), contentType: "application/json"
+        )
+    }
+
+    /// Takes the sealed account key off the server. Nil if it expired, was taken or withdrawn.
+    public func takePairing(_ id: UUID) async throws -> String? {
+        do {
+            let data = try await send(url: try endpoint("/v1/vault/pairings/\(id.uuidString.lowercased())"), method: "GET", body: nil, contentType: nil)
+            return try InkhashJSON.decode(PairingBody.self, from: data).sealed
+        } catch APIError.notFound {
+            return nil
+        }
+    }
+
+    public func withdrawPairing(_ id: UUID) async throws {
+        _ = try await send(url: try endpoint("/v1/vault/pairings/\(id.uuidString.lowercased())"), method: "DELETE", body: nil, contentType: nil)
+    }
+
     // MARK: Notes as they lie on the server
 
     public func fetchWire(id: UUID) async throws -> WireNote {

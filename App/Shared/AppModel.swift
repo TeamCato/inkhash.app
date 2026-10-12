@@ -431,19 +431,23 @@ final class AppModel {
         status = syncer.statusAtRest
     }
 
-    // MARK: Vault, ADR 0052
+    // MARK: Vault, ADR 0052, 0054
 
     /// Creates, opens or resets a vault, then syncs. Nil on success, else why not.
-    func createVault(on server: UUID, passphrase: String) async -> String? {
-        await afterVault(await vaults.create(server, passphrase: passphrase))
+    func createVault(on server: UUID, recoveryKey: RecoveryKey) async -> String? {
+        await afterVault(await vaults.create(server, recoveryKey: recoveryKey))
     }
 
-    func unlockVault(on server: UUID, passphrase: String) async -> String? {
-        await afterVault(await vaults.unlock(server, passphrase: passphrase))
+    func unlockVault(on server: UUID, recoveryKey: RecoveryKey) async -> String? {
+        await afterVault(await vaults.unlock(server, recoveryKey: recoveryKey))
     }
 
-    func resetVault(on server: UUID, password: String, passphrase: String) async -> String? {
-        await afterVault(await vaults.reset(server, password: password, passphrase: passphrase))
+    func unlockVault(on server: UUID, pairingCode: String) async -> String? {
+        await afterVault(await vaults.unlock(server, pairingCode: pairingCode))
+    }
+
+    func resetVault(on server: UUID, password: String, recoveryKey: RecoveryKey) async -> String? {
+        await afterVault(await vaults.reset(server, password: password, recoveryKey: recoveryKey))
     }
 
     private func afterVault(_ problem: String?) async -> String? {

@@ -87,7 +87,7 @@ final class SealedSyncTests: XCTestCase {
     private var key: VaultKey!
 
     override func setUp() async throws {
-        key = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds).0
+        key = try VaultCrypto.create(recoveryKey: .generate(), rounds: testRounds).0
     }
 
     private func freshStore() throws -> LocalStore {
@@ -249,7 +249,7 @@ final class SealedLooksTests: XCTestCase {
     }
 
     func testAPictureGoesUpSealedAndComesBackPlainOnTheNextDevice() async throws {
-        let key = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds).0
+        let key = try VaultCrypto.create(recoveryKey: .generate(), rounds: testRounds).0
         let sealer = Sealer(key)
         let server = UUID()
         let first = base()
@@ -283,7 +283,7 @@ final class SealedLooksTests: XCTestCase {
     }
 
     func testAPlainPictureFromBeforeTheVaultIsTakenAndPutUpSealed() async throws {
-        let key = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds).0
+        let key = try VaultCrypto.create(recoveryKey: .generate(), rounds: testRounds).0
         let sealer = Sealer(key)
         let server = UUID()
         let picture = Data("altes bild".utf8)

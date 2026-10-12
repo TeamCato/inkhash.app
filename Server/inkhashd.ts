@@ -262,6 +262,27 @@ const ROUTES: Route[] = [
   },
   {
     method: "PUT",
+    pattern: /^\/v1\/vault\/pairings\/([^/]+)$/,
+    access: "session",
+    handle: async (ctx) => json(201, ctx.accounts.offerPairing(accountOf(ctx), ctx.params[0], await readJson(ctx))),
+  },
+  {
+    method: "GET",
+    pattern: /^\/v1\/vault\/pairings\/([^/]+)$/,
+    access: "session",
+    handle: (ctx) => json(200, ctx.accounts.takePairing(accountOf(ctx), ctx.params[0])),
+  },
+  {
+    method: "DELETE",
+    pattern: /^\/v1\/vault\/pairings\/([^/]+)$/,
+    access: "session",
+    handle: (ctx) => {
+      ctx.accounts.withdrawPairing(accountOf(ctx), ctx.params[0]);
+      return { status: 204 };
+    },
+  },
+  {
+    method: "PUT",
     pattern: /^\/v1\/password$/,
     access: "session",
     handle: async (ctx) => {

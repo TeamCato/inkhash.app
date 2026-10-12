@@ -7,7 +7,7 @@ import { join } from "node:path";
 import { promisify } from "node:util";
 
 import { DIR_MODE, Store, StoreError, atomicWrite, canonicalId, nowStamp } from "./store.js";
-import { vaultBody, type Vault } from "./vault.js";
+import { Pairings, vaultBody, type Vault } from "./vault.js";
 
 const pbkdf2Async = promisify(pbkdf2);
 
@@ -252,6 +252,7 @@ export class Accounts {
   private readonly sessions: string;
   private readonly rounds: number;
   private readonly stores = new Map<string, Store>();
+  private readonly pairings = new Pairings();
   /** Wrong passwords per account name. */
   private readonly names = new Throttle(NAME_LOCK_AFTER, LOCK_MS);
   /** Every failed unauthenticated attempt per client key (`clientKey`): logins and the setup token. */
@@ -378,6 +379,7 @@ export class Accounts {
     // The identity goes first: from then on nobody signs in as it, and its sessions find no account.
     rmSync(join(this.identities, `${identity.name}.json`), { force: true });
     this.endSessions(identity.id);
+    this.pairings.drop(identity.id);
     for (const key of [...this.stores.keys()]) {
       if (key === identity.id || key.startsWith(`${identity.id}/`)) this.stores.delete(key);
     }
@@ -452,7 +454,7 @@ export class Accounts {
   }
 
   /**
-   * Creates the vault, or with the same `keyId` replaces its wrapping: a new passphrase for the
+   * Creates the vault, or with the same `keyId` replaces its wrapping: a new recovery key for the
    * same key. Another `keyId` is 409 `vault-exists` with the vault there, so a second device
    * that raced to create one opens the first one instead.
    */
@@ -469,7 +471,7 @@ export class Accounts {
   }
 
   /**
-   * For a forgotten passphrase: with the login password, every note and blob of the account
+   * For a lost recovery key: with the login password, every note and blob of the account
    * moves to `deleted/vault-reset-<time>/`, the vault goes and `epoch` counts up. Pictures of
    * the workspaces go with their blobs. See ADR 0052.
    */
@@ -496,8 +498,23 @@ export class Accounts {
     }
     this.clearIcons(accountId);
     rmSync(this.vaultPath(accountId), { force: true });
+    this.pairings.drop(accountId);
     atomicWrite(join(this.spaceOf(accountId), "vault-epoch.txt"), Buffer.from(`${this.vaultEpoch(accountId) + 1}\n`));
     for (const workspace of this.workspaces(accountId).workspaces) this.workspaceStore(accountId, workspace.id);
+  }
+
+  /** Leaves the sealed account key for a new device. Needs a vault. See ADR 0054. */
+  offerPairing(accountId: string, id: unknown, body: unknown): { expiresAt: string } {
+    if (!existsSync(this.vaultPath(accountId))) throw new StoreError(404, "no-vault");
+    return this.pairings.offer(accountId, id, body);
+  }
+
+  takePairing(accountId: string, id: unknown): { sealed: string } {
+    return this.pairings.take(accountId, id);
+  }
+
+  withdrawPairing(accountId: string, id: unknown): void {
+    this.pairings.withdraw(accountId, id);
   }
 
   private vaultPath(accountId: string): string {

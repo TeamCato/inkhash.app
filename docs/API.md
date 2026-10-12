@@ -17,8 +17,11 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
 | DELETE | `/v1/session` | Sitzung beenden |
 | GET | `/v1/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
-| PUT | `/v1/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neue Passphrase). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
+| PUT | `/v1/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neuer Wiederherstellungsschlüssel). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
 | DELETE | `/v1/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts wandern nach `deleted/vault-reset-<zeit>/`, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
+| PUT | `/v1/vault/pairings/<id>` | `{ "sealed" }` → 201 `{ "expiresAt" }`. Legt den versiegelten Account-Schlüssel für ein neues Gerät ab, fünf Minuten, höchstens einer pro Account; ein neuer ersetzt den alten. 404 `no-vault` ohne Tresor (ADR 0054) |
+| GET | `/v1/vault/pairings/<id>` | `{ "sealed" }` einmal, danach ist er weg. 404, wenn abgelaufen, schon abgeholt, zurückgezogen oder unbekannt |
+| DELETE | `/v1/vault/pairings/<id>` | Zieht die Kopplung zurück → 204, auch wenn sie schon weg ist |
 | PUT | `/v1/password` | `{ "current", "password" }` → 204. Das eigene Passwort ändern. Die anderen Sitzungen des Accounts enden, die fragende bleibt (ADR 0050) |
 | GET | `/v1/accounts` | nur Admin: `{ "accounts": [{ "id", "name", "admin", "createdAt" }], "me" }`, nach Name; `me` ist der fragende Account |
 | POST | `/v1/accounts` | nur Admin: `{ "name", "password" }` → 201 `{ "id", "name", "admin": false, "createdAt" }`. Keine Sitzung für den neuen Account |
@@ -65,7 +68,9 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
 
 ## Tresor und verschlüsselte Notizen
 
-Siehe ADR 0052. Der Tresor hält den Schlüssel des Accounts, verpackt mit einer Passphrase, die nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl der Resets. `DELETE /v1/vault` antwortet bei falschem Passwort mit 403 `wrong-password` und zählt Fehlversuche wie das Anmelden; ohne Tresor 404.
+Siehe ADR 0052 und 0054. Der Tresor hält den Schlüssel des Accounts, verpackt mit einem Wiederherstellungsschlüssel, den nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl der Resets. `DELETE /v1/vault` antwortet bei falschem Passwort mit 403 `wrong-password` und zählt Fehlversuche wie das Anmelden; ohne Tresor 404.
+
+Kopplungen (ADR 0054) liegen nur im Speicher des Servers und gehören zum Account der Sitzung; ein anderer Account bekommt 404. `<id>` ist eine UUID, sonst 400 `reason: "pairing"`. `sealed` ist Base64 bis 512 Zeichen, sonst 400 `reason: "sealed"`. Der Server kann `sealed` nicht öffnen: Das Geheimnis dafür steht nur im QR-Code. Ein Reset des Tresors, das Löschen des Accounts und ein Neustart des Servers verwerfen offene Kopplungen.
 
 Hat ein Account einen Tresor, nehmen alle seine Workspaces nur verschlüsselte Notizen an:
 

@@ -351,7 +351,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Server-Tests und Swift-Tests sind grün, trotzdem lehnt der Server, was die App schickt, oder die App versteht seine Antwort nicht. Bei verschlüsselten Notizen fällt das erst auf einem zweiten Gerät auf.
 **Ursache.** Jede Seite testete gegen ihr eigenes Bild des Vertrags: der Server mit JSON von Hand, die App mit einem Fake-Transport.
-**Wache.** `make test` startet den echten Server auf einem freien Port und lässt `ContractTests` mit `APIClient`, `SealedTransport` und `SealedLooks` dagegen laufen (`tools/contract-test.sh`): Umstieg auf den Tresor, zweites Gerät, Konflikt, Retry, Bild, Passphrase, Reset. Neue Routen bekommen dort einen Fall.
+**Wache.** `make test` startet den echten Server auf einem freien Port und lässt `ContractTests` mit `APIClient`, `SealedTransport` und `SealedLooks` dagegen laufen (`tools/contract-test.sh`): Umstieg auf den Tresor, zweites Gerät, Konflikt, Retry, Bild, Wiederherstellungsschlüssel, Kopplung, Reset. Neue Routen bekommen dort einen Fall.
 
 ## P-059 · Code-Block per Kürzel kommt nie an
 

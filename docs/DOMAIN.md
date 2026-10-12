@@ -40,8 +40,9 @@ Diese Wörter heißen im Code so.
 | Admin | Darf auf `/admin` Accounts anlegen, umbenennen, Passwörter setzen, zu Admins machen und löschen, sonst ein Account wie jeder andere. Der erste Account ist Admin, der letzte bleibt es (ADR 0021, 0046). |
 | Export | Eine Notiz als Datei (Markdown oder PDF) oder ein Workspace als ZIP mit lesbaren Dateien und einer Kopie für die App (ADR 0051). |
 | Sicherung | Ein Workspace-Export, den der Import wieder als neue Notizen holt. Daneben das Geräte-Backup (iCloud-Backup, Time Machine), kein Sync-Ziel. |
-| Tresor | Der Schlüssel eines Accounts auf dem Server, verpackt mit der Passphrase (`VaultRecord`, `/v1/vault`). Ohne ihn gleicht die App nicht ab (ADR 0052). |
-| Passphrase | Öffnet den Tresor. Nur die Geräte kennen sie, nicht der Server, nicht der Admin. Nicht das Login-Passwort. |
+| Tresor | Der Schlüssel eines Accounts auf dem Server, verpackt mit dem Wiederherstellungsschlüssel (`VaultRecord`, `/v1/vault`). Ohne ihn gleicht die App nicht ab (ADR 0052). |
+| Wiederherstellungsschlüssel | Öffnet den Tresor, wenn kein Gerät mit offenem Tresor da ist. Die App erzeugt ihn, 25 Zeichen in fünf Gruppen (`RecoveryKey`). Nur die Geräte kennen ihn, nicht der Server, nicht der Admin. Nicht das Login-Passwort (ADR 0054). |
+| Kopplung | Übergabe des Account-Schlüssels an ein neues Gerät per QR-Code; der Server hält ihn versiegelt fünf Minuten (`Pairing`, `/v1/vault/pairings`, ADR 0054). |
 | sealed | Eine Notiz oder ein Blob, verschlüsselt mit dem Schlüssel des Accounts (`Sealer`). `schemaVersion: 2` auf dem Draht. |
 | epoch | Zahl der Resets eines Tresors. Ändert die Bindung der Bibliotheken (`Workspaces.bindingKey`). |
 

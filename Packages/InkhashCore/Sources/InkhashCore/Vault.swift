@@ -2,8 +2,8 @@ import CommonCrypto
 import CryptoKit
 import Foundation
 
-/// The account's vault as the server keeps it: the account key, wrapped with a key made from a
-/// passphrase only the devices know. See ADR 0052.
+/// The account's vault as the server keeps it: the account key, wrapped with a key made from the
+/// recovery key only the devices know. See ADR 0052, 0054.
 public struct VaultRecord: Codable, Equatable, Sendable {
     public struct KDF: Codable, Equatable, Sendable {
         public var name: String
@@ -50,8 +50,7 @@ public struct VaultKey: Codable, Equatable, Sendable {
 }
 
 public enum VaultError: Error, Equatable {
-    case wrongPassphrase
-    case weakPassphrase
+    case wrongRecoveryKey
     case unsupported
     case damaged
 }
@@ -62,21 +61,20 @@ public enum VaultCrypto {
     public static let rounds = 600_000
     static let format: UInt8 = 1
 
-    /// A new account key, wrapped with `passphrase`.
-    public static func create(passphrase: String, epoch: Int = 0, rounds: Int = rounds) throws -> (VaultKey, VaultRecord) {
-        guard Passphrase.problem(passphrase) == nil else { throw VaultError.weakPassphrase }
+    /// A new account key, wrapped with `recoveryKey`.
+    public static func create(recoveryKey: RecoveryKey, epoch: Int = 0, rounds: Int = rounds) throws -> (VaultKey, VaultRecord) {
         let material = SymmetricKey(size: .bits256).withUnsafeBytes { Data($0) }
         let key = VaultKey(keyId: UUID().uuidString.lowercased(), material: material, epoch: epoch)
-        return (key, try wrap(key, passphrase: passphrase, rounds: rounds))
+        return (key, try wrap(key, recoveryKey: recoveryKey, rounds: rounds))
     }
 
-    /// The account key in `record`. A wrong passphrase fails authentication, nothing else can.
-    public static func open(_ record: VaultRecord, passphrase: String) throws -> VaultKey {
+    /// The account key in `record`. A wrong recovery key fails authentication, nothing else can.
+    public static func open(_ record: VaultRecord, recoveryKey: RecoveryKey) throws -> VaultKey {
         guard record.kdf.name == kdfName, record.kdf.rounds > 0,
               let salt = Data(base64Encoded: record.kdf.salt),
               let wrapped = Data(base64Encoded: record.wrapped),
               wrapped.first == format else { throw VaultError.unsupported }
-        let kek = try derive(passphrase, salt: salt, rounds: record.kdf.rounds)
+        let kek = try derive(recoveryKey.canonical, salt: salt, rounds: record.kdf.rounds)
         do {
             let box = try AES.GCM.SealedBox(combined: wrapped.dropFirst())
             let material = try AES.GCM.open(box, using: kek, authenticating: aad(record.keyId))
@@ -85,17 +83,16 @@ public enum VaultCrypto {
         } catch let error as VaultError {
             throw error
         } catch {
-            throw VaultError.wrongPassphrase
+            throw VaultError.wrongRecoveryKey
         }
     }
 
-    /// The same key under a new passphrase.
-    public static func wrap(_ key: VaultKey, passphrase: String, rounds: Int = rounds) throws -> VaultRecord {
-        guard Passphrase.problem(passphrase) == nil else { throw VaultError.weakPassphrase }
+    /// The same key under a new recovery key.
+    public static func wrap(_ key: VaultKey, recoveryKey: RecoveryKey, rounds: Int = rounds) throws -> VaultRecord {
         var salt = Data(count: 16)
         let status = salt.withUnsafeMutableBytes { SecRandomCopyBytes(kSecRandomDefault, 16, $0.baseAddress!) }
         guard status == errSecSuccess else { throw VaultError.unsupported }
-        let kek = try derive(passphrase, salt: salt, rounds: rounds)
+        let kek = try derive(recoveryKey.canonical, salt: salt, rounds: rounds)
         let box = try AES.GCM.seal(key.material, using: kek, authenticating: aad(key.keyId))
         guard let combined = box.combined else { throw VaultError.unsupported }
         return VaultRecord(
@@ -109,10 +106,10 @@ public enum VaultCrypto {
         Data("inkhash-vault-v1:\(keyId)".utf8)
     }
 
-    /// PBKDF2-HMAC-SHA256 over the passphrase in Unicode NFC, so the same words typed on
-    /// different keyboards give the same key.
-    static func derive(_ passphrase: String, salt: Data, rounds: Int) throws -> SymmetricKey {
-        let password = Array(passphrase.precomposedStringWithCanonicalMapping.utf8)
+    /// PBKDF2-HMAC-SHA256 over the recovery key in canonical form. A random key would not need
+    /// the rounds; they stay so the vault keeps the form the server checks. See ADR 0054.
+    static func derive(_ secret: String, salt: Data, rounds: Int) throws -> SymmetricKey {
+        let password = Array(secret.utf8)
         var derived = [UInt8](repeating: 0, count: 32)
         let status = password.withUnsafeBufferPointer { passwordBuffer in
             salt.withUnsafeBytes { saltBuffer in
@@ -130,24 +127,5 @@ public enum VaultCrypto {
         }
         guard status == kCCSuccess else { throw VaultError.unsupported }
         return SymmetricKey(data: derived)
-    }
-}
-
-/// What makes a passphrase acceptable. Long beats clever: it guards everything on the server.
-public enum Passphrase {
-    public static let minimum = 12
-
-    /// Why `passphrase` is not good enough, in words for the form, or nil.
-    public static func problem(_ passphrase: String) -> String? {
-        let trimmed = passphrase.trimmingCharacters(in: .whitespacesAndNewlines)
-        if trimmed.count < minimum { return "Die Passphrase braucht mindestens \(minimum) Zeichen." }
-        if Set(trimmed).count < 4 { return "Die Passphrase ist zu eintönig." }
-        return nil
-    }
-
-    /// Why a new passphrase and its repetition cannot be used, or nil.
-    public static func problem(_ passphrase: String, repeated: String) -> String? {
-        if let problem = problem(passphrase) { return problem }
-        return passphrase == repeated ? nil : "Die Wiederholung passt nicht."
     }
 }

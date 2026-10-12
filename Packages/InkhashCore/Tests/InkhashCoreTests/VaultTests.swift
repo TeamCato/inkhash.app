@@ -6,81 +6,150 @@ import XCTest
 let testRounds = 1_000
 
 final class VaultTests: XCTestCase {
-    func testCreatedVaultOpensWithItsPassphraseOnly() throws {
-        let (key, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds)
+    private let recoveryKey = RecoveryKey.generate()
+
+    func testCreatedVaultOpensWithItsRecoveryKeyOnly() throws {
+        let (key, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: testRounds)
         XCTAssertEqual(key.material.count, 32)
         XCTAssertEqual(record.keyId, key.keyId)
         XCTAssertEqual(record.kdf.name, "pbkdf2-sha256")
         XCTAssertEqual(record.kdf.rounds, testRounds)
         XCTAssertEqual(Data(base64Encoded: record.kdf.salt)?.count, 16)
-        XCTAssertEqual(try VaultCrypto.open(record, passphrase: "korrekt pferd batterie"), key)
-        XCTAssertThrowsError(try VaultCrypto.open(record, passphrase: "korrekt pferd batterlE")) {
-            XCTAssertEqual($0 as? VaultError, .wrongPassphrase)
+        XCTAssertEqual(try VaultCrypto.open(record, recoveryKey: recoveryKey), key)
+        XCTAssertThrowsError(try VaultCrypto.open(record, recoveryKey: .generate())) {
+            XCTAssertEqual($0 as? VaultError, .wrongRecoveryKey)
         }
     }
 
     func testDefaultsAreTheDocumentedOnes() {
         XCTAssertEqual(VaultCrypto.rounds, 600_000)
-        XCTAssertEqual(Passphrase.minimum, 12)
     }
 
-    func testRewrapKeepsTheKeyWithANewPassphrase() throws {
-        let (key, old) = try VaultCrypto.create(passphrase: "erste passphrase", rounds: testRounds)
-        let new = try VaultCrypto.wrap(key, passphrase: "zweite passphrase", rounds: testRounds)
+    func testRewrapKeepsTheKeyWithANewRecoveryKey() throws {
+        let (key, old) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: testRounds)
+        let next = RecoveryKey.generate()
+        let new = try VaultCrypto.wrap(key, recoveryKey: next, rounds: testRounds)
         XCTAssertEqual(new.keyId, old.keyId)
         XCTAssertNotEqual(new.kdf.salt, old.kdf.salt)
-        XCTAssertEqual(try VaultCrypto.open(new, passphrase: "zweite passphrase"), key)
-        XCTAssertThrowsError(try VaultCrypto.open(new, passphrase: "erste passphrase"))
-    }
-
-    func testPassphraseIsNormalizedLikeAnyKeyboardTypesIt() throws {
-        let composed = "grüne wiese im mai"
-        let decomposed = "gru\u{0308}ne wiese im mai"
-        XCTAssertNotEqual(Array(composed.utf8), Array(decomposed.utf8))
-        let (key, record) = try VaultCrypto.create(passphrase: composed, rounds: testRounds)
-        XCTAssertEqual(try VaultCrypto.open(record, passphrase: decomposed), key)
+        XCTAssertEqual(try VaultCrypto.open(new, recoveryKey: next), key)
+        XCTAssertThrowsError(try VaultCrypto.open(new, recoveryKey: recoveryKey))
     }
 
     func testTheWrappedKeyIsBoundToItsId() throws {
-        let (_, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds)
+        let (_, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: testRounds)
         var moved = record
         moved.keyId = UUID().uuidString.lowercased()
-        XCTAssertThrowsError(try VaultCrypto.open(moved, passphrase: "korrekt pferd batterie"))
+        XCTAssertThrowsError(try VaultCrypto.open(moved, recoveryKey: recoveryKey))
     }
 
     func testEpochComesFromTheServer() throws {
-        var (_, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds)
+        var (_, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: testRounds)
         record.epoch = 3
-        XCTAssertEqual(try VaultCrypto.open(record, passphrase: "korrekt pferd batterie").epoch, 3)
+        XCTAssertEqual(try VaultCrypto.open(record, recoveryKey: recoveryKey).epoch, 3)
     }
 
     func testUnknownOrBrokenVaultsAreRefused() throws {
-        var (_, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds)
+        var (_, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: testRounds)
         var other = record
         other.kdf.name = "scrypt"
-        XCTAssertThrowsError(try VaultCrypto.open(other, passphrase: "korrekt pferd batterie")) { XCTAssertEqual($0 as? VaultError, .unsupported) }
+        XCTAssertThrowsError(try VaultCrypto.open(other, recoveryKey: recoveryKey)) { XCTAssertEqual($0 as? VaultError, .unsupported) }
         record.wrapped = "AAAA"
-        XCTAssertThrowsError(try VaultCrypto.open(record, passphrase: "korrekt pferd batterie")) { XCTAssertEqual($0 as? VaultError, .unsupported) }
-    }
-
-    func testWeakPassphrasesAreRefused() {
-        XCTAssertEqual(Passphrase.problem("kurz"), "Die Passphrase braucht mindestens 12 Zeichen.")
-        XCTAssertEqual(Passphrase.problem("aaaaaaaaaaaaaaaa"), "Die Passphrase ist zu eintönig.")
-        XCTAssertNil(Passphrase.problem("korrekt pferd batterie"))
-        XCTAssertEqual(Passphrase.problem("korrekt pferd batterie", repeated: "korrekt pferd"), "Die Wiederholung passt nicht.")
-        XCTAssertThrowsError(try VaultCrypto.create(passphrase: "kurz", rounds: testRounds)) { XCTAssertEqual($0 as? VaultError, .weakPassphrase) }
+        XCTAssertThrowsError(try VaultCrypto.open(record, recoveryKey: recoveryKey)) { XCTAssertEqual($0 as? VaultError, .unsupported) }
     }
 
     func testRecordRoundTripsThroughJSON() throws {
-        let (_, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds)
+        let (_, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: testRounds)
         let decoded = try InkhashJSON.decode(VaultRecord.self, from: InkhashJSON.encode(record))
         XCTAssertEqual(decoded, record)
     }
 }
 
+/// ADR 0054: 24 random characters and a check character, read forgivingly.
+final class RecoveryKeyTests: XCTestCase {
+    func testAKeyHasFiveGroupsOfFiveFromTheAlphabet() {
+        let key = RecoveryKey.generate()
+        XCTAssertEqual(key.canonical.count, 25)
+        XCTAssertTrue(key.canonical.allSatisfy { RecoveryKey.alphabet.contains($0) })
+        let groups = key.display.split(separator: "-")
+        XCTAssertEqual(groups.count, 5)
+        XCTAssertTrue(groups.allSatisfy { $0.count == 5 })
+        XCTAssertNotEqual(key, RecoveryKey.generate())
+    }
+
+    func testTypingIsForgiving() throws {
+        let key = RecoveryKey.generate()
+        XCTAssertEqual(RecoveryKey(parsing: key.display), key)
+        XCTAssertEqual(RecoveryKey(parsing: " " + key.canonical.lowercased() + "\n"), key)
+        let spaced = key.display.replacingOccurrences(of: "-", with: " ")
+        XCTAssertEqual(RecoveryKey(parsing: spaced), key)
+        let lookalikes = key.canonical.replacingOccurrences(of: "0", with: "O").replacingOccurrences(of: "1", with: "l")
+        XCTAssertEqual(RecoveryKey(parsing: lookalikes), key)
+    }
+
+    func testTyposAndOtherTextAreRefused() {
+        let key = RecoveryKey.generate()
+        XCTAssertNil(RecoveryKey(parsing: String(key.canonical.dropLast())))
+        XCTAssertNil(RecoveryKey(parsing: key.canonical + "A"))
+        XCTAssertNil(RecoveryKey(parsing: "korrekt pferd batterie"))
+        XCTAssertNil(RecoveryKey(parsing: String(key.canonical.dropLast()) + "U"))
+        // Changing one character is caught by the check character nearly always: count over many keys.
+        var caught = 0
+        for _ in 0..<200 {
+            let sample = RecoveryKey.generate().canonical
+            var characters = Array(sample)
+            let index = Int.random(in: 0..<24)
+            characters[index] = RecoveryKey.alphabet.first { $0 != characters[index] }!
+            if RecoveryKey(parsing: String(characters)) == nil { caught += 1 }
+        }
+        XCTAssertGreaterThan(caught, 170)
+    }
+
+    func testTheCanonicalFormWrapsTheVault() throws {
+        let key = RecoveryKey.generate()
+        let (vaultKey, record) = try VaultCrypto.create(recoveryKey: key, rounds: testRounds)
+        let typed = try XCTUnwrap(RecoveryKey(parsing: key.display.lowercased()))
+        XCTAssertEqual(try VaultCrypto.open(record, recoveryKey: typed), vaultKey)
+    }
+}
+
+/// ADR 0054: the code carries the secret, the server only the sealed key.
+final class PairingTests: XCTestCase {
+    private let key = VaultKey(keyId: UUID().uuidString.lowercased(), material: Data(repeating: 7, count: 32), epoch: 2)
+
+    func testTheScannedCodeOpensThePackage() throws {
+        let pairing = Pairing.make()
+        let sealed = try pairing.seal(key)
+        let scanned = try Pairing(code: pairing.code)
+        XCTAssertEqual(scanned, pairing)
+        XCTAssertEqual(try scanned.open(sealed), key)
+        XCTAssertFalse(sealed.contains(key.material.base64EncodedString()))
+        XCTAssertFalse(pairing.code.contains(key.material.base64EncodedString()))
+    }
+
+    func testTheCodeNamesNeitherServerNorAccount() {
+        let pairing = Pairing.make()
+        XCTAssertTrue(pairing.code.hasPrefix("inkhash-pair:1:\(pairing.id.uuidString.lowercased()):"))
+        XCTAssertEqual(pairing.code.split(separator: ":").count, 4)
+    }
+
+    func testAnotherCodeOrAnotherIdDoesNotOpen() throws {
+        let pairing = Pairing.make()
+        let sealed = try pairing.seal(key)
+        XCTAssertThrowsError(try Pairing.make().open(sealed)) { XCTAssertEqual($0 as? PairingError, .damaged) }
+        let moved = Pairing(id: UUID(), secret: pairing.secret)
+        XCTAssertThrowsError(try moved.open(sealed)) { XCTAssertEqual($0 as? PairingError, .damaged) }
+    }
+
+    func testOtherCodesAreRefused() {
+        for code in ["https://example.com", "inkhash-pair:1:nope:AAAA", "inkhash-pair:2:\(UUID().uuidString):AAAA", ""] {
+            XCTAssertThrowsError(try Pairing(code: code), code) { XCTAssertEqual($0 as? PairingError, .notACode) }
+        }
+    }
+}
+
 final class SealerTests: XCTestCase {
     private func sealer() throws -> Sealer {
-        Sealer(try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: testRounds).0)
+        Sealer(try VaultCrypto.create(recoveryKey: .generate(), rounds: testRounds).0)
     }
 
     private func note() -> Note {

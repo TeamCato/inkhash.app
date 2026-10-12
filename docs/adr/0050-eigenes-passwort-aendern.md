@@ -16,4 +16,4 @@ Der Admin vergibt Startpasswörter und kennt sie damit. Ohne eigenen Wechsel bli
 
 ## Nicht
 
-Kein Zurücksetzen per E-Mail, es gibt keine E-Mail. Wer sein Passwort vergessen hat, bekommt vom Admin ein neues. Das Login-Passwort ist nicht die Passphrase des Tresors (ADR 0052).
+Kein Zurücksetzen per E-Mail, es gibt keine E-Mail. Wer sein Passwort vergessen hat, bekommt vom Admin ein neues. Das Login-Passwort ist nicht der Wiederherstellungsschlüssel des Tresors (ADR 0052, 0054).

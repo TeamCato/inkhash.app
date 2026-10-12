@@ -92,7 +92,8 @@ final class ContractTests: XCTestCase {
         // The vault, then the move.
         let none = try await client.vault()
         XCTAssertNil(none)
-        let (key, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: Self.rounds)
+        let recoveryKey = RecoveryKey.generate()
+        let (key, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: Self.rounds)
         let stored = try await client.putVault(record)
         XCTAssertEqual(stored.keyId, key.keyId)
         XCTAssertEqual(stored.epoch, 0)
@@ -121,11 +122,11 @@ final class ContractTests: XCTestCase {
             XCTAssertTrue(body.contains("sealed"))
         }
 
-        // A second device opens the vault with the passphrase and reads everything.
+        // A second device opens the vault with the recovery key and reads everything.
         let vault = try await client.vault()
         let fetched = try XCTUnwrap(vault)
-        XCTAssertThrowsError(try VaultCrypto.open(fetched, passphrase: "falsche passphrase"))
-        let opened = try VaultCrypto.open(fetched, passphrase: "korrekt pferd batterie")
+        XCTAssertThrowsError(try VaultCrypto.open(fetched, recoveryKey: .generate()))
+        let opened = try VaultCrypto.open(fetched, recoveryKey: recoveryKey)
         let other = try freshStore()
         _ = try await Syncer.sync(store: other, transport: SealedTransport(wire: client, sealer: Sealer(opened)), sealedWith: opened.keyId)
         for note in notes {
@@ -141,7 +142,7 @@ final class ContractTests: XCTestCase {
 
     func testEditsConflictsAndRetriesWithSealedNotes() async throws {
         let client = try await account()
-        let (key, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: Self.rounds)
+        let (key, record) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
         _ = try await client.putVault(record)
         let transport = SealedTransport(wire: client, sealer: Sealer(key))
         let a = try freshStore()
@@ -171,7 +172,7 @@ final class ContractTests: XCTestCase {
 
     func testAPictureOfAWorkspaceGoesUpSealed() async throws {
         let client = try await account()
-        let (key, record) = try VaultCrypto.create(passphrase: "korrekt pferd batterie", rounds: Self.rounds)
+        let (key, record) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
         _ = try await client.putVault(record)
         let sealer = Sealer(key)
         let base = FileManager.default.temporaryDirectory.appendingPathComponent(UUID().uuidString, isDirectory: true)
@@ -196,22 +197,45 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(synced.workspaces[0].name, "Zuhause")
     }
 
-    func testPassphraseChangeAndReset() async throws {
+    func testNewRecoveryKeyPairingAndReset() async throws {
         let client = try await account()
-        let (key, record) = try VaultCrypto.create(passphrase: "erste passphrase", rounds: Self.rounds)
+        let (key, record) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
         _ = try await client.putVault(record)
         let store = try freshStore()
         _ = try fill(store)
         _ = try await Syncer.sync(store: store, transport: SealedTransport(wire: client, sealer: Sealer(key)), sealedWith: key.keyId)
 
-        // A new passphrase for the same key.
-        _ = try await client.putVault(try VaultCrypto.wrap(key, passphrase: "zweite passphrase", rounds: Self.rounds))
+        // A new recovery key for the same key.
+        let second = RecoveryKey.generate()
+        _ = try await client.putVault(try VaultCrypto.wrap(key, recoveryKey: second, rounds: Self.rounds))
         let vault = try await client.vault()
         let rewrapped = try XCTUnwrap(vault)
-        XCTAssertEqual(try VaultCrypto.open(rewrapped, passphrase: "zweite passphrase"), key)
+        XCTAssertEqual(try VaultCrypto.open(rewrapped, recoveryKey: second), key)
+
+        // Pairing: the key goes through the server once, sealed with the code's secret.
+        let pairing = Pairing.make()
+        try await client.offerPairing(pairing.id, sealed: try pairing.seal(key))
+        let scanned = try Pairing(code: pairing.code)
+        let taken = try await client.takePairing(scanned.id)
+        XCTAssertEqual(try scanned.open(try XCTUnwrap(taken)), key)
+        let again = try await client.takePairing(scanned.id)
+        XCTAssertNil(again)
+        // A withdrawn pairing is gone, a newer one replaces the older.
+        let withdrawn = Pairing.make()
+        try await client.offerPairing(withdrawn.id, sealed: try withdrawn.seal(key))
+        try await client.withdrawPairing(withdrawn.id)
+        let none = try await client.takePairing(withdrawn.id)
+        XCTAssertNil(none)
+        let older = Pairing.make(), newer = Pairing.make()
+        try await client.offerPairing(older.id, sealed: try older.seal(key))
+        try await client.offerPairing(newer.id, sealed: try newer.seal(key))
+        let replaced = try await client.takePairing(older.id)
+        XCTAssertNil(replaced)
+        let current = try await client.takePairing(newer.id)
+        XCTAssertNotNil(current)
 
         // Another key cannot take over.
-        let (_, intruder) = try VaultCrypto.create(passphrase: "fremde passphrase", rounds: Self.rounds)
+        let (_, intruder) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
         do {
             _ = try await client.putVault(intruder)
             XCTFail("expected vaultExists")
@@ -227,7 +251,7 @@ final class ContractTests: XCTestCase {
         try await client.resetVault(password: "secretsecret")
         let gone = try await client.vault()
         XCTAssertNil(gone)
-        let (fresh, freshRecord) = try VaultCrypto.create(passphrase: "dritte passphrase", rounds: Self.rounds)
+        let (fresh, freshRecord) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
         let stored = try await client.putVault(freshRecord)
         XCTAssertEqual(stored.epoch, 1)
         let page = try await client.changes(after: 0)

@@ -114,11 +114,11 @@ Nur Proxys eintragen, die man selbst betreibt. Wer in der Liste steht, darf dem 
 
 ## Was der Betreiber sieht
 
-Ab Server 0.7.0 sind Notizen Ende-zu-Ende verschlüsselt (ADR 0052). Die App legt beim ersten Start einen Tresor pro Account an, geschützt mit einer Passphrase, die nur die Geräte kennen, und schreibt alle Notizen verschlüsselt neu. Danach liegen im Datenverzeichnis keine lesbaren Inhalte mehr. Ältere Server gleichen mit der App nicht mehr ab, bis sie aktualisiert sind.
+Ab Server 0.7.0 sind Notizen Ende-zu-Ende verschlüsselt (ADR 0052). Die App legt beim ersten Start einen Tresor pro Account an, geschützt mit einem Wiederherstellungsschlüssel, den nur die Geräte kennen (ADR 0054), und schreibt alle Notizen verschlüsselt neu. Danach liegen im Datenverzeichnis keine lesbaren Inhalte mehr. Ältere Server gleichen mit der App nicht mehr ab, bis sie aktualisiert sind.
 
 Was der Betreiber weiterhin sieht: Account-Namen, Namen und Symbole der Workspaces, wie viele Notizen es gibt, wann sie sich ändern, wie groß sie sind und ob sie im Papierkorb liegen. Titel, Text, Ordner, Schlagwörter, Handschrift, Fotos und Workspace-Bilder sieht er nicht.
 
-Was vor dem Umstieg gesichert wurde oder unter `deleted/` und `deleted-accounts/` liegt, bleibt lesbar. Wer das nicht will, löscht es nach dem Umstieg. Ein Reset des Tresors legt die alten, verschlüsselten Notizen unter `deleted/vault-reset-<zeit>/` im Account ab. Ohne die alte Passphrase sind sie wertlos und dürfen weg.
+Was vor dem Umstieg gesichert wurde oder unter `deleted/` und `deleted-accounts/` liegt, bleibt lesbar. Wer das nicht will, löscht es nach dem Umstieg. Ein Reset des Tresors legt die alten, verschlüsselten Notizen unter `deleted/vault-reset-<zeit>/` im Account ab. Ohne den alten Schlüssel sind sie wertlos und dürfen weg.
 
 Der Admin vergibt die Startpasswörter. Jeder Account ändert sein Passwort danach in der App selbst (ADR 0050). Das Login-Passwort öffnet den Tresor nicht.
 

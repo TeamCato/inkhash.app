@@ -18,6 +18,7 @@ import {
 } from "../accounts.js";
 import { adminAddress, serve, trustedProxies, type ServeOptions } from "../inkhashd.js";
 import { Store, StoreError, type Note } from "../store.js";
+import { PAIRING_TTL_MS, Pairings } from "../vault.js";
 
 function textNote(id: string, markdown = "# Hallo\n", tags: string[] = []): Note {
   return {
@@ -880,7 +881,7 @@ test("a vault is created once, rewrapped with its key, and never replaced by ano
     assert.equal(vault.keyId, KEY_ID);
     assert.equal(vault.epoch, 0);
 
-    // A new passphrase for the same key.
+    // A new recovery key for the same key.
     const rewrapped = await request(port, "PUT", "/v1/vault", vaultBody(KEY_ID, Buffer.alloc(60, 9).toString("base64")), ada.token);
     assert.equal(rewrapped.status, 200);
     assert.equal(body<{ wrapped: string }>((await request(port, "GET", "/v1/vault", undefined, ada.token)).raw).wrapped, Buffer.alloc(60, 9).toString("base64"));
@@ -905,6 +906,69 @@ test("a vault is created once, rewrapped with its key, and never replaced by ano
     const bea = await addAccount(port, ada.token, "bea");
     assert.equal((await request(port, "GET", "/v1/vault", undefined, bea.token)).status, 404);
   });
+});
+
+test("a pairing hands the sealed key over once, to the same account, and is replaced or withdrawn", async () => {
+  await withServer(async (port) => {
+    const ada = await openAccount(port);
+    const id = "3d2c1b0a-9f8e-4d7c-8b6a-5f4e3d2c1b0a";
+    const sealed = Buffer.alloc(140, 5).toString("base64");
+    const path = `/v1/vault/pairings/${id}`;
+    // Without a vault there is nothing to hand over.
+    assert.equal((await request(port, "PUT", path, { sealed }, ada.token)).status, 404);
+    await request(port, "PUT", "/v1/vault", vaultBody(), ada.token);
+    assert.equal((await request(port, "PUT", path, { sealed }, null)).status, 401);
+
+    const offered = await request(port, "PUT", path, { sealed }, ada.token);
+    assert.equal(offered.status, 201);
+    assert.match(body<{ expiresAt: string }>(offered.raw).expiresAt, /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}Z$/);
+    // Another account does not see it.
+    const bea = await addAccount(port, ada.token, "bea");
+    assert.equal((await request(port, "GET", path, undefined, bea.token)).status, 404);
+    // Taken once, upper case id or not.
+    const taken = await request(port, "GET", path.toUpperCase().replace("/V1/VAULT/PAIRINGS/", "/v1/vault/pairings/"), undefined, ada.token);
+    assert.equal(taken.status, 200);
+    assert.deepEqual(body<unknown>(taken.raw), { sealed });
+    assert.equal((await request(port, "GET", path, undefined, ada.token)).status, 404);
+
+    // A newer pairing replaces the older one; a withdrawn one is gone.
+    const newer = "4e3d2c1b-0a9f-4e8d-9c7b-6a5f4e3d2c1b";
+    await request(port, "PUT", path, { sealed }, ada.token);
+    await request(port, "PUT", `/v1/vault/pairings/${newer}`, { sealed }, ada.token);
+    assert.equal((await request(port, "GET", path, undefined, ada.token)).status, 404);
+    assert.equal((await request(port, "DELETE", `/v1/vault/pairings/${newer}`, undefined, ada.token)).status, 204);
+    assert.equal((await request(port, "DELETE", `/v1/vault/pairings/${newer}`, undefined, ada.token)).status, 204);
+    assert.equal((await request(port, "GET", `/v1/vault/pairings/${newer}`, undefined, ada.token)).status, 404);
+
+    // A reset drops an open pairing.
+    await request(port, "PUT", path, { sealed }, ada.token);
+    assert.equal((await request(port, "DELETE", "/v1/vault", { password: "secretsecret" }, ada.token)).status, 204);
+    assert.equal((await request(port, "GET", path, undefined, ada.token)).status, 404);
+
+    await request(port, "PUT", "/v1/vault", vaultBody(), ada.token);
+    for (const [target, payload] of [
+      ["/v1/vault/pairings/nope", { sealed }],
+      [path, {}],
+      [path, { sealed: "kein base64!" }],
+      [path, { sealed: Buffer.alloc(600, 1).toString("base64") }],
+    ] as const) {
+      assert.equal((await request(port, "PUT", target, payload, ada.token)).status, 400, JSON.stringify([target, payload]));
+    }
+  });
+});
+
+test("a pairing expires after five minutes", () => {
+  let now = 1_000_000;
+  const pairings = new Pairings(() => now);
+  const id = "3d2c1b0a-9f8e-4d7c-8b6a-5f4e3d2c1b0a";
+  const sealed = Buffer.alloc(140, 5).toString("base64");
+  pairings.offer("ada", id, { sealed });
+  now += PAIRING_TTL_MS - 1;
+  assert.deepEqual(pairings.take("ada", id), { sealed });
+  pairings.offer("ada", id, { sealed });
+  now += PAIRING_TTL_MS;
+  assert.throws(() => pairings.take("ada", id), (error: unknown) => error instanceof StoreError && error.status === 404);
+  assert.equal(PAIRING_TTL_MS, 5 * 60 * 1000);
 });
 
 test("a sealed account takes only sealed notes and encrypted blobs", async () => {

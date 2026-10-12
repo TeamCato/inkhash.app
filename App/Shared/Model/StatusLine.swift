@@ -25,8 +25,8 @@ final class StatusLine {
             return "Server nicht erreichbar."
         case is SealError:
             return "Eine Notiz vom Server ließ sich nicht entschlüsseln."
-        case VaultError.wrongPassphrase:
-            return "Die Passphrase stimmt nicht."
+        case VaultError.wrongRecoveryKey:
+            return "Der Wiederherstellungsschlüssel passt nicht."
         case is VaultError:
             return "Der Tresor ließ sich nicht öffnen."
         case let error as KeychainError:
