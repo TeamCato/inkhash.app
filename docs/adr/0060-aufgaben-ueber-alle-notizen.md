@@ -1,6 +1,6 @@
 # 0060 Aufgaben über alle Notizen
 
-Status: angenommen
+Status: angenommen, für Kästchen aus mehreren Strichen geändert durch 0065
 
 Ergänzt 0027 (Aufgaben im Text), 0010 (Erkennung) und 0022 (Seitenleiste).
 
@@ -10,7 +10,7 @@ Ergänzt 0027 (Aufgaben im Text), 0010 (Erkennung) und 0022 (Seitenleiste).
 
 **Fälligkeit im Text.** Eine Aufgabe kann ein Datum tragen. Im Markdown steht es am Ende der Zeile als `📅 JJJJ-MM-TT`, wie im Tasks-Plugin von Obsidian: `- [ ] Angebot schicken 📅 2026-10-20`. Nur das letzte Datum am Ende gilt; ein `📅` mitten im Text ist Text. Steht der Cursor in einer Aufgabe, zeigt der Editor am Rand einen kleinen Chip: „Fällig…“ ohne Datum, sonst das Datum. Er öffnet eine Auswahl mit Heute, Morgen, Nächste Woche, einem Kalender und Entfernen. Wer will, tippt das Datum auch selbst. Ohne Datum bleibt die Aufgabe ohne.
 
-**Aufgaben in der Handschrift.** Ein kleines, gemaltes Kästchen vor einer Zeile ist eine Aufgabe. Erkannt wird es nach dem Schreiben auf dem Gerät, zusammen mit der Abschrift (`TaskBoxes`): ein einzelner, geschlossener Strich, ungefähr quadratisch, 8 bis 60 Seitenpunkte groß, mit Ecken. Ein weiterer Strich im Kästchen hakt es ab. Der Text der Aufgabe ist die erkannte Zeile rechts daneben. Kästchen und Haken gehen nicht in die Abschrift. Die erkannten Aufgaben liegen mit Lage, Text, Zustand und Fälligkeit an der Seite (`tasks`), wie die Abschrift, und werden mit ihr abgeglichen. Abhaken in der Liste zeichnet einen Haken ins Kästchen; wieder öffnen nimmt die Striche im Kästchen weg. Die Tinte bleibt die Wahrheit, die Liste an der Seite folgt ihr. Ein Datum für eine Handschrift-Aufgabe setzt man in der Liste; es bleibt an der Aufgabe, solange ihr Kästchen an derselben Stelle steht.
+**Aufgaben in der Handschrift.** Ein kleines, gemaltes Kästchen vor einer Zeile ist eine Aufgabe. Erkannt wird es nach dem Schreiben auf dem Gerät, zusammen mit der Abschrift (`TaskBoxes`): ein einzelner, geschlossener Strich (seit 0065 auch bis zu vier Striche nacheinander), ungefähr quadratisch, 8 bis 60 Seitenpunkte groß, mit Ecken. Ein weiterer Strich im Kästchen hakt es ab. Der Text der Aufgabe ist die erkannte Zeile rechts daneben. Kästchen und Haken gehen nicht in die Abschrift. Die erkannten Aufgaben liegen mit Lage, Text, Zustand und Fälligkeit an der Seite (`tasks`), wie die Abschrift, und werden mit ihr abgeglichen. Abhaken in der Liste zeichnet einen Haken ins Kästchen; wieder öffnen nimmt die Striche im Kästchen weg. Die Tinte bleibt die Wahrheit, die Liste an der Seite folgt ihr. Ein Datum für eine Handschrift-Aufgabe setzt man in der Liste; es bleibt an der Aufgabe, solange ihr Kästchen an derselben Stelle steht.
 
 ## Warum
 
@@ -22,4 +22,4 @@ Ein gemaltes Kästchen ist, wie man auf Papier Aufgaben schreibt. Ein eigenes We
 
 ## Nicht
 
-Keine Erinnerungen, keine Mitteilungen, keine Wiederholungen, keine Prioritäten, keine Zuständigen. Keine Uhrzeit, nur Tage. Kästchen aus mehreren Strichen werden nicht erkannt. Kein Bearbeiten des Aufgabentexts in der Liste. Der Server liest keine Aufgaben aus dem Markdown und prüft `tasks` nur auf ihre Form.
+Keine Erinnerungen, keine Mitteilungen, keine Wiederholungen, keine Prioritäten, keine Zuständigen. Keine Uhrzeit, nur Tage. Kästchen aus mehreren Strichen werden nicht erkannt (aufgehoben durch 0065). Kein Bearbeiten des Aufgabentexts in der Liste. Der Server liest keine Aufgaben aus dem Markdown und prüft `tasks` nur auf ihre Form.

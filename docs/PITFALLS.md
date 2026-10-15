@@ -386,3 +386,10 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Steht der Cursor in den letzten Zeilen einer Textnotiz, zeigt das `/`-Menü (oder `[[`) nur seine oberen Einträge; der Rest lässt sich nicht hinscrollen.
 **Ursache.** Das Menü hängt als Overlay unter der Cursorzeile und vergrößert den Inhalt der `ScrollView` nicht. Der Leerraum nach dem Text war fest 240 pt, das volle Menü ist rund 470 pt hoch, und gescrollt wurde nur bis zum Cursor.
 **Wache.** `TextNoteView` misst Text und offenes Menü, lässt den Leerraum bis unter das Menü wachsen, sodass sich das ganze Menü hinscrollen lässt. Automatisch gescrollt wird nur bis zum Cursor, durch das Textfeld selbst: Ein Scroll-Proxy von SwiftUI warf die Notiz nach oben (P-062). Das Menü bleibt unter der Cursorzeile (P-010). Kein automatischer Test; in einer langen Notiz in der letzten Zeile `/` tippen, auf Mac, iPad und iPhone.
+
+## P-065 · Gemalte Kästchen aus mehreren Strichen
+
+**Symptom.** Eine Aufgabenliste in Handschrift mit gemalten Kästchen erscheint nicht in der Aufgabenliste; die Abschrift beginnt die Zeilen mit „I“ oder „1“.
+**Ursache.** `TaskBoxes` nahm nur Kästchen aus einem geschlossenen Strich. Auf dem iPad gezeichnet bestehen sie oft aus einem „∩“ und dem Boden, deren Enden über die Ecken hinausstehen. Nach dem Umriss der Striche gemessen ist so ein Kästchen oben so rund wie ein O.
+**Wache.** Mehrere Striche nacheinander bilden ein Kästchen über die eingeschlossene Fläche (`EnclosedArea`) und eine gerade, waagrechte Linie oben oder unten (ADR 0065). Test `TaskBoxTests.testTheBoxesOfAWrittenPageAreFound` mit den echten Strichen einer iPad-Seite aus `docs/fixtures/ink-task-boxes.json`.
+

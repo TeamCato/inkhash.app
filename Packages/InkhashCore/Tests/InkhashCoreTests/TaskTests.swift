@@ -198,4 +198,86 @@ final class TaskBoxTests: XCTestCase {
         let marks = TaskBoxes.marks(in: [square(box), TaskBoxes.tick(in: box)])
         XCTAssertEqual(marks.ticked, [true])
     }
+
+    /// A box as many draw it: left, top and right in one stroke, then the bottom.
+    private func arch(_ rect: CGRect) -> [[CGPoint]] {
+        [
+            line(CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.minX, y: rect.minY))
+                + line(CGPoint(x: rect.minX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.minY))
+                + line(CGPoint(x: rect.maxX, y: rect.minY), CGPoint(x: rect.maxX, y: rect.maxY)),
+            line(CGPoint(x: rect.minX, y: rect.maxY), CGPoint(x: rect.maxX, y: rect.maxY)),
+        ]
+    }
+
+    func testABoxDrawnInSeveralStrokesIsABox() {
+        let box = CGRect(x: 40, y: 100, width: 20, height: 20)
+        let left = line(CGPoint(x: 40, y: 100), CGPoint(x: 40, y: 120))
+        let topRight = line(CGPoint(x: 40, y: 100), CGPoint(x: 60, y: 100)) + line(CGPoint(x: 60, y: 100), CGPoint(x: 60, y: 120))
+        let bottom = line(CGPoint(x: 40, y: 120), CGPoint(x: 60, y: 120))
+        for strokes in [arch(box), [left, topRight, bottom]] {
+            let found = TaskBoxes.marks(in: strokes).boxes
+            XCTAssertEqual(found.count, 1)
+            XCTAssertEqual(found.first?.midX ?? 0, box.midX, accuracy: 1)
+            XCTAssertEqual(found.first?.width ?? 0, box.width, accuracy: 1)
+        }
+    }
+
+    func testAUOrADIsNoBox() {
+        let rect = CGRect(x: 40, y: 100, width: 20, height: 20)
+        let u = line(CGPoint(x: 40, y: 100), CGPoint(x: 40, y: 120))
+            + line(CGPoint(x: 40, y: 120), CGPoint(x: 60, y: 120))
+            + line(CGPoint(x: 60, y: 120), CGPoint(x: 60, y: 100))
+        XCTAssertTrue(TaskBoxes.marks(in: [u]).boxes.isEmpty)
+        let stem = line(CGPoint(x: 40, y: 100), CGPoint(x: 40, y: 120))
+        let bowl = (0...20).map { step -> CGPoint in
+            let angle = -CGFloat.pi / 2 + CGFloat(step) / 20 * .pi
+            return CGPoint(x: rect.minX + cos(angle) * 20, y: rect.midY + sin(angle) * 10)
+        }
+        XCTAssertTrue(TaskBoxes.marks(in: [stem, bowl]).boxes.isEmpty)
+        let squareBowl = line(CGPoint(x: 40, y: 100), CGPoint(x: 52, y: 100))
+            + (0...20).map { step -> CGPoint in
+                let angle = -CGFloat.pi / 2 + CGFloat(step) / 20 * .pi
+                return CGPoint(x: 52 + cos(angle) * 8, y: rect.midY + sin(angle) * 10)
+            }
+            + line(CGPoint(x: 52, y: 120), CGPoint(x: 40, y: 120))
+        XCTAssertTrue(TaskBoxes.marks(in: [stem, squareBowl]).boxes.isEmpty)
+    }
+
+    func testAnOInTwoStrokesIsNoBox() {
+        let halves = [CGFloat.pi / 2, -CGFloat.pi / 2].map { start in
+            (0...20).map { step -> CGPoint in
+                let angle = start + CGFloat(step) / 20 * .pi
+                return CGPoint(x: 50 + cos(angle) * 10, y: 110 + sin(angle) * 10)
+            }
+        }
+        XCTAssertTrue(TaskBoxes.marks(in: halves).boxes.isEmpty)
+    }
+
+    func testATickInABoxOfSeveralStrokesTicksItAndOpeningKeepsTheBox() {
+        let box = CGRect(x: 40, y: 100, width: 20, height: 20)
+        let strokes = arch(box) + [TaskBoxes.tick(in: box)]
+        let marks = TaskBoxes.marks(in: strokes)
+        XCTAssertEqual(marks.ticked, [true])
+        XCTAssertEqual(marks.strokes, [0, 1, 2])
+        XCTAssertEqual(TaskBoxes.ticks(in: strokes, box: box), [2])
+    }
+
+    /// Strokes of a page written on the iPad: "Test Todo:" and three boxes, each drawn in two or
+    /// three strokes, with "Müll rausbringen", "Kochen" and "Einkaufen" beside them.
+    func testTheBoxesOfAWrittenPageAreFound() throws {
+        var url = URL(fileURLWithPath: #filePath)
+        var strokes: [[CGPoint]]?
+        for _ in 0..<8 where strokes == nil {
+            url.deleteLastPathComponent()
+            let fixture = url.appendingPathComponent("docs/fixtures/ink-task-boxes.json")
+            if let data = try? Data(contentsOf: fixture) {
+                let raw = try JSONDecoder().decode([[[Double]]].self, from: data)
+                strokes = raw.map { $0.map { CGPoint(x: $0[0], y: $0[1]) } }
+            }
+        }
+        let marks = TaskBoxes.marks(in: try XCTUnwrap(strokes))
+        XCTAssertEqual(marks.boxes.count, 3)
+        XCTAssertEqual(marks.ticked, [false, false, false])
+        XCTAssertEqual(marks.strokes, [12, 13, 14, 25, 26, 32, 33])
+    }
 }

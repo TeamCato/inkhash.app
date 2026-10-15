@@ -1,9 +1,9 @@
 import CoreGraphics
 import Foundation
 
-/// Finds tasks on a handwriting page: a small box drawn in one stroke, ticked by any stroke inside
+/// Finds tasks on a handwriting page: a small box drawn in one stroke or a few in a row, ticked by any stroke inside
 /// it, with the recognized line to its right as its text. Pure geometry, so it runs without PencilKit.
-/// See ADR 0060.
+/// See ADR 0060 and 0065.
 public enum TaskBoxes {
     /// Side lengths a box may have, in page points. Smaller is a dot, larger a frame in a sketch.
     static let sides: ClosedRange<CGFloat> = 8...60
@@ -16,12 +16,12 @@ public enum TaskBoxes {
         public var strokes: Set<Int>
     }
 
+    /// A box may be drawn in up to this many strokes in a row, such as "∩" and then the bottom.
+    static let maxParts = 4
+
     public static func marks(in strokes: [[CGPoint]]) -> Marks {
-        var boxes: [(index: Int, rect: CGRect)] = []
-        for (index, points) in strokes.enumerated() {
-            if let rect = box(points) { boxes.append((index, rect)) }
-        }
-        var used = Set(boxes.map(\.index))
+        let boxes = groups(in: strokes)
+        var used = Set(boxes.flatMap(\.strokes))
         var ticked = Array(repeating: false, count: boxes.count)
         for (index, points) in strokes.enumerated() where !used.contains(index) {
             guard let bounds = bounds(of: points) else { continue }
@@ -31,6 +31,26 @@ public enum TaskBoxes {
             }
         }
         return Marks(boxes: boxes.map(\.rect), ticked: ticked, strokes: used)
+    }
+
+    /// Boxes in drawing order, each from one stroke or a few drawn one after another. The fewest
+    /// strokes that make a box win, so a tick drawn right after its box stays a tick.
+    static func groups(in strokes: [[CGPoint]]) -> [(strokes: Range<Int>, rect: CGRect)] {
+        var found: [(strokes: Range<Int>, rect: CGRect)] = []
+        var start = 0
+        scan: while start < strokes.count {
+            for count in 1...maxParts where start + count <= strokes.count {
+                let range = start..<(start + count)
+                let rect = count == 1 ? box(strokes[start]) : box(parts: Array(strokes[range]))
+                if let rect {
+                    found.append((range, rect))
+                    start = range.upperBound
+                    continue scan
+                }
+            }
+            start += 1
+        }
+        return found
     }
 
     /// The tasks for the boxes that have a line beside them. `lines` are recognized lines in
@@ -76,10 +96,56 @@ public enum TaskBoxes {
         return rect
     }
 
-    /// Indices of the strokes that tick `box`: on it and not a box themselves.
+    /// A box from several strokes: they close in an area of box size that fills its corners about
+    /// as a box does, every stroke runs along its edge, and one of them is a straight line along
+    /// the top or bottom. That line keeps out an O in two strokes and a D, whose straight stem stands upright.
+    static func box(parts: [[CGPoint]]) -> CGRect? {
+        let points = parts.flatMap { $0 }
+        guard points.count >= 8, let bounds = bounds(of: points) else { return nil }
+        guard min(bounds.width, bounds.height) >= sides.lowerBound, max(bounds.width, bounds.height) <= sides.upperBound * 1.5 else { return nil }
+        let radius = max(1.5, 0.08 * min(bounds.width, bounds.height))
+        guard let area = EnclosedArea.largest(in: parts, inkRadius: radius) else { return nil }
+        let rect = area.rect
+        let short = min(rect.width, rect.height)
+        let long = max(rect.width, rect.height)
+        guard sides.contains(short), sides.contains(long), long / short <= 1.6 else { return nil }
+        guard area.fill >= 0.7, area.size >= 0.35 * Double(bounds.width * bounds.height) else { return nil }
+        let band = 0.25 * short
+        for part in parts {
+            let onEdge = part.filter { distance($0, toEdgeOf: rect) <= band }
+            guard Double(onEdge.count) >= 0.6 * Double(part.count) else { return nil }
+        }
+        guard parts.contains(where: { isBase($0, of: rect, band: band) }) else { return nil }
+        return rect
+    }
+
+    /// A straight, level stroke along the top or bottom of `rect`, over most of its width.
+    static func isBase(_ points: [CGPoint], of rect: CGRect, band: CGFloat) -> Bool {
+        guard let first = points.first, let last = points.last else { return false }
+        let length = distance(first, last)
+        guard length >= 0.6 * rect.width, abs(last.y - first.y) <= 0.35 * abs(last.x - first.x) else { return false }
+        let straight = points.allSatisfy { point in
+            abs((last.x - first.x) * (first.y - point.y) - (first.x - point.x) * (last.y - first.y)) / length <= 0.2 * length
+        }
+        let middle = (first.y + last.y) / 2
+        return straight && min(abs(middle - rect.minY), abs(middle - rect.maxY)) <= band
+    }
+
+    /// Distance from a point to the outline of `rect`, from inside or outside.
+    static func distance(_ point: CGPoint, toEdgeOf rect: CGRect) -> CGFloat {
+        if rect.contains(point) {
+            return min(point.x - rect.minX, rect.maxX - point.x, point.y - rect.minY, rect.maxY - point.y)
+        }
+        let dx = max(rect.minX - point.x, 0, point.x - rect.maxX)
+        let dy = max(rect.minY - point.y, 0, point.y - rect.maxY)
+        return hypot(dx, dy)
+    }
+
+    /// Indices of the strokes that tick `box`: on it and not part of a box themselves.
     public static func ticks(in strokes: [[CGPoint]], box: CGRect) -> [Int] {
-        strokes.indices.filter { index in
-            guard self.box(strokes[index]) == nil, let bounds = bounds(of: strokes[index]) else { return false }
+        let parts = Set(groups(in: strokes).flatMap(\.strokes))
+        return strokes.indices.filter { index in
+            guard !parts.contains(index), let bounds = bounds(of: strokes[index]) else { return false }
             return isTick(bounds, in: box)
         }
     }
