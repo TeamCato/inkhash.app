@@ -334,3 +334,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Nach dem Import eines GoodNotes-Notizbuchs steht dauerhaft „lese Handschrift…“, die App reagiert kaum, die Suche findet nichts. iPad und iPhone.
 **Ursache.** Beim Öffnen startet für jede ungelesene Seite eine Erkennung. `PKDrawing.image` und Vision blockieren ihren Thread synchron, liefen aber auf dem kooperativen Pool von Swift Concurrency. Bei zehn Seiten waren alle Threads des Pools belegt und warteten aufeinander (PencilKit-Metal, Vision-Queue): Deadlock, danach lief keine Task der App mehr.
 **Wache.** `HandwritingRecognizer` rendert und liest nur auf seiner eigenen seriellen `DispatchQueue`, eine Seite nach der anderen, und kehrt per Continuation zurück. Blockierende Framework-Aufrufe nie in `Task`/`Task.detached` direkt ausführen. Kein automatischer Test; im Simulator mit einem Notizbuch mit vielen Seiten prüfen.
+
+## P-056 · `/`-Menü am Dokumentende abgeschnitten
+
+**Symptom.** Steht der Cursor in den letzten Zeilen einer Textnotiz, zeigt das `/`-Menü (oder `[[`) nur seine oberen Einträge; der Rest lässt sich nicht hinscrollen.
+**Ursache.** Das Menü hängt als Overlay unter der Cursorzeile und vergrößert den Inhalt der `ScrollView` nicht. Der Leerraum nach dem Text war fest 240 pt, das volle Menü ist rund 470 pt hoch, und gescrollt wurde nur bis zum Cursor.
+**Wache.** `TextNoteView` misst Text und offenes Menü, lässt den Leerraum bis unter das Menü wachsen und scrollt zu einem Anker an dessen Unterkante. Das Menü bleibt unter der Cursorzeile (P-010). Kein automatischer Test; in einer langen Notiz in der letzten Zeile `/` tippen, auf Mac, iPad und iPhone.

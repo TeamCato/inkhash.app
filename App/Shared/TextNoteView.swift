@@ -6,6 +6,9 @@ struct TextNoteView: View {
     @Environment(AppModel.self) private var model
     @State private var compact = false
     @State private var showsPaper = false
+    /// Height of the text itself and of the open `/` or `[[` menu, to keep the menu inside the sheet.
+    @State private var textHeight: CGFloat = 0
+    @State private var menuHeight: CGFloat = 0
 
     /// Title and path start where the text starts, right of the marker column.
     static var gutter: CGFloat { NoteDocument.gutter }
@@ -31,11 +34,13 @@ struct TextNoteView: View {
                             .padding(.leading, Self.gutter)
                     }
                     NoteTextView(session: session, version: session.version)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
                         .overlay(alignment: .topLeading) { overlays(state) }
                         // Menus hang below the text; they must stay above the empty area after it.
                         .zIndex(1)
+                    // Grows while a menu hangs past the end, so the scroll view can show all of it.
                     Color.clear
-                        .frame(height: 240)
+                        .frame(height: max(240, (menuEnd(state) ?? 0) + Self.menuMargin - textHeight))
                         .contentShape(Rectangle())
                         .onTapGesture { session.focusEnd() }
                 }
@@ -48,7 +53,9 @@ struct TextNoteView: View {
             .onChange(of: state.caret) { _, _ in
                 // Without an anchor the scroll view moves only as far as needed.
                 proxy.scrollTo(Self.caretID)
+                revealMenu(proxy)
             }
+            .onChange(of: menuEnd(state)) { _, _ in revealMenu(proxy) }
         }
         // A text note has a colour only, no pattern. See ADR 0042.
         .background((record?.note.shownPaper ?? .standard).fill.ignoresSafeArea())
@@ -85,6 +92,20 @@ struct TextNoteView: View {
     }
 
     private static let caretID = "caret"
+    private static let menuEndID = "menuEnd"
+    private static let menuMargin: CGFloat = 24
+
+    /// Bottom edge of the open menu below the cursor line, nil while none is open.
+    private func menuEnd(_ state: EditorState) -> CGFloat? {
+        guard state.slashQuery != nil || state.noteQuery != nil else { return nil }
+        return state.caret.maxY + menuHeight
+    }
+
+    /// Scrolls just far enough to show the whole menu. Waits a turn so the grown bottom space is laid out.
+    private func revealMenu(_ proxy: ScrollViewProxy) {
+        guard menuEnd(session.state) != nil else { return }
+        DispatchQueue.main.async { proxy.scrollTo(Self.menuEndID) }
+    }
 
     @ViewBuilder
     private func overlays(_ state: EditorState) -> some View {
@@ -93,6 +114,13 @@ struct TextNoteView: View {
             .offset(x: state.caret.minX, y: state.caret.minY)
             .id(Self.caretID)
             .allowsHitTesting(false)
+        if let end = menuEnd(state) {
+            Color.clear
+                .frame(width: 1, height: 1)
+                .offset(x: state.caret.minX, y: end + Self.menuMargin - 1)
+                .id(Self.menuEndID)
+                .allowsHitTesting(false)
+        }
         // `/Link` asks for target and label at the cursor. See ADR 0031.
         Color.clear
             .allowsHitTesting(false)
@@ -132,6 +160,7 @@ struct TextNoteView: View {
             NoteLinkMenu(notes: session.noteSuggestions, index: session.noteIndex) {
                 session.applyNoteLink($0)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
             .offset(x: Self.gutter, y: state.caret.maxY)
         }
         if state.slashQuery != nil {
@@ -139,6 +168,7 @@ struct TextNoteView: View {
                 session.slashIndex = $0
                 session.applySlash()
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
             .offset(x: Self.gutter, y: state.caret.maxY)
         }
     }
