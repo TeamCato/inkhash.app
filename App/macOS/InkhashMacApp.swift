@@ -16,5 +16,14 @@ struct InkhashMacApp: App {
             // "Show/Hide Sidebar" on Ctrl+Cmd+S, see ADR 0030.
             SidebarCommands()
         }
+        // Inkhash > Einstellungen (Cmd+,): what belongs to this Mac, not to a workspace. See ADR 0061.
+        Settings {
+            Form {
+                TextSettingsSection()
+            }
+            .formStyle(.grouped)
+            .frame(width: 460)
+            .preferredColorScheme(.light)
+        }
     }
 }

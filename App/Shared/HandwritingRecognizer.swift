@@ -18,6 +18,8 @@ enum InkDrawing {
 struct PageReading: Equatable {
     var transcript: String
     var tags: [String]
+    /// Drawn boxes with the line beside them. See ADR 0060.
+    var tasks: [InkTask] = []
 }
 
 enum HandwritingRecognizer {
@@ -37,33 +39,35 @@ enum HandwritingRecognizer {
         }
     }
 
+    /// Drawn boxes and their ticks are taken out first: they are tasks, not words. See ADR 0060.
     private static func readSplit(_ drawing: PKDrawing, width: Double, height: Double) -> PageReading {
         let isMarker: (PKStroke) -> Bool = { $0.ink.inkType == .marker }
-        guard drawing.strokes.contains(where: isMarker) else {
-            return read(drawing, width: width, height: height)
+        let pens = drawing.strokes.filter { !isMarker($0) }
+        let marks = TaskBoxes.marks(in: pens.map(InkTasks.points(of:)))
+        let writing = pens.enumerated().filter { !marks.strokes.contains($0.offset) }.map(\.element)
+        let (penReading, lines) = read(PKDrawing(strokes: writing), width: width, height: height)
+        let tasks = TaskBoxes.tasks(marks, lines: lines, size: CGSize(width: width, height: height))
+        let markers = drawing.strokes.filter(isMarker)
+        guard !markers.isEmpty else {
+            return PageReading(transcript: penReading.transcript, tags: penReading.tags, tasks: tasks)
         }
-        let pens = read(PKDrawing(strokes: drawing.strokes.filter { !isMarker($0) }), width: width, height: height)
-        let markers = read(PKDrawing(strokes: drawing.strokes.filter(isMarker)), width: width, height: height)
-        let transcript = [pens.transcript, markers.transcript].filter { !$0.isEmpty }.joined(separator: "\n")
-        return PageReading(transcript: transcript, tags: Hashtags.unique(pens.tags + markers.tags))
+        let markerReading = read(PKDrawing(strokes: markers), width: width, height: height).reading
+        let transcript = [penReading.transcript, markerReading.transcript].filter { !$0.isEmpty }.joined(separator: "\n")
+        return PageReading(transcript: transcript, tags: Hashtags.unique(penReading.tags + markerReading.tags), tasks: tasks)
     }
 
     /// Renders the drawing and reads it on device. Language correction stays off so unusual tags survive.
-    private static func read(_ drawing: PKDrawing, width: Double, height: Double) -> PageReading {
-        if drawing.strokes.isEmpty {
-            return PageReading(transcript: "", tags: [])
-        }
+    /// The recognized lines come along for the tasks beside drawn boxes.
+    private static func read(_ drawing: PKDrawing, width: Double, height: Double) -> (reading: PageReading, lines: [RecognizedWord]) {
+        let empty = (PageReading(transcript: "", tags: []), [RecognizedWord]())
+        if drawing.strokes.isEmpty { return empty }
         let rect = CGRect(x: 0, y: 0, width: width, height: height)
-        guard let image = rendered(drawing, rect: rect) else {
-            return PageReading(transcript: "", tags: [])
-        }
+        guard let image = rendered(drawing, rect: rect) else { return empty }
         let words = observations(in: image)
         let transcript = Hashtags.transcript(from: words)
         let tags = Hashtags.inObservations(words)
-        if transcript.isEmpty, tags.isEmpty {
-            return PageReading(transcript: "", tags: [])
-        }
-        return PageReading(transcript: transcript, tags: tags)
+        if transcript.isEmpty, tags.isEmpty { return empty }
+        return (PageReading(transcript: transcript, tags: tags), words)
     }
 
     /// The whole page, in light appearance: PencilKit draws ink for the current appearance, and a

@@ -422,8 +422,41 @@ final class NoteLibrary {
         }
     }
 
-    func applyReading(noteID: UUID, pageID: UUID, transcript: String, tags: [String], pageHasInk: Bool) {
-        change(noteID) { note in note.applyInkReading(pageID: pageID, transcript: transcript, tags: tags, pageHasInk: pageHasInk) }
+    func applyReading(noteID: UUID, pageID: UUID, transcript: String, tags: [String], tasks: [InkTask] = [], pageHasInk: Bool) {
+        change(noteID) { note in note.applyInkReading(pageID: pageID, transcript: transcript, tags: tags, tasks: tasks, pageHasInk: pageHasInk) }
+    }
+
+    // MARK: Tasks
+
+    /// Ticks or opens a task in its note. On a handwriting page the drawing gets or loses the tick.
+    /// See ADR 0060.
+    func setTask(_ item: TaskItem, checked: Bool) {
+        switch item.place {
+        case .text(let index):
+            change(item.noteID) { $0.setTextTask(index, checked: checked) }
+        case .ink(let pageID, let taskID):
+            guard let note = record(item.noteID)?.note, let page = note.pages?.first(where: { $0.id == pageID }),
+                  let task = note.inkTask(page: pageID, task: taskID) else { return }
+            guard let data = drawingData(for: page.blob), let drawing = try? PKDrawing(data: data) else {
+                status.message = "Die Zeichnung ließ sich nicht lesen."
+                return
+            }
+            let box = CGRect(x: task.x, y: task.y, width: task.width, height: task.height)
+            if let next = InkTasks.drawing(drawing, ticking: box, checked: checked) {
+                guard updateDrawing(noteID: item.noteID, pageID: pageID, data: next.dataRepresentation()) else { return }
+            }
+            change(item.noteID) { $0.setInkTask(page: pageID, task: taskID, checked: checked) }
+        }
+    }
+
+    /// Sets or removes the due day of a task in its note. `due` is a day as `JJJJ-MM-TT`.
+    func setTask(_ item: TaskItem, due: String?) {
+        switch item.place {
+        case .text(let index):
+            change(item.noteID) { $0.setTextTask(index, due: due) }
+        case .ink(let pageID, let taskID):
+            change(item.noteID) { $0.setInkTask(page: pageID, task: taskID, due: due) }
+        }
     }
 
     func addPage(noteID: UUID, data: Data) {

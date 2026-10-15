@@ -21,18 +21,14 @@ struct SidebarView: View {
     var body: some View {
         @Bindable var model = model
         VStack(alignment: .leading, spacing: 0) {
-            InkhashLogo(markSide: 22, wordSize: 17)
-                .padding(.horizontal, 18)
-                .padding(.top, 8)
-                .padding(.bottom, 10)
-                .accessibilityAddTraits(.isHeader)
-            WorkspaceSwitcher(newWorkspace: $newWorkspace, showSettings: $showSettings)
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
-            HStack(spacing: 0) {
-                searchField
+            HStack(spacing: 8) {
+                WorkspaceSwitcher(newWorkspace: $newWorkspace, showSettings: $showSettings)
                 newMenu
             }
+            .padding(.horizontal, 10)
+            .padding(.top, 8)
+            .padding(.bottom, 8)
+            searchField
             if model.tagFilter != nil {
                 tagSuggestions
             }
@@ -102,8 +98,7 @@ struct SidebarView: View {
         .padding(.horizontal, 12)
         .padding(.vertical, 7)
         .inkSurface(in: Capsule())
-        .padding(.leading, 10)
-        .padding(.trailing, 4)
+        .padding(.horizontal, 10)
         .padding(.bottom, 8)
     }
 
@@ -179,8 +174,6 @@ struct SidebarView: View {
         .menuIndicator(.hidden)
         .fixedSize()
         .accessibilityLabel("Neu")
-        .padding(.trailing, 6)
-        .padding(.bottom, 8)
         .fileImporter(isPresented: $model.importRequested, allowedContentTypes: [.pdf, .goodnotes, .zip]) { result in
             if case .success(let url) = result { model.importFile(at: url) }
         }
@@ -202,21 +195,26 @@ struct SidebarView: View {
                     case .note(let record): noteRow(record)
                     }
                 }
-                .padding(.leading, CGFloat(row.depth) * Self.indent)
+                .padding(.leading, CGFloat(row.depth) * TreeGuides.indent)
+                .sidebarRow(selected: isSelected(row.item), depth: row.depth)
             }
         }
-        .listStyle(.sidebar)
+        .listStyle(.plain)
         .scrollContentBackground(.hidden)
+        .environment(\.defaultMinListRowHeight, 34)
     }
 
-    private static let indent: CGFloat = 16
+    private func isSelected(_ item: TreeRow.Item) -> Bool {
+        if case .note(let record) = item { return record.id == model.selectedID }
+        return false
+    }
 
-    /// Room for the disclosure chevron, kept on note rows too so labels line up per level.
+    /// Room for the disclosure chevron.
     private func chevronSlot(_ expanded: Bool?) -> some View {
         Group {
             if let expanded {
                 Image(systemName: "chevron.right")
-                    .font(.system(size: 10, weight: .semibold))
+                    .font(.system(size: 11, weight: .semibold))
                     .foregroundStyle(Ink.muted)
                     .rotationEffect(.degrees(expanded ? 90 : 0))
             }
@@ -230,9 +228,15 @@ struct SidebarView: View {
                 model.library.setExpanded(node.path, !expanded)
             }
         } label: {
-            HStack(spacing: 6) {
+            HStack(spacing: 8) {
                 chevronSlot(expanded)
-                Label(Folders.name(of: node.path), systemImage: "folder")
+                Image(systemName: "folder")
+                    .font(.system(size: 14))
+                    .foregroundStyle(Ink.muted)
+                    .frame(width: 20)
+                Text(Folders.name(of: node.path))
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundStyle(Ink.ink)
                     .lineLimit(1)
                 Spacer()
                 count(node.notes.count)
@@ -267,14 +271,13 @@ struct SidebarView: View {
 
     fileprivate func noteRow(_ record: NoteRecord) -> some View {
         let note = record.note
-        return HStack(spacing: 6) {
-            chevronSlot(nil)
-            Image(systemName: note.kind == .ink ? "pencil.tip" : "doc.text")
-                .font(.system(size: 12))
-                .foregroundStyle(Ink.muted)
-                .frame(width: 16)
+        let selected = model.selectedID == record.id
+        // The kind icon stands where folders have their chevron; the guide lines show the nesting.
+        return HStack(spacing: 8) {
+            NoteKindIcon(kind: note.kind, selected: selected)
             Text(note.displayTitle)
-                .font(.system(size: 13, design: .serif))
+                .font(.system(size: 15, weight: selected ? .medium : .regular))
+                .foregroundStyle(Ink.ink)
                 .lineLimit(1)
             Spacer(minLength: 4)
             if record.conflict {
@@ -298,16 +301,16 @@ struct SidebarView: View {
 
     private func count(_ value: Int) -> some View {
         Text(value > 0 ? "\(value)" : "")
-            .font(.system(size: 11))
+            .font(.system(size: 12))
             .foregroundStyle(Ink.muted)
             .monospacedDigit()
     }
 
     private func hint(_ text: String) -> some View {
         Text(text)
-            .font(.system(size: 12))
+            .font(.system(size: 14))
             .foregroundStyle(Ink.muted)
-            .listRowBackground(Color.clear)
+            .sidebarRow(selected: false)
     }
 
     // MARK: Flat lists: search results, favorites, trash
@@ -342,15 +345,16 @@ struct SidebarView: View {
                     hint(emptyText)
                 }
                 ForEach(model.listed) { item in
-                    NoteRow(item: item)
+                    NoteRow(item: item, selected: model.selectedID == item.id)
                         .tag(item.id)
+                        .sidebarRow(selected: model.selectedID == item.id)
                         .swipeActions(edge: .trailing) { trailingSwipe(item.record) }
                         .swipeActions(edge: .leading) { leadingSwipe(item.record) }
                         .contextMenu { menu(for: item.record) }
                         .modifier(deleteConfirmation(for: item.id))
                 }
             }
-            .listStyle(.sidebar)
+            .listStyle(.plain)
             .scrollContentBackground(.hidden)
         }
     }
@@ -442,16 +446,44 @@ struct SidebarView: View {
         .help(label)
     }
 
+    /// Logo while all is well, the message in its place while one stands. See ADR 0056.
+    /// Opens the task list on the sheet; it is no section of the sidebar. See ADR 0060.
+    private var tasksButton: some View {
+        let active = model.showsTasks && model.selectedID == nil
+        return Button {
+            model.toggleTasks()
+        } label: {
+            Image(systemName: active ? "checklist.checked" : "checklist")
+                .font(.system(size: 14))
+                .foregroundStyle(active ? Ink.accent : Ink.muted)
+                .frame(minWidth: 28, minHeight: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Aufgaben")
+        .help("Aufgaben")
+    }
+
     private var footer: some View {
         HStack(spacing: 8) {
             Image(systemName: model.isSyncEnabled ? "arrow.triangle.2.circlepath" : "internaldrive")
                 .font(.system(size: 11))
                 .foregroundStyle(Ink.muted)
-            Text(model.status.isEmpty ? syncLabel : model.status)
-                .font(.system(size: 11))
-                .foregroundStyle(Ink.muted)
-                .lineLimit(1)
+                .help(statusText)
+                .accessibilityLabel(statusText)
+            if StatusLine.isRoutine(model.status) {
+                InkhashLogo(markSide: 14, wordSize: 12)
+                    .opacity(0.55)
+                    .accessibilityHidden(true)
+            } else {
+                Text(model.status)
+                    .font(.system(size: 11))
+                    .foregroundStyle(Ink.muted)
+                    .lineLimit(1)
+                    .help(model.status)
+            }
             Spacer(minLength: 8)
+            tasksButton
             footerButton("star", .favorites, label: "Favoriten")
             footerButton("trash", .trash, label: "Papierkorb", count: model.library.listing.trashCount)
             Button {
@@ -472,7 +504,9 @@ struct SidebarView: View {
         .padding(.vertical, 6)
     }
 
-    private var syncLabel: String {
+    /// What the sync symbol says on hover and to VoiceOver.
+    private var statusText: String {
+        if !model.status.isEmpty, model.status != StatusLine.localOnly { return model.status }
         guard let server = model.registry.server(of: model.registry.current) else { return StatusLine.localOnly }
         return ServerAddress.host(server.url)
     }
@@ -564,6 +598,87 @@ struct WorkspaceSwitcher: View {
         .buttonStyle(.plain)
         .menuIndicator(.hidden)
         .accessibilityLabel("Workspace: \(model.registry.current.name)")
+    }
+}
+
+/// One hairline per enclosing folder, under that folder's chevron, so a folder's contents read as
+/// belonging to it. See ADR 0056.
+private struct TreeGuides: View {
+    static let indent: CGFloat = 16
+    /// Middle of the chevron slot at the start of each row.
+    private static let offset: CGFloat = 6
+
+    var depth: Int
+
+    var body: some View {
+        ZStack(alignment: .leading) {
+            ForEach(0..<depth, id: \.self) { level in
+                Rectangle()
+                    .fill(Ink.hairline)
+                    .frame(width: 1)
+                    .offset(x: CGFloat(level) * Self.indent + Self.offset)
+            }
+        }
+        .frame(maxHeight: .infinity, alignment: .leading)
+        .accessibilityHidden(true)
+    }
+}
+
+/// Pen or text, in front of a note's title; blue while the note is chosen. See ADR 0056.
+struct NoteKindIcon: View {
+    var kind: NoteKind
+    var selected: Bool
+
+    var body: some View {
+        Image(systemName: kind == .ink ? "pencil.tip" : "doc.text")
+            .font(.system(size: 14))
+            .foregroundStyle(selected ? Ink.accent : Ink.muted)
+            .frame(width: 20)
+            .accessibilityLabel(kind == .ink ? "Stiftnotiz" : "Textnotiz")
+    }
+}
+
+/// A row of the sidebar's lists. The chosen note lies as a small sheet of paper on the desk, like
+/// everything else above it; the system's grey highlight and separators do not show. See ADR 0056.
+private struct SidebarRow: ViewModifier {
+    var selected: Bool
+    var depth: Int
+
+    func body(content: Content) -> some View {
+        content
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .overlay(alignment: .leading) {
+                TreeGuides(depth: depth)
+                    .padding(.leading, 10)
+                    // Reaches into the row insets so the lines run on unbroken from row to row.
+                    .padding(.vertical, -1)
+            }
+            .listRowInsets(EdgeInsets(top: 1, leading: 10, bottom: 1, trailing: 10))
+            .listRowSeparator(.hidden)
+            .listRowBackground(
+                Group {
+                    if selected {
+                        RoundedRectangle(cornerRadius: 10, style: .continuous)
+                            .fill(Ink.paper)
+                            .shadow(color: Color.black.opacity(0.06), radius: 6, y: 3)
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 10, style: .continuous)
+                                    .strokeBorder(Ink.hairline, lineWidth: 1)
+                            )
+                            .padding(.horizontal, 10)
+                            .padding(.vertical, 1)
+                    } else {
+                        Color.clear
+                    }
+                }
+            )
+    }
+}
+
+extension View {
+    fileprivate func sidebarRow(selected: Bool, depth: Int = 0) -> some View {
+        modifier(SidebarRow(selected: selected, depth: depth))
     }
 }
 

@@ -9,6 +9,12 @@ final class StatusLine {
     var message = ""
 
     static let localOnly = "Nur auf diesem Gerät."
+    static let synced = "Abgeglichen."
+
+    /// Messages that say nothing is wrong. The sidebar shows its logo instead of them. See ADR 0056.
+    static func isRoutine(_ message: String) -> Bool {
+        message.isEmpty || message == localOnly || message == synced
+    }
 
     /// A failed request in words for the status line.
     static func describe(_ error: Error) -> String {

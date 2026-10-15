@@ -19,6 +19,7 @@ struct RootView: View {
         .splitStyle(floating: sidebarFloats)
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .onChange(of: model.selectedID) { _, _ in placeSidebar() }
+        .onChange(of: model.showsTasks) { _, _ in placeSidebar() }
         .onAppear { placeSidebar() }
         .hidingWindowTitle()
         .inkDesk()
@@ -55,7 +56,7 @@ struct RootView: View {
     /// Opening a note hides the sidebar where it floats; without a note to show it comes back.
     private func placeSidebar() {
         let showsNote = model.selectedID.flatMap { model.library.record($0) }.map { $0.note.deletedAt == nil } ?? false
-        if !showsNote {
+        if !showsNote, !model.showsTasks {
             columns = .all
         } else if sidebarFloats {
             columns = .detailOnly
@@ -76,6 +77,8 @@ struct RootView: View {
             .id("\(record.id.uuidString)-\(model.editorEpoch)")
         } else if let id = model.selectedID, let record = model.library.record(id) {
             TrashedNoteView(record: record)
+        } else if model.showsTasks {
+            TaskListView()
         } else {
             VStack(spacing: 18) {
                 InkhashLogo(axis: .stacked, markSide: 88, wordSize: 34)
@@ -136,20 +139,19 @@ struct TrashedNoteView: View {
 /// A note in a flat list: search results, favorites, trash. Shows where it lies, since the tree does not.
 struct NoteRow: View {
     var item: ListedNote
+    var selected = false
 
     private var note: Note { item.record.note }
 
     var body: some View {
         HStack(alignment: .top, spacing: 10) {
-            Image(systemName: note.kind == .ink ? "pencil.tip" : "doc.text")
-                .font(.system(size: 13))
-                .foregroundStyle(Ink.muted)
-                .frame(width: 18)
-                .padding(.top, 2)
+            NoteKindIcon(kind: note.kind, selected: selected)
+                .padding(.top, 1)
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
                     Text(note.displayTitle)
-                        .font(.system(size: 14, design: .serif))
+                        .font(.system(size: 15, weight: selected ? .semibold : .medium))
+                        .foregroundStyle(Ink.ink)
                         .lineLimit(1)
                     Spacer(minLength: 6)
                     if item.record.conflict {
@@ -166,7 +168,7 @@ struct NoteRow: View {
                 }
                 if let snippet = item.snippet {
                     Text(snippet)
-                        .font(.system(size: 12))
+                        .font(.system(size: 13))
                         .foregroundStyle(Ink.muted)
                         .lineLimit(2)
                 }
@@ -182,11 +184,10 @@ struct NoteRow: View {
                             .lineLimit(1)
                     }
                 }
-                .font(.system(size: 11))
+                .font(.system(size: 12))
                 .foregroundStyle(Ink.muted)
             }
         }
-        .padding(.vertical, 3)
     }
 
     private func relative(_ iso: String) -> String {

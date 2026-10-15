@@ -359,3 +359,27 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Ursache.** Nach jedem Zeichen liest der Editor die Zeile als Inline-Markdown neu (`reconcileInline`). Zwei Backticks sind dort leerer Inline-Code und wurden entfernt, bevor der dritte und das Leerzeichen das Block-Kürzel (`BlockShortcut`) erreichen konnten.
 **Wache.** `EditorEngine.reconcileInline` lässt einen Absatz in Ruhe, der nur aus ein bis drei Backticks besteht. Test `BlockEditingTests.testCodeBlockKeepsItsLines`.
 
+
+## P-060 · UIKit wirft seinen Verlauf weg, sobald der Editor Text ändert
+
+**Symptom.** Im Text auf iPad und iPhone geht Rückgängig nur bis zur letzten Formatierung, zum letzten Kürzel oder zur letzten Tabellenzelle. Davor Getipptes lässt sich nicht mehr zurücknehmen.
+**Ursache.** Der `UndoManager` von `UITextView` (`_UITextUndoManager`) löscht seine Tipp-Schritte, sobald sich die Zeichen im Text ändern, ohne dass er es selbst war: ein ersetzter Bereich genügt, nur Attribute nicht. Die `EditorEngine` ändert den Text direkt im `NSTextStorage`. Früher wurde der Verlauf deshalb nach jeder solchen Änderung ganz gelöscht.
+**Wache.** `InkNoteTextView` auf iOS gibt einen eigenen `UndoManager` aus und legt alle Schritte selbst an: einen pro Lauf beim Tippen (`recordTyping`) und einen pro Änderung der Engine (`performEdit`). Jeder Schritt legt den ganzen Text samt Auswahl zurück (`EditorEngine.snapshot`/`restore`, ADR 0059). In den `UndoManager` von UIKit nichts eintragen und ihn nicht mit eigenen Schritten mischen. Tests in `UndoTests`.
+
+## P-061 · Menüs im Text stehen nicht am Cursor
+
+**Symptom.** Das `/`-Menü, das `[[`-Menü oder der Link-Chip öffnen sich weit rechts oder unter dem Cursor, nicht an ihm. Am Zeilenanfang fällt es kaum auf.
+**Ursache.** Zwei Dinge. `EditorEngine` meldete als Cursor den ganzen Zeilenkasten: Zeilenanfang statt Einfügemarke, mit Absatz- und Zeilenabstand. Und die Menüs lagen direkt im `overlay` des Textfelds; SwiftUI zentrierte einige von ihnen in der Breite, bevor der `offset` wirkte.
+**Wache.** `EditorEngine.caretRect` liefert die Einfügemarke in Schrifthöhe (Test `EditorLookTests.testTheCaretIsWhereTheCursorStandsNotAtTheLineStart`). `TextNoteView` legt alle Menüs in ein eigenes `ZStack(alignment: .topLeading)` mit voller Größe. `make mac-test` rendert das Blatt mit offenem Menü nach `/tmp/inkhash-mac-sheet.png`.
+
+## P-062 · Tippen wirft die Notiz nach oben
+
+**Symptom.** In einer langen Textnotiz springt die Ansicht beim Tippen oder beim Öffnen des `/`-Menüs ein Stück oder ganz nach oben; der Cursor ist danach außer Sicht.
+**Ursache.** `TextNoteView` scrollte bei jeder Änderung des Cursors per `ScrollViewReader.scrollTo` zu einer unsichtbaren Markierung über dem Text. Die Markierung stand per `offset` am Cursor; `offset` verschiebt nur das Bild, `scrollTo` geht nach der Lage, also oben links. Auch mit `padding` rechnete SwiftUI die Stelle falsch.
+**Wache.** Kein `scrollTo` für den Cursor. Die Engine ruft `EditorHost.reveal` mit der Einfügemarke, nur wenn sich Auswahl oder Text geändert haben; das Textfeld scrollt die umgebende Scroll-Ansicht selbst, nur so weit wie nötig (`scrollToVisible`, `scrollRectToVisible`). Tests `MacNoteSheetTests.testTheSlashMenuKeepsTheNoteWhereItIs` und `testTypingOutOfSightScrollsToTheCursor` (`make mac-test`).
+
+## P-063 · Rückgängig gehört zur Seite und zur Notiz, nicht zum Fenster
+
+**Symptom.** Auf dem iPad: Strich auf Seite 1, umblättern, Rückgängig; Seite 2 bekommt die Tinte von Seite 1 und verliert ihre eigene. Auf dem Mac: nach dem Wechsel in eine andere Notiz ist ↶ aktiv und ändert unsichtbar die geschlossene Notiz, der Verlauf hält beliebig viele volle Kopien der Zeichnung.
+**Ursache.** Der `PKCanvasView` bleibt beim Blättern derselbe, sein `UndoManager` mit ihm. Auf dem Mac ist `@Environment(\.undoManager)` der Manager des Fensters; `NSTextView` benutzt ebenfalls den des Fensters. Seit ADR 0059 sind diese Schritte über Knöpfe sichtbar und erreichbar.
+**Wache.** `InkPageCanvas.updateUIView` leert den Manager des Canvas beim Seitenwechsel. Auf dem Mac nimmt die Zeichenfläche ihre Schritte beim Verschwinden zurück (`removeAllActions(withTarget: history)`), das Textfeld beim Abbau (`dismantleNSView`); beide setzen `levelsOfUndo = 100`. Test `InkPageCanvasTests.testTurningThePageDropsTheUndoStepsOfTheOldOne`.

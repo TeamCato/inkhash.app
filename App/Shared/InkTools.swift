@@ -1,9 +1,11 @@
 import InkhashCore
 import SwiftUI
 
-#if os(iOS)
 import PencilKit
+#if os(iOS)
 import UIKit
+#else
+import AppKit
 #endif
 
 enum InkPen: String, CaseIterable, Identifiable {
@@ -49,7 +51,6 @@ enum InkPen: String, CaseIterable, Identifiable {
         self == .marker ? "#FFE433" : "#1C1D20"
     }
 
-    #if os(iOS)
     var inkType: PKInkingTool.InkType {
         switch self {
         case .fountain: .fountainPen
@@ -58,7 +59,6 @@ enum InkPen: String, CaseIterable, Identifiable {
         case .marker: .marker
         }
     }
-    #endif
 }
 
 struct InkStrokeTool: Equatable {
@@ -464,6 +464,70 @@ struct InkToolRail: View {
     }
 }
 
+#else
+/// The Mac's tools: pens, a stroke eraser, colours and widths. Shapes, tape, images and selection
+/// stay on the iPad. Same strip and look as `InkToolRail`. See ADR 0058.
+struct MacInkTools: View {
+    var tools: InkToolState
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: false) {
+            VStack(spacing: 4) {
+                ForEach(InkPen.allCases) { pen in
+                    tool(pen.symbol, title: pen.title, active: !tools.erasing && tools.pen == pen) { tools.choose(pen) }
+                }
+                tool("eraser", title: "Radierer", active: tools.erasing) { tools.chooseEraser() }
+                if !tools.erasing {
+                    Divider().frame(width: 28).padding(.vertical, 6)
+                    ForEach(tools.swatches, id: \.self) { hex in
+                        ColorSwatch(hex: hex, selected: tools.currentColor == hex) { tools.pickColor(hex) }
+                    }
+                    Divider().frame(width: 28).padding(.vertical, 6)
+                    ForEach(tools.pen.widths, id: \.self) { width in
+                        widthButton(width)
+                    }
+                }
+            }
+            .padding(.vertical, 10)
+            .frame(width: 52)
+        }
+        .inkPanel(radius: 18)
+        .onAppear {
+            // The Mac only draws; a shape or tape tool remembered from elsewhere would do nothing.
+            if tools.mode != .draw { tools.choose(.draw) }
+        }
+    }
+
+    private func tool(_ symbol: String, title: String, active: Bool, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Image(systemName: symbol)
+                .font(.system(size: 16, weight: .medium))
+                .frame(width: 32, height: 32)
+        }
+        .buttonStyle(InkToolButtonStyle(isActive: active))
+        .accessibilityLabel(title)
+        .help(title)
+    }
+
+    private func widthButton(_ width: Double) -> some View {
+        let chosen = tools.width(for: tools.pen) == width
+        let side = min(4 + width * 0.9, 22)
+        return Button {
+            tools.pickWidth(width)
+        } label: {
+            Circle()
+                .fill(chosen ? Ink.accent : Ink.ink.opacity(0.7))
+                .frame(width: side, height: side)
+                .frame(width: 32, height: 28)
+                .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .accessibilityLabel("Stärke \(Int(width))")
+        .accessibilityAddTraits(chosen ? .isSelected : [])
+    }
+}
+#endif
+
 struct ColorSwatch: View {
     var hex: String
     var selected: Bool
@@ -485,6 +549,7 @@ struct ColorSwatch: View {
     }
 }
 
+#if os(iOS)
 extension UIColor {
     /// "#RRGGBB", upper case like the server stores it.
     var inkHex: String {
@@ -509,6 +574,25 @@ extension UIColor {
 extension Color {
     init(inkHex: String) {
         self.init(uiColor: UIColor(inkHex: inkHex))
+    }
+}
+#else
+extension NSColor {
+    convenience init(inkHex: String) {
+        var value: UInt64 = 0
+        Scanner(string: String(inkHex.dropFirst())).scanHexInt64(&value)
+        self.init(
+            srgbRed: CGFloat((value >> 16) & 0xFF) / 255,
+            green: CGFloat((value >> 8) & 0xFF) / 255,
+            blue: CGFloat(value & 0xFF) / 255,
+            alpha: 1
+        )
+    }
+}
+
+extension Color {
+    init(inkHex: String) {
+        self.init(nsColor: NSColor(inkHex: inkHex))
     }
 }
 #endif

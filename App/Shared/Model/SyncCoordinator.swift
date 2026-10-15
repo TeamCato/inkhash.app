@@ -154,6 +154,6 @@ final class SyncCoordinator {
                 ? "Der Server lehnt „\(title)“ ab."
                 : "Der Server lehnt \(report.rejected.count) Notizen ab, darunter „\(title)“."
         }
-        return report.conflicts > 0 ? "Konflikt mit dem Server." : "Abgeglichen."
+        return report.conflicts > 0 ? "Konflikt mit dem Server." : StatusLine.synced
     }
 }

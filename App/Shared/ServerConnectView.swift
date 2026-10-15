@@ -48,7 +48,7 @@ struct ServerConnectView: View {
             if case .reachable(let mode) = model.sessions.connection {
                 accountSection(mode)
             }
-            if !model.status.isEmpty, model.status != StatusLine.localOnly, model.status != "Abgeglichen." {
+            if !StatusLine.isRoutine(model.status) {
                 Text(model.status)
                     .font(.system(size: 12))
                     .foregroundStyle(Ink.muted)

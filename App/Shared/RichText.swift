@@ -57,12 +57,14 @@ enum EditorFont {
         scaled(baseSize(for: type))
     }
 
-    /// A length that grows with the text size the person chose. The Mac has no Dynamic Type.
+    /// A length that grows with the size chosen in the settings (ADR 0061) and, on iPad and iPhone,
+    /// with the system's text size. The Mac has no Dynamic Type.
     static func scaled(_ value: CGFloat) -> CGFloat {
+        let chosen = value * TextAppearance.current.scale
         #if os(macOS)
-        value
+        return chosen
         #else
-        UIFontMetrics(forTextStyle: .body).scaledValue(for: value)
+        return UIFontMetrics(forTextStyle: .body).scaledValue(for: chosen)
         #endif
     }
 
@@ -99,9 +101,10 @@ enum EditorFont {
         if code {
             return PlatformFont.monospacedSystemFont(ofSize: size, weight: .regular)
         }
+        let design = serif ? .serif : TextAppearance.current.family.design
         #if os(macOS)
         let preferred = NSFontDescriptor.preferredFontDescriptor(forTextStyle: .body)
-        let base = serif ? (preferred.withDesign(.serif) ?? preferred) : preferred
+        let base = preferred.withDesign(design) ?? preferred
         var traits = NSFontDescriptor.SymbolicTraits()
         if bold { traits.insert(.bold) }
         if italic { traits.insert(.italic) }
@@ -109,7 +112,7 @@ enum EditorFont {
             ?? .systemFont(ofSize: size, weight: bold ? .semibold : .regular)
         #else
         let preferred = UIFontDescriptor.preferredFontDescriptor(withTextStyle: .body)
-        let base = serif ? (preferred.withDesign(.serif) ?? preferred) : preferred
+        let base = preferred.withDesign(design) ?? preferred
         var traits = UIFontDescriptor.SymbolicTraits()
         if bold { traits.insert(.traitBold) }
         if italic { traits.insert(.traitItalic) }
@@ -119,6 +122,28 @@ enum EditorFont {
         return .systemFont(ofSize: size, weight: bold ? .semibold : .regular)
         #endif
     }
+}
+
+extension TextFamily {
+    #if os(macOS)
+    var design: NSFontDescriptor.SystemDesign {
+        switch self {
+        case .standard: .default
+        case .serif: .serif
+        case .rounded: .rounded
+        case .mono: .monospaced
+        }
+    }
+    #else
+    var design: UIFontDescriptor.SystemDesign {
+        switch self {
+        case .standard: .default
+        case .serif: .serif
+        case .rounded: .rounded
+        case .mono: .monospaced
+        }
+    }
+    #endif
 }
 
 enum RichText {
@@ -173,6 +198,34 @@ enum RichText {
             if inCode { continue }
             storage.addAttribute(.foregroundColor, value: accentColor, range: match.range)
         }
+    }
+
+    /// A task as in the task list: done ones grey and struck through, the due day as a capsule the
+    /// layout manager draws. Display only; `blocks(from:)` reads neither. Other paragraphs lose both.
+    /// See ADR 0062.
+    static func decorateTask(in storage: NSMutableAttributedString, range: NSRange, style: BlockStyle) {
+        guard range.length > 0 else { return }
+        storage.removeAttribute(.strikethroughStyle, range: range)
+        storage.removeAttribute(.strikethroughColor, range: range)
+        storage.removeAttribute(.inkhashDue, range: range)
+        guard style.type == .checkbox else { return }
+        if style.checked {
+            storage.addAttributes([
+                .foregroundColor: mutedColor,
+                .strikethroughStyle: NSUnderlineStyle.single.rawValue,
+                .strikethroughColor: mutedColor,
+            ], range: range)
+        }
+        let text = (storage.string as NSString).substring(with: range) as NSString
+        guard let found = TaskDue.trailingRange(in: text as String) else { return }
+        let marker = text.range(of: TaskDue.marker, range: found.whole)
+        guard marker.location != NSNotFound else { return }
+        let chip = NSRange(location: range.location + marker.location, length: NSMaxRange(found.day) - marker.location)
+        storage.removeAttribute(.strikethroughStyle, range: chip)
+        storage.addAttributes([
+            .inkhashDue: text.substring(with: found.day),
+            .font: EditorFont.font(size: EditorFont.scaled(12), serif: false, bold: false, italic: false, code: false),
+        ], range: chip)
     }
 
     private static let markerPattern = try! NSRegularExpression(
@@ -316,6 +369,8 @@ extension NSAttributedString.Key {
     /// Paragraph attributes, on every character of a paragraph including its newline. See ADR 0025.
     static let inkhashBlockType = NSAttributedString.Key("inkhash.blockType")
     static let inkhashChecked = NSAttributedString.Key("inkhash.checked")
+    /// On the `📅 JJJJ-MM-TT` of a task: the day. The layout manager draws a capsule there instead. See ADR 0062.
+    static let inkhashDue = NSAttributedString.Key("inkhash.due")
     static let inkhashLanguage = NSAttributedString.Key("inkhash.language")
     /// Column count of the table a row belongs to; the layout manager draws the grid from it.
     static let inkhashTableColumns = NSAttributedString.Key("inkhash.tableColumns")

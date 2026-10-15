@@ -13,7 +13,8 @@ struct InkPageCanvas: UIViewRepresentable {
     var pageHeight: Double
     /// Lines, grid or dots under everything, see ADR 0042. The colour is the view's background.
     var paper: Paper
-    /// Screen points per page point. Strokes and elements stay in page coordinates, see ADR 0018.
+    /// Screen points per page point at which the page fits, the least zoom. Pinching zooms in
+    /// from there. Strokes and elements stay in page coordinates, see ADR 0018 and 0057.
     var scale: CGFloat
     var fingerDrawing: Bool
     var tools: InkToolState
@@ -23,10 +24,8 @@ struct InkPageCanvas: UIViewRepresentable {
     var onDrawing: (UUID, Data, Double) -> Void
     var onElements: (UUID, [PageElement]) -> Void
 
-    /// Room kept below the lowest stroke, in page points. Writing into it grows the page.
-    static let growMargin: Double = 320
-    static let growStep: Double = 640
-    static let maxHeight: Double = 10_000
+    /// How far pinching zooms in beyond the fitting scale. See ADR 0057.
+    static let maxZoomFactor: CGFloat = 4
 
     func makeUIView(context: Context) -> PKCanvasView {
         let canvas = PKCanvasView()
@@ -50,20 +49,19 @@ struct InkPageCanvas: UIViewRepresentable {
         coordinator.applyMode()
         coordinator.redrawSoon()
         editor.controller = coordinator
+        // The canvas has its undo manager only once it is in a window.
+        DispatchQueue.main.async { editor.history.follow(canvas.undoManager) }
         return canvas
     }
 
     func updateUIView(_ canvas: PKCanvasView, context: Context) {
         let coordinator = context.coordinator
         if coordinator.pageID != pageID {
-            // Another page in the same view: what was drawn belongs to the old one.
-            coordinator.flush()
-            coordinator.pageID = pageID
-            coordinator.height = pageHeight
-            coordinator.localHash = nil
+            coordinator.turn(to: pageID, height: pageHeight)
         }
         coordinator.parent = self
         editor.controller = coordinator
+        editor.history.follow(canvas.undoManager)
         applyZoom(canvas, coordinator: coordinator)
         coordinator.applyMode()
         coordinator.applyToolIfIdle()
@@ -71,16 +69,20 @@ struct InkPageCanvas: UIViewRepresentable {
         coordinator.syncElements(elements, force: false)
     }
 
-    /// Width fits the surface. The content is at least as tall as the surface, so every spot is drawable.
+    /// Width fits the surface; pinching zooms in up to `maxZoomFactor` and never out beyond the fit.
+    /// A new fitting scale (rotation, another window size) starts over at the fit. The content is at
+    /// least as tall as the surface, so every spot is drawable.
     private func applyZoom(_ canvas: PKCanvasView, coordinator: Coordinator) {
         guard scale > 0 else { return }
-        if abs(canvas.zoomScale - scale) > 0.001 {
+        if abs(coordinator.fitScale - scale) > 0.001 {
+            coordinator.fitScale = scale
             canvas.minimumZoomScale = scale
-            canvas.maximumZoomScale = scale
+            canvas.maximumZoomScale = scale * Self.maxZoomFactor
             canvas.zoomScale = scale
             coordinator.redrawSoon()
         }
-        Self.layoutContent(canvas, pageWidth: pageWidth, pageHeight: pageHeight, scale: scale)
+        guard !canvas.isZooming else { return }
+        Self.layoutContent(canvas, pageWidth: pageWidth, pageHeight: pageHeight, scale: coordinator.zoom)
         coordinator.layoutLayers()
     }
 
@@ -105,15 +107,30 @@ struct InkPageCanvas: UIViewRepresentable {
         coordinator.flush()
     }
 
+
     @MainActor
     final class Coordinator: NSObject, PKCanvasViewDelegate, UIGestureRecognizerDelegate, InkPageControlling {
         var parent: InkPageCanvas
         weak var canvas: PKCanvasView?
         var localHash: String?
+
+        /// Another page in the same view: what was drawn belongs to the old one, and so do its undo
+        /// steps. Undoing them here would write the old page's ink onto this one. See P-063.
+        func turn(to pageID: UUID, height: Double) {
+            flush()
+            self.pageID = pageID
+            self.height = height
+            localHash = nil
+            canvas?.undoManager?.removeAllActions()
+        }
         var usingTool = false
         var appliedTool: InkStrokeTool?
         var saveItem: DispatchWorkItem?
         var height: Double = PageGeometry.height
+        /// The scale at which the page fits, the least zoom. Changing it resets the zoom.
+        var fitScale: CGFloat = 0
+        /// Screen points per page point right now: the fit, or more while zoomed in.
+        var zoom: CGFloat { max(canvas?.zoomScale ?? parent.scale, 0.01) }
         /// The page this canvas holds. Saves always go to it, see P-034.
         var pageID: UUID?
         private var pending: Data?
@@ -130,6 +147,7 @@ struct InkPageCanvas: UIViewRepresentable {
         private let snapshot = UIImageView()
         private var pan: UIPanGestureRecognizer?
         private var tap: UITapGestureRecognizer?
+        private let marginBlocker = MarginBlocker()
 
         private var selectedIDs: Set<UUID> = []
         private var selectedStrokes: [Int] = []
@@ -179,11 +197,38 @@ struct InkPageCanvas: UIViewRepresentable {
             tap.delegate = self
             canvas.addGestureRecognizer(tap)
             self.tap = tap
+            // Beside the page nothing is drawn or framed; scrolling and zooming still work there.
+            marginBlocker.delegate = self
+            marginBlocker.isOnPage = { [weak self] point in
+                guard let self else { return true }
+                return point.x >= 0 && point.x <= CGFloat(self.parent.pageWidth) * self.zoom
+            }
+            canvas.addGestureRecognizer(marginBlocker)
+            canvas.drawingGestureRecognizer.require(toFail: marginBlocker)
+            pan.require(toFail: marginBlocker)
+        }
+
+        func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldRecognizeSimultaneouslyWith other: UIGestureRecognizer) -> Bool {
+            gesture === marginBlocker
+        }
+
+        /// The page stands in the middle while it is narrower than the surface. Insets, not a
+        /// narrower canvas, so a zoomed page can use the whole width. See ADR 0057.
+        func centerPage() {
+            guard let canvas, canvas.bounds.width > 0 else { return }
+            let side = max(0, (canvas.bounds.width - CGFloat(parent.pageWidth) * zoom) / 2).rounded(.down)
+            if canvas.contentInset.left != side || canvas.contentInset.right != side {
+                canvas.contentInset.left = side
+                canvas.contentInset.right = side
+            }
+            if side > 0, canvas.contentOffset.x != -side {
+                canvas.contentOffset.x = -side
+            }
         }
 
         func layoutLayers() {
             guard let canvas else { return }
-            let scale = max(parent.scale, 0.01)
+            let scale = zoom
             let pageHeight = max(height, parent.pageHeight, Double(canvas.bounds.height / scale))
             for layer in [elementLayer, overlay] {
                 layer.transform = .identity
@@ -198,9 +243,13 @@ struct InkPageCanvas: UIViewRepresentable {
             canvas.sendSubviewToBack(elementLayer)
             canvas.sendSubviewToBack(paperView)
             canvas.bringSubviewToFront(overlay)
+            centerPage()
             layoutPaper()
-            // SwiftUI can update before the canvas has its final size; place the pattern again once it has.
-            DispatchQueue.main.async { [weak self] in self?.layoutPaper() }
+            // SwiftUI can update before the canvas has its final size; place page and pattern again once it has.
+            DispatchQueue.main.async { [weak self] in
+                self?.centerPage()
+                self?.layoutPaper()
+            }
             preview.lineWidth = 1.5 / scale
             selectionOutline.lineWidth = 1.5 / scale
         }
@@ -263,13 +312,27 @@ struct InkPageCanvas: UIViewRepresentable {
         /// The pattern follows the visible rectangle, in content points of the canvas.
         func layoutPaper() {
             guard let canvas else { return }
-            paperView.show(parent.paper, visible: canvas.bounds, pageWidth: parent.pageWidth, scale: parent.scale)
+            let edges = canvas.contentInset.left > 0
+            paperView.show(parent.paper, visible: canvas.bounds, pageWidth: parent.pageWidth, scale: zoom, edges: edges)
         }
 
         func scrollViewDidScroll(_ scrollView: UIScrollView) {
             layoutPaper()
             let offset = scrollView.contentOffset
             if parent.editor.offset != offset { parent.editor.offset = offset }
+        }
+
+        /// Elements, overlay and pattern sit beside PencilKit's own zooming view and follow by hand.
+        func scrollViewDidZoom(_ scrollView: UIScrollView) {
+            layoutLayers()
+            let zoom = self.zoom
+            if parent.editor.zoom != zoom { parent.editor.zoom = zoom }
+        }
+
+        func scrollViewDidEndZooming(_ scrollView: UIScrollView, with view: UIView?, atScale scale: CGFloat) {
+            guard let canvas else { return }
+            InkPageCanvas.layoutContent(canvas, pageWidth: parent.pageWidth, pageHeight: max(height, parent.pageHeight), scale: zoom)
+            layoutLayers()
         }
 
         func canvasViewDidBeginUsingTool(_ canvasView: PKCanvasView) {
@@ -328,7 +391,7 @@ struct InkPageCanvas: UIViewRepresentable {
                 )
                 if grown != height {
                     height = grown
-                    InkPageCanvas.layoutContent(canvas, pageWidth: parent.pageWidth, pageHeight: height, scale: parent.scale)
+                    InkPageCanvas.layoutContent(canvas, pageWidth: parent.pageWidth, pageHeight: height, scale: zoom)
                     layoutLayers()
                 }
             }
@@ -359,7 +422,7 @@ struct InkPageCanvas: UIViewRepresentable {
                 view.removeFromSuperview()
                 elementViews[id] = nil
             }
-            let pixels = (canvas?.traitCollection.displayScale ?? 2) * max(parent.scale, 0.01)
+            let pixels = (canvas?.traitCollection.displayScale ?? 2) * zoom
             for element in elements.sorted(by: { $0.z < $1.z }) {
                 let view: ElementView
                 if let existing = elementViews[element.id] {
@@ -435,7 +498,7 @@ struct InkPageCanvas: UIViewRepresentable {
         }
 
         private func handleRect(_ bounds: CGRect) -> CGRect {
-            let side = 14 / max(parent.scale, 0.01)
+            let side = 14 / zoom
             return CGRect(x: bounds.maxX + 8 - side / 2, y: bounds.maxY + 8 - side / 2, width: side, height: side)
         }
 
@@ -486,7 +549,7 @@ struct InkPageCanvas: UIViewRepresentable {
 
         func insertImage(blob: String, pixelSize: CGSize) {
             guard let canvas else { return }
-            let scale = max(parent.scale, 0.01)
+            let scale = zoom
             let visible = CGRect(origin: canvas.contentOffset, size: canvas.bounds.size)
             let center = CGPoint(x: visible.midX / scale, y: visible.midY / scale)
             let image = PageEdits.image(
@@ -500,7 +563,7 @@ struct InkPageCanvas: UIViewRepresentable {
 
         func insertExcerpt(_ target: ExcerptTarget) {
             guard let canvas else { return }
-            let scale = max(parent.scale, 0.01)
+            let scale = zoom
             let visible = CGRect(origin: canvas.contentOffset, size: canvas.bounds.size)
             let center = (x: Double(visible.midX / scale), y: Double(visible.midY / scale))
             let width: Double = {
@@ -520,7 +583,8 @@ struct InkPageCanvas: UIViewRepresentable {
         /// PencilKit's own taps (its edit menu, "Insert Space") wait for ours while a page tool is active.
         func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
             guard gesture === tap || gesture === pan, let canvas, other.view === canvas else { return false }
-            return other !== canvas.panGestureRecognizer && other !== canvas.pinchGestureRecognizer && other !== pan && other !== tap
+            return other !== canvas.panGestureRecognizer && other !== canvas.pinchGestureRecognizer
+                && other !== pan && other !== tap && other !== marginBlocker
         }
 
         @objc private func tapped(_ gesture: UITapGestureRecognizer) {
@@ -592,7 +656,7 @@ struct InkPageCanvas: UIViewRepresentable {
             let lifted = PKDrawing(strokes: dragStrokes.enumerated().filter { chosen.contains($0.offset) }.map(\.element))
             let rect = lifted.bounds.insetBy(dx: -4, dy: -4)
             snapshot.transform = .identity
-            snapshot.image = lifted.image(from: rect, scale: canvas.traitCollection.displayScale * parent.scale)
+            snapshot.image = lifted.image(from: rect, scale: canvas.traitCollection.displayScale * zoom)
             snapshot.frame = rect
             snapshot.isHidden = false
             settingDrawing = true
@@ -740,9 +804,46 @@ struct InkPageCanvas: UIViewRepresentable {
         }
     }
 }
+
+/// Recognizes touches that start beside the page, so drawing and page tools, which wait for it to
+/// fail, ignore them. It fails at once on the page and never delays the pencil there.
+final class MarginBlocker: UIGestureRecognizer {
+    var isOnPage: (CGPoint) -> Bool = { _ in true }
+
+    override init(target: Any? = nil, action: Selector? = nil) {
+        super.init(target: target, action: action)
+        cancelsTouchesInView = false
+        delaysTouchesBegan = false
+        delaysTouchesEnded = false
+    }
+
+    override func touchesBegan(_ touches: Set<UITouch>, with event: UIEvent) {
+        guard state == .possible else { return }
+        guard let touch = touches.first, let view else {
+            state = .failed
+            return
+        }
+        state = isOnPage(touch.location(in: view)) ? .failed : .began
+    }
+
+    override func touchesMoved(_ touches: Set<UITouch>, with event: UIEvent) {
+        if state == .began || state == .changed { state = .changed }
+    }
+
+    override func touchesEnded(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = state == .began || state == .changed ? .ended : .failed
+    }
+
+    override func touchesCancelled(_ touches: Set<UITouch>, with event: UIEvent) {
+        state = .cancelled
+    }
+}
 #else
-/// macOS PencilKit can read and render a PKDrawing, but it has no canvas view.
-/// Handwriting is written on the iPad. The Mac shows the page, its elements and their links.
+import AppKit
+
+/// macOS PencilKit can build, read and render a PKDrawing, but it has no canvas view. The Mac draws
+/// with the mouse here: strokes from drags through `InkSketch`, a stroke eraser, undo through the
+/// window. Elements are shown, not edited. See ADR 0058.
 struct InkPageCanvas: View {
     var drawingData: Data
     var elements: [PageElement]
@@ -758,28 +859,152 @@ struct InkPageCanvas: View {
     var onDrawing: (UUID, Data, Double) -> Void
     var onElements: (UUID, [PageElement]) -> Void
 
+    @Environment(\.undoManager) private var undoManager
+    /// The stroke being drawn, in page points.
+    @State private var live: [CGPoint] = []
+    @State private var started = Date()
+    /// The drawing while the eraser is dragged, saved when it is let go.
+    @State private var erased: PKDrawing?
+    @State private var history = UndoTarget()
+
     var body: some View {
-        let drawing = (try? PKDrawing(data: drawingData)) ?? PKDrawing()
+        let drawing = erased ?? (try? PKDrawing(data: drawingData)) ?? PKDrawing()
         let size = CGSize(width: pageWidth, height: pageHeight)
+        let frame = CGSize(width: pageWidth * scale, height: pageHeight * scale)
         ScrollView(.vertical) {
             ZStack(alignment: .topLeading) {
                 PaperPatternCanvas(paper: paper, pageWidth: pageWidth, scale: scale)
-                    .frame(width: pageWidth * scale, height: pageHeight * scale)
+                    .frame(width: frame.width, height: frame.height)
                 if let image = PageElementsImage.cgImage(elements: elements, size: size, scale: 2, load: loadBlob) {
                     Image(decorative: image, scale: 2)
                         .resizable()
                         .interpolation(.high)
-                        .frame(width: pageWidth * scale, height: pageHeight * scale)
+                        .frame(width: frame.width, height: frame.height)
                 }
                 Image(nsImage: drawing.image(from: CGRect(origin: .zero, size: size), scale: 2))
                     .resizable()
                     .interpolation(.high)
-                    .frame(width: pageWidth * scale, height: pageHeight * scale)
+                    .frame(width: frame.width, height: frame.height)
                     .accessibilityLabel("Handschrift")
+                livePath
+                Color.clear
+                    .frame(width: frame.width, height: frame.height)
+                    .contentShape(Rectangle())
+                    .gesture(sketch(on: drawing))
+                    .onContinuousHover { phase in
+                        if case .active = phase { cursor.set() } else { NSCursor.arrow.set() }
+                    }
                 PageBadges(elements: elements, scale: scale)
             }
-            .frame(width: pageWidth * scale, height: pageHeight * scale, alignment: .topLeading)
+            .frame(width: frame.width, height: frame.height, alignment: .topLeading)
+            .overlay {
+                // Where the page ends beside it, in a window wider than the page. See ADR 0057.
+                HStack {
+                    Rectangle().fill(Ink.hairline).frame(width: 1)
+                    Spacer(minLength: 0)
+                    Rectangle().fill(Ink.hairline).frame(width: 1)
+                }
+                .allowsHitTesting(false)
+            }
+            // The scroll view spans the window, so the margin scrolls too; the page stands in the middle.
+            .frame(maxWidth: .infinity)
+        }
+        .onAppear {
+            undoManager?.levelsOfUndo = 100
+            editor.history.follow(undoManager)
+        }
+        // The window's manager outlives the note; its steps must not. See ADR 0059 and P-063.
+        .onDisappear { undoManager?.removeAllActions(withTarget: history) }
+    }
+
+    private var cursor: NSCursor { tools.erasing ? .disappearingItem : .crosshair }
+
+    /// The stroke under the mouse, until it is let go and becomes part of the drawing.
+    @ViewBuilder
+    private var livePath: some View {
+        if live.count > 0, !tools.erasing {
+            let tool = tools.strokeTool
+            Path { path in
+                path.addLines(live.map { CGPoint(x: $0.x * scale, y: $0.y * scale) })
+            }
+            .stroke(
+                Color(inkHex: tool.colorHex).opacity(tool.pen == .marker ? 0.5 : 1),
+                style: StrokeStyle(lineWidth: tool.width * scale, lineCap: .round, lineJoin: .round)
+            )
+            .allowsHitTesting(false)
+        }
+    }
+
+    /// A short drag, so a click to focus the window leaves no dot.
+    private func sketch(on drawing: PKDrawing) -> some Gesture {
+        DragGesture(minimumDistance: 2, coordinateSpace: .local)
+            .onChanged { value in
+                let point = CGPoint(x: value.location.x / scale, y: value.location.y / scale)
+                if tools.erasing {
+                    let current = erased ?? drawing
+                    if let next = InkSketch.erasing(at: point, radius: 6 / scale, from: current) { erased = next }
+                    return
+                }
+                if live.isEmpty {
+                    started = Date()
+                    live = [CGPoint(x: value.startLocation.x / scale, y: value.startLocation.y / scale)]
+                }
+                live.append(point)
+            }
+            .onEnded { _ in
+                if tools.erasing {
+                    if let next = erased { commit(next, replacing: drawing) }
+                    erased = nil
+                    return
+                }
+                let points = live
+                live = []
+                guard let stroke = InkSketch.stroke(through: points, tool: tools.strokeTool, duration: Date().timeIntervalSince(started)) else { return }
+                commit(PKDrawing(strokes: drawing.strokes + [stroke]), replacing: drawing)
+            }
+    }
+
+    /// Saves the drawing, with one undo step back to `previous`. The page grows like on the iPad.
+    private func commit(_ next: PKDrawing, replacing previous: PKDrawing) {
+        let bottom = max(
+            next.strokes.isEmpty ? 0 : Double(next.bounds.maxY),
+            elements.map { Double(ElementGeometry.bounds(of: $0).maxY) }.max() ?? 0
+        )
+        let height = PageEdits.grownHeight(
+            current: pageHeight, contentBottom: bottom,
+            margin: InkPageCanvas.growMargin, step: InkPageCanvas.growStep, limit: InkPageCanvas.maxHeight
+        )
+        onDrawing(pageID, next.dataRepresentation(), height)
+        let page = pageID
+        let save = onDrawing
+        Self.registerUndo(
+            undoManager, target: history,
+            back: (previous.dataRepresentation(), pageHeight), forth: (next.dataRepresentation(), height)
+        ) { save(page, $0, $1) }
+        undoManager?.setActionName(tools.erasing ? "Radieren" : "Zeichnen")
+    }
+
+    /// Undo goes `back`; while undoing, the manager records the step `forth` as redo, and so on.
+    private static func registerUndo(
+        _ manager: UndoManager?, target: UndoTarget,
+        back: (Data, Double), forth: (Data, Double), save: @escaping (Data, Double) -> Void
+    ) {
+        manager?.registerUndo(withTarget: target) { target in
+            MainActor.assumeIsolated {
+                save(back.0, back.1)
+                registerUndo(manager, target: target, back: forth, forth: back, save: save)
+            }
         }
     }
 }
+
+/// Something for the undo manager to hold on to.
+final class UndoTarget {}
 #endif
+
+extension InkPageCanvas {
+    /// Room kept below the lowest stroke, in page points. Writing into it grows the page.
+    static let growMargin: Double = 320
+    static let growStep: Double = 640
+    static let maxHeight: Double = 10_000
+}

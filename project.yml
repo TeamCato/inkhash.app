@@ -77,7 +77,30 @@ targets:
       BUNDLE_LOADER: $(TEST_HOST)
       CODE_SIGN_STYLE: Manual
       CODE_SIGN_IDENTITY: "-"
+  InkhashMacTests:
+    # The Mac editor without the app: no host, so tests never open the real library. Shared code is
+    # compiled in directly.
+    type: bundle.unit-test
+    platform: macOS
+    sources:
+      - path: App/Shared
+      - path: App/MacTests
+    dependencies:
+      - package: InkhashCore
+        product: InkhashCore
+    settings:
+      PRODUCT_BUNDLE_IDENTIFIER: local.inkhash.mactests
+      GENERATE_INFOPLIST_FILE: YES
+      CODE_SIGN_STYLE: Manual
+      CODE_SIGN_IDENTITY: "-"
 schemes:
+  InkhashMacTests:
+    build:
+      targets:
+        InkhashMacTests: all
+    test:
+      targets:
+        - InkhashMacTests
   Inkhash:
     build:
       targets:

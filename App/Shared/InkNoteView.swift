@@ -20,6 +20,8 @@ struct InkNoteView: View {
     @State private var pageIndex = 0
     @State private var compact = false
     @State private var showsPaper = false
+    /// The paper while a slider in the picker moves, shown on the page before it is saved. See ADR 0055.
+    @State private var previewPaper: Paper?
     @State private var showsPages = false
     #if os(iOS)
     @State private var photoItem: PhotosPickerItem?
@@ -56,6 +58,11 @@ struct InkNoteView: View {
                         .padding(.vertical, 10)
                         .frame(maxHeight: .infinity, alignment: .top)
                 }
+                #else
+                MacInkTools(tools: tools)
+                    .padding(.leading, 10)
+                    .padding(.vertical, 10)
+                    .frame(maxHeight: .infinity, alignment: .top)
                 #endif
                 pageStack(pages, index: index)
                     .frame(maxWidth: .infinity, maxHeight: .infinity)
@@ -103,6 +110,7 @@ struct InkNoteView: View {
             .allowsHitTesting(false)
         }
         .toolbar {
+            UndoToolbar(history: editor.history)
             if pages.count > 1 {
                 ToolbarItemGroup(placement: .primaryAction) {
                     Button { turn(to: max(0, pageIndex - 1)) } label: { Image(systemName: "chevron.up") }
@@ -122,7 +130,12 @@ struct InkNoteView: View {
                 Button { showsPaper = true } label: { Image(systemName: "rectangle.split.3x3") }
                     .accessibilityLabel("Papier")
                     .popover(isPresented: $showsPaper) {
-                        PaperPicker(paper: note.shownPaper, patterns: true) { model.library.setPaper(noteID: note.id, paper: $0) }
+                        PaperPicker(
+                            paper: note.shownPaper,
+                            patterns: true,
+                            choose: { model.library.setPaper(noteID: note.id, paper: $0) },
+                            preview: { previewPaper = $0 }
+                        )
                     }
             }
             #if os(iOS)
@@ -247,20 +260,21 @@ struct InkNoteView: View {
         }
     }
 
-    /// The current page fills the whole surface and is drawable everywhere. Its width fits the
-    /// surface; it scrolls down and grows as the writing reaches the bottom. See ADR 0018.
+    /// The current page fits the width of the surface up to `PageGeometry.maxScale`; on wider
+    /// surfaces it stands in the middle at that scale. It scrolls down and grows as the writing
+    /// reaches the bottom. See ADR 0018 and 0057.
     private func pageStack(_ pages: [InkPage], index: Int) -> some View {
         GeometryReader { geometry in
             if pages.indices.contains(index) {
                 let page = pages[index]
-                let scale = max(0.01, geometry.size.width / page.width)
+                let scale = CGFloat(PageGeometry.scale(surfaceWidth: geometry.size.width, pageWidth: page.width))
                 InkPageCanvas(
                     drawingData: model.library.drawingData(for: page.blob) ?? InkDrawing.empty(),
                     elements: page.elements,
                     pageID: page.id,
                     pageWidth: page.width,
                     pageHeight: page.height,
-                    paper: current.shownPaper,
+                    paper: previewPaper ?? current.shownPaper,
                     scale: scale,
                     // An iPhone has no pencil: the finger always draws, two fingers scroll. See ADR 0026.
                     fingerDrawing: tools.fingerDraws || Device.isPhone,
@@ -283,7 +297,7 @@ struct InkNoteView: View {
                 .frame(width: geometry.size.width, height: geometry.size.height)
                 #if os(iOS)
                 .overlay(alignment: .topLeading) {
-                    PageBadges(elements: page.elements, scale: scale)
+                    PageBadges(elements: page.elements, scale: editor.zoom > 0 ? editor.zoom : scale)
                         .offset(x: -editor.offset.x, y: -editor.offset.y)
                 }
                 .clipped()
@@ -313,7 +327,7 @@ struct InkNoteView: View {
             if drawing.strokes.isEmpty {
                 model.library.applyReading(noteID: noteID, pageID: pageID, transcript: "", tags: [], pageHasInk: false)
             } else {
-                model.library.applyReading(noteID: noteID, pageID: pageID, transcript: reading.transcript, tags: reading.tags, pageHasInk: true)
+                model.library.applyReading(noteID: noteID, pageID: pageID, transcript: reading.transcript, tags: reading.tags, tasks: reading.tasks, pageHasInk: true)
             }
         }
     }

@@ -1,4 +1,4 @@
-.PHONY: icon test contract-test app-test server server-lan server-test server-package generate mac ipad iphone ipad-device import-spike
+.PHONY: icon test contract-test app-test mac-test server server-lan server-test server-package generate mac ipad iphone ipad-device import-spike
 
 PORT ?= 8787
 
@@ -43,6 +43,10 @@ generate:
 # Editor tests in the iPad simulator: a real UITextView, typed into through its delegate.
 app-test: generate
 	xcodebuild -scheme Inkhash -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' -derivedDataPath .build/xcode CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES test
+
+# The Mac editor and note sheet, without the app and without the real library.
+mac-test: generate
+	xcodebuild -scheme InkhashMacTests -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO test
 
 mac: generate
 	xcodebuild -scheme InkhashMac -destination 'platform=macOS' -derivedDataPath .build/xcode CODE_SIGNING_ALLOWED=NO build

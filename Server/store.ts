@@ -38,6 +38,9 @@ const MIN_ELEMENT_POS = -20_000;
 const MAX_ELEMENT_POS = 40_000;
 const MAX_MASK_POINTS = 500;
 const MAX_LINK = 2000;
+const MAX_TASKS = 200;
+const MAX_TASK_TEXT = 1000;
+const DAY_RE = /^\d{4}-\d{2}-\d{2}$/;
 const LINK_PREFIXES = ["https://", "http://", "mailto:", "inkhash://note/"];
 const COLOR_RE = /^#[0-9a-fA-F]{6}$/;
 
@@ -87,6 +90,19 @@ export interface Page {
   transcript: string;
   tags: string[];
   elements: Element[];
+  tasks: Task[];
+}
+
+/** A drawn box with the line beside it, read on the device. See ADR 0060. Absent `due` is left out. */
+export interface Task {
+  id: string;
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  text: string;
+  checked: boolean;
+  due?: string;
 }
 
 /** An image, shape, tape, link area or text excerpt on an ink page, see ADR 0028 and 0035. Absent keys are left out, never null. */
@@ -111,16 +127,20 @@ export interface Element {
   link?: string;
 }
 
-/** Colour and pattern under the writing, for the whole note. See ADR 0042 and 0047. */
+/** Colour and pattern under the writing, for the whole note. See ADR 0042, 0047 and 0055. */
 export interface Paper {
   color: string;
   pattern: "blank" | "grid" | "lines" | "dots";
   /** Distance between lines or dots in page points. Absent means the pattern's default. */
   spacing?: number;
+  /** Where the first row lies, in page points from the top. Absent means the pattern's default. */
+  start?: number;
 }
 
 const SPACING_MIN = 20;
 const SPACING_MAX = 64;
+const START_MIN = 0;
+const START_MAX = 200;
 
 export interface Note {
   schemaVersion: 1;
@@ -316,19 +336,27 @@ function link(value: unknown): string {
   return value;
 }
 
-/** A text note has a colour only; its pattern is always blank. Blank paper has no spacing. */
+/** A text note has a colour only; its pattern is always blank. Blank paper has no spacing and no start. */
 function paperOf(value: unknown, kind: Note["kind"]): Paper {
   const bad = () => new StoreError(400, "bad-request", { reason: "paper" });
   if (!isRecord(value) || typeof value.color !== "string" || !COLOR_RE.test(value.color)) throw bad();
   const pattern = value.pattern ?? "blank";
   if (pattern !== "blank" && pattern !== "grid" && pattern !== "lines" && pattern !== "dots") throw bad();
   if (kind === "text" && pattern !== "blank") throw bad();
-  const spacing = value.spacing ?? undefined;
-  if (spacing !== undefined) {
-    if (!Number.isInteger(spacing) || (spacing as number) < SPACING_MIN || (spacing as number) > SPACING_MAX) throw bad();
+  const whole = (raw: unknown, min: number, max: number): number | undefined => {
+    if (raw === undefined || raw === null) return undefined;
+    if (typeof raw !== "number" || !Number.isInteger(raw) || raw < min || raw > max) throw bad();
     if (pattern === "blank") throw bad();
-  }
-  return { color: value.color.toUpperCase(), pattern, ...(spacing !== undefined ? { spacing: spacing as number } : {}) };
+    return raw;
+  };
+  const spacing = whole(value.spacing, SPACING_MIN, SPACING_MAX);
+  const start = whole(value.start, START_MIN, START_MAX);
+  return {
+    color: value.color.toUpperCase(),
+    pattern,
+    ...(spacing !== undefined ? { spacing } : {}),
+    ...(start !== undefined ? { start } : {}),
+  };
 }
 
 const UUID_PART = "[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}";
@@ -397,6 +425,53 @@ export function normalizeElement(value: unknown): Element {
   // An excerpt shows another note: a page rectangle or text. The server does not look into that note.
   if (kind === "excerpt" && !EXCERPT_RE.test(element.link ?? "")) throw badElement();
   return element;
+}
+
+function badTask(): StoreError {
+  return new StoreError(400, "bad-request", { reason: "task" });
+}
+
+function isDay(value: string): boolean {
+  if (!DAY_RE.test(value)) return false;
+  const date = new Date(`${value}T00:00:00Z`);
+  return !Number.isNaN(date.getTime()) && date.toISOString().slice(0, 10) === value;
+}
+
+function number(value: unknown, min: number, max: number, open = false): number {
+  if (typeof value !== "number" || !Number.isFinite(value) || value > max || (open ? value <= min : value < min)) throw badTask();
+  return value;
+}
+
+/** Keys in a fixed order, like elements. */
+function normalizeTask(value: unknown): Task {
+  if (!isRecord(value)) throw badTask();
+  const allowed = new Set(["id", "x", "y", "width", "height", "text", "checked", "due"]);
+  if (Object.keys(value).some((key) => !allowed.has(key))) throw badTask();
+  const id = String(value.id ?? "").toLowerCase();
+  if (!UUID_RE.test(id)) throw badTask();
+  const text = value.text;
+  if (typeof text !== "string" || text.length > MAX_TASK_TEXT) throw badTask();
+  if (typeof value.checked !== "boolean") throw badTask();
+  const task: Task = {
+    id,
+    x: number(value.x, MIN_ELEMENT_POS, MAX_ELEMENT_POS),
+    y: number(value.y, MIN_ELEMENT_POS, MAX_ELEMENT_POS),
+    width: number(value.width, 0, MAX_ELEMENT_SIZE, true),
+    height: number(value.height, 0, MAX_ELEMENT_SIZE, true),
+    text,
+    checked: value.checked,
+  };
+  if (value.due != null) {
+    if (typeof value.due !== "string" || !isDay(value.due)) throw badTask();
+    task.due = value.due;
+  }
+  return task;
+}
+
+function tasks(value: unknown): Task[] {
+  if (value == null) return [];
+  if (!Array.isArray(value) || value.length > MAX_TASKS) throw badTask();
+  return value.map(normalizeTask);
 }
 
 function elements(value: unknown): Element[] {
@@ -719,6 +794,7 @@ export class Store {
         transcript,
         tags,
         elements: elements(page.elements),
+        tasks: tasks(page.tasks),
       };
     });
   }
@@ -852,8 +928,20 @@ export class Store {
     // Notes stored before folders existed.
     note.folder ??= "";
     note.favorite ??= false;
-    // Pages stored before elements, ADR 0028.
-    for (const page of note.pages ?? []) page.elements ??= [];
+    // Pages stored before elements (ADR 0028) or tasks (ADR 0060). Rebuilt in the fixed key order,
+    // since the retry comparison compares JSON.
+    if (note.pages) {
+      note.pages = note.pages.map((page) => ({
+        id: page.id,
+        blob: page.blob,
+        width: page.width,
+        height: page.height,
+        transcript: page.transcript,
+        tags: page.tags,
+        elements: page.elements ?? [],
+        tasks: page.tasks ?? [],
+      }));
+    }
     return note;
   }
 

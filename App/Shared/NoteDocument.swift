@@ -56,10 +56,20 @@ enum NoteDocument {
     /// Space between a marker and the text.
     static let markerGap: CGFloat = 10
 
+    /// How far the text of a list item stands right of the paragraphs: its marker sits in between,
+    /// where paragraphs begin. Zero for everything else. See ADR 0062.
+    static func listIndent(_ type: BlockType) -> CGFloat {
+        switch type {
+        case .bullet, .numbered: EditorFont.scaled(24)
+        case .checkbox: EditorFont.scaled(28)
+        default: 0
+        }
+    }
+
     static func paragraphStyle(_ type: BlockType) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.firstLineHeadIndent = gutter
-        style.headIndent = gutter
+        style.firstLineHeadIndent = gutter + listIndent(type)
+        style.headIndent = gutter + listIndent(type)
         style.lineSpacing = EditorFont.lineSpacing(for: type)
         style.paragraphSpacingBefore = EditorFont.scaled(spacingBefore(type))
         return style
@@ -130,6 +140,8 @@ enum NoteDocument {
         if full.length > 0 {
             text.addAttributes(style.attributes, range: full)
             RichText.highlightMarkers(in: text, range: full, type: style.type)
+            let content = newline ? NSRange(location: 0, length: full.length - 1) : full
+            RichText.decorateTask(in: text, range: content, style: style)
         }
         return text
     }
@@ -279,6 +291,7 @@ final class MarkerLayoutManager: NSLayoutManager {
                 let fragment = lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
                 let baseline = fragment.minY + location(forGlyphAt: glyph).y
                 drawMarker(style, number: number(endingAt: paragraph.location, in: storage), baseline: baseline, origin: origin)
+                if style.type == .checkbox { drawDueDays(in: paragraph, storage: storage, checked: style.checked, origin: origin) }
             }
             cursor = NSMaxRange(paragraph)
         }
@@ -305,24 +318,104 @@ final class MarkerLayoutManager: NSLayoutManager {
         return count
     }
 
+    /// Markers stand where paragraphs begin; the item's text starts one step right of them. See ADR 0062.
     private func drawMarker(_ style: BlockStyle, number: Int, baseline: CGFloat, origin: CGPoint) {
         let size = EditorFont.size(for: style.type)
-        let right = origin.x + NoteDocument.gutter - NoteDocument.markerGap
+        let start = origin.x + NoteDocument.gutter
+        let text = start + NoteDocument.listIndent(style.type)
         let y = origin.y + baseline
         switch style.type {
         case .bullet:
-            draw("•", font: EditorFont.font(for: style.type, bold: false, italic: false, code: false), color: RichText.inkColor, right: right, baseline: y)
+            draw("•", font: EditorFont.font(for: style.type, bold: false, italic: false, code: false), color: RichText.inkColor, right: text - EditorFont.scaled(12), baseline: y)
         case .numbered:
-            draw("\(number).", font: EditorFont.font(size: size * 0.85, serif: false, bold: false, italic: false, code: false), color: Self.mutedColor, right: right, baseline: y)
+            draw("\(number).", font: EditorFont.font(size: size * 0.85, serif: false, bold: false, italic: false, code: false), color: Self.mutedColor, right: text - EditorFont.scaled(7), baseline: y)
         case .checkbox:
-            let side = EditorFont.scaled(16)
+            let side = EditorFont.scaled(18)
             let font = EditorFont.font(for: style.type, bold: false, italic: false, code: false)
-            let rect = CGRect(x: right - side, y: y - font.xHeight / 2 - side / 2, width: side, height: side)
+            let rect = CGRect(x: start, y: y - font.xHeight / 2 - side / 2, width: side, height: side)
             drawCheckbox(checked: style.checked, in: rect)
         default:
             break
         }
     }
+
+    /// The glyphs of a due day are not drawn; its capsule is. See ADR 0062.
+    override func drawGlyphs(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
+        guard let storage = textStorage else { return super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin) }
+        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        var hidden: [NSRange] = []
+        storage.enumerateAttribute(.inkhashDue, in: characters) { value, range, _ in
+            if value != nil { hidden.append(glyphRange(forCharacterRange: range, actualCharacterRange: nil)) }
+        }
+        guard !hidden.isEmpty else { return super.drawGlyphs(forGlyphRange: glyphsToShow, at: origin) }
+        var cursor = glyphsToShow.location
+        for range in hidden {
+            if range.location > cursor {
+                super.drawGlyphs(forGlyphRange: NSRange(location: cursor, length: range.location - cursor), at: origin)
+            }
+            cursor = max(cursor, NSMaxRange(range))
+        }
+        if cursor < NSMaxRange(glyphsToShow) {
+            super.drawGlyphs(forGlyphRange: NSRange(location: cursor, length: NSMaxRange(glyphsToShow) - cursor), at: origin)
+        }
+    }
+
+    /// A capsule with a calendar and the day in words where `📅 JJJJ-MM-TT` stands, like in the task list.
+    private func drawDueDays(in paragraph: NSRange, storage: NSTextStorage, checked: Bool, origin: CGPoint) {
+        let today = TaskDue.day(of: Date())
+        storage.enumerateAttribute(.inkhashDue, in: paragraph) { value, range, _ in
+            guard let day = value as? String, let container = textContainers.first else { return }
+            let glyphs = glyphRange(forCharacterRange: range, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { return }
+            let bounds = boundingRect(forGlyphRange: glyphs, in: container).offsetBy(dx: origin.x, dy: origin.y)
+            let body = EditorFont.font(for: .checkbox, bold: false, italic: false, code: false)
+            let baseline = origin.y + lineFragmentRect(forGlyphAt: glyphs.location, effectiveRange: nil).minY + location(forGlyphAt: glyphs.location).y
+            let color = checked ? Self.mutedColor : (day <= today ? RichText.accentColor : RichText.inkColor)
+            let font = EditorFont.font(size: EditorFont.scaled(11.5), serif: false, bold: false, italic: false, code: false)
+            let label = NSAttributedString(string: DueText.short(day, today: today), attributes: [.font: font, .foregroundColor: color])
+            let icon = EditorFont.scaled(11)
+            let gap = EditorFont.scaled(4)
+            let padding = EditorFont.scaled(8)
+            // As wide as what it says, from where the hidden characters begin.
+            let height = EditorFont.scaled(20)
+            let width = padding * 2 + icon + gap + label.size().width
+            let capsule = CGRect(x: bounds.minX, y: baseline - body.xHeight / 2 - height / 2, width: width, height: height)
+            drawCapsule(capsule)
+            let left = capsule.minX + padding
+            drawSymbol("calendar", color: color, in: CGRect(x: left, y: capsule.midY - icon / 2, width: icon, height: icon))
+            label.draw(at: CGPoint(x: left + icon + gap, y: capsule.midY - label.size().height / 2))
+        }
+    }
+
+    private func drawCapsule(_ rect: CGRect) {
+        #if os(macOS)
+        let path = NSBezierPath(roundedRect: rect, xRadius: rect.height / 2, yRadius: rect.height / 2)
+        #else
+        let path = UIBezierPath(roundedRect: rect, cornerRadius: rect.height / 2)
+        #endif
+        Self.capsuleFill.setFill()
+        path.fill()
+        Self.capsuleRule.setStroke()
+        path.lineWidth = 1
+        path.stroke()
+    }
+
+    private func drawSymbol(_ name: String, color: PlatformColor, in rect: CGRect) {
+        #if os(macOS)
+        let configuration = NSImage.SymbolConfiguration(pointSize: rect.height, weight: .medium)
+            .applying(NSImage.SymbolConfiguration(paletteColors: [color]))
+        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) else { return }
+        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        #else
+        let configuration = UIImage.SymbolConfiguration(pointSize: rect.height, weight: .medium)
+        guard let image = UIImage(systemName: name, withConfiguration: configuration)?
+            .withTintColor(color, renderingMode: .alwaysOriginal) else { return }
+        image.draw(in: rect)
+        #endif
+    }
+
+    private static var capsuleFill: PlatformColor { PlatformColor(red: 0.992, green: 0.992, blue: 0.988, alpha: 1) }
+    private static var capsuleRule: PlatformColor { PlatformColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 0.12) }
 
     private func draw(_ text: String, font: PlatformFont, color: PlatformColor, right: CGFloat, baseline: CGFloat) {
         let string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
@@ -330,19 +423,43 @@ final class MarkerLayoutManager: NSLayoutManager {
         string.draw(at: CGPoint(x: right - width, y: baseline - font.ascender))
     }
 
+    /// Like in the task list: a grey rounded square while open, filled blue with a white tick when done.
+    /// Drawn as paths, not as symbols: the symbols came out smaller on the Mac, and the filled one lost
+    /// its tick there. See ADR 0062.
     private func drawCheckbox(checked: Bool, in rect: CGRect) {
-        let name = checked ? "checkmark.square.fill" : "square"
+        let box = rect.insetBy(dx: rect.width * 0.06, dy: rect.height * 0.06)
+        let radius = box.width * 0.22
         #if os(macOS)
-        let configuration = NSImage.SymbolConfiguration(pointSize: rect.height, weight: .regular)
-            .applying(NSImage.SymbolConfiguration(paletteColors: [RichText.accentColor]))
-        guard let image = NSImage(systemSymbolName: name, accessibilityDescription: nil)?.withSymbolConfiguration(configuration) else { return }
-        image.draw(in: rect, from: .zero, operation: .sourceOver, fraction: 1, respectFlipped: true, hints: nil)
+        let path = NSBezierPath(roundedRect: box, xRadius: radius, yRadius: radius)
         #else
-        let configuration = UIImage.SymbolConfiguration(pointSize: rect.height, weight: .regular)
-        guard let image = UIImage(systemName: name, withConfiguration: configuration)?
-            .withTintColor(RichText.accentColor, renderingMode: .alwaysOriginal) else { return }
-        image.draw(in: rect)
+        let path = UIBezierPath(roundedRect: box, cornerRadius: radius)
         #endif
+        if checked {
+            RichText.accentColor.setFill()
+            path.fill()
+            #if os(macOS)
+            let tick = NSBezierPath()
+            tick.move(to: CGPoint(x: box.minX + box.width * 0.26, y: box.minY + box.height * 0.53))
+            tick.line(to: CGPoint(x: box.minX + box.width * 0.43, y: box.minY + box.height * 0.7))
+            tick.line(to: CGPoint(x: box.minX + box.width * 0.75, y: box.minY + box.height * 0.32))
+            tick.lineCapStyle = .round
+            tick.lineJoinStyle = .round
+            #else
+            let tick = UIBezierPath()
+            tick.move(to: CGPoint(x: box.minX + box.width * 0.26, y: box.minY + box.height * 0.53))
+            tick.addLine(to: CGPoint(x: box.minX + box.width * 0.43, y: box.minY + box.height * 0.7))
+            tick.addLine(to: CGPoint(x: box.minX + box.width * 0.75, y: box.minY + box.height * 0.32))
+            tick.lineCapStyle = .round
+            tick.lineJoinStyle = .round
+            #endif
+            tick.lineWidth = max(1.5, box.width * 0.12)
+            PlatformColor.white.setStroke()
+            tick.stroke()
+        } else {
+            path.lineWidth = max(1.2, box.width * 0.08)
+            Self.mutedColor.setStroke()
+            path.stroke()
+        }
     }
 
     /// Grid of one table row: lines between the cells and around the row, a tint behind the header.

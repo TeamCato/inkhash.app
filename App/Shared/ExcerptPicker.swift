@@ -107,9 +107,7 @@ struct ExcerptPicker: View {
                 .padding(.top, 14)
             List {
                 Section {
-                    #if os(iOS)
                     newRow("Neue Handschrift", symbol: "pencil.tip.crop.circle.badge.plus", kind: .ink)
-                    #endif
                     newRow("Neue Textnotiz", symbol: "doc.badge.plus", kind: .text)
                 } footer: {
                     Text("Liegt dann unter \(Folders.display(childFolder)).")

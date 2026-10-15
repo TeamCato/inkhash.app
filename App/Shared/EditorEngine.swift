@@ -22,6 +22,8 @@ protocol EditorHost: AnyObject {
     func performEdit(_ range: NSRange, replacement: String?, _ body: () -> Void)
     func focus()
     func contentChanged()
+    /// Scrolls the enclosing scroll view only as far as needed to show `rect`, in the view's coordinates.
+    func reveal(_ rect: CGRect)
 }
 
 /// What the sheet needs to know about the editor: the selection, the block at the cursor, menus and where to put them.
@@ -45,6 +47,12 @@ struct EditorState: Equatable {
     var table: TableFormat?
     var tableColumn = 0
     var tableColumns = 0
+    /// Width of the text, so menus at the cursor stay inside it.
+    var textWidth: CGFloat = 0
+    /// The cursor stands in a task, so the sheet offers its due day. See ADR 0060.
+    var inTask = false
+    /// The due day of that task, as `JJJJ-MM-TT`.
+    var taskDue: String?
 }
 
 /// Editing rules for a whole note in one text view. Both platforms forward their delegate calls here.
@@ -65,6 +73,9 @@ final class EditorEngine {
     /// Width the table tab stops were laid out for.
     var tableWidth: CGFloat = 0
     private(set) var noteLinkOpen = false
+    /// Selection and length at the last state, so the cursor is revealed only when it moved or the
+    /// text changed: not when the note opens, not when it is only laid out again.
+    private var revealed: (selection: NSRange, length: Int)?
     var suppressedNoteQuery: String?
     /// Set when the text view inserts a newline itself; styles of the two halves follow in `didChange`.
     private var pendingNewline: (location: Int, atStart: Bool, upper: BlockStyle, below: BlockStyle)?
@@ -477,7 +488,8 @@ final class EditorEngine {
     /// The checkbox paragraph whose marker lies under `point` (text view coordinates), if any.
     func checkbox(at point: CGPoint) -> NSRange? {
         let local = CGPoint(x: point.x - host.containerOrigin.x, y: point.y - host.containerOrigin.y)
-        guard local.x >= 0, local.x < NoteDocument.gutter else { return nil }
+        // The box stands where paragraphs begin, before the task's text. See ADR 0062.
+        guard local.x >= NoteDocument.gutter - 8, local.x < NoteDocument.gutter + NoteDocument.listIndent(.checkbox) else { return nil }
         let layout = host.markers
         layout.ensureLayout(for: host.container)
         let extra = layout.extraLineFragmentRect
@@ -521,6 +533,36 @@ final class EditorEngine {
             used = scratchLayout.usedRect(for: scratch).height
         }
         return ceil(max(used, 24)) + host.containerOrigin.y * 2 + 4
+    }
+
+    // MARK: Undo
+
+    /// The whole text with selection and the style of the empty last line, as an undo step needs it.
+    struct Snapshot {
+        let text: NSAttributedString
+        let selection: NSRange
+        let trailing: BlockStyle
+    }
+
+    func snapshot() -> Snapshot {
+        Snapshot(text: NSAttributedString(attributedString: host.storage), selection: host.selection, trailing: trailing)
+    }
+
+    /// Puts the text back as `snapshot` had it, for undo of edits the text view did not record. See ADR 0059.
+    func restore(_ snapshot: Snapshot) {
+        programmatic = true
+        host.storage.beginEditing()
+        host.storage.setAttributedString(snapshot.text)
+        host.storage.endEditing()
+        programmatic = false
+        pendingRange = nil
+        pendingNewline = nil
+        trailing = snapshot.trailing
+        host.markers.trailing = trailing
+        host.selection = snapshot.selection
+        layoutTables()
+        applyTypingForCursor()
+        publish()
     }
 
     // MARK: Internals
@@ -568,7 +610,17 @@ final class EditorEngine {
             }
             inserted = built
         } else {
-            inserted = NoteDocument.attributed(blocks, source: source)
+            // Blocks keep their own lines: a heading or list item pasted after text starts a new line,
+            // one before text ends its line. Text first or last joins the line as it would when typed.
+            let built = NSMutableAttributedString(attributedString: NoteDocument.attributed(blocks, source: source))
+            let contentRange = content(of: paragraph(at: range.location))
+            if let first = blocks.first, first.type != .paragraph, range.location > contentRange.location {
+                built.insert(NSAttributedString(string: "\n", attributes: host.typing), at: 0)
+            }
+            if let last = blocks.last, last.type != .paragraph, NSMaxRange(range) < NSMaxRange(contentRange) {
+                built.append(NSAttributedString(string: "\n", attributes: NoteDocument.typingAttributes(.paragraph)))
+            }
+            inserted = built
         }
         edit(range, replacement: inserted.string) { host.storage.replaceCharacters(in: range, with: inserted) }
         host.selection = NSRange(location: range.location + inserted.length, length: 0)
@@ -622,6 +674,7 @@ final class EditorEngine {
                 storage.addAttribute(.font, value: EditorFont.font(for: currentStyle.type, bold: bold && !code, italic: italic && !code, code: code), range: run)
             }
             RichText.highlightMarkers(in: storage, range: content(of: current), type: currentStyle.type)
+            RichText.decorateTask(in: storage, range: content(of: current), style: currentStyle)
         }
         storage.endEditing()
         for current in paragraphs(in: range) where current.length > 0 && style(of: current).type == .tableRow {
@@ -659,6 +712,9 @@ final class EditorEngine {
             typing[.foregroundColor] = RichText.inkColor
         }
         typing.removeValue(forKey: .attachment)
+        // Typing after a due day or in a done task starts plain; restyling decorates it again.
+        if typing[.inkhashDue] != nil { typing = NoteDocument.typingAttributes(currentStyle) }
+        for key in [NSAttributedString.Key.strikethroughStyle, .strikethroughColor] { typing.removeValue(forKey: key) }
         let typingStyle = currentStyle.type == .excerpt ? BlockStyle.paragraph : currentStyle
         typing.merge(typingStyle.attributes) { _, new in new }
         host.typing = typing
@@ -696,34 +752,91 @@ final class EditorEngine {
         slashOpen = query != nil
         let noteQuery = selection.length == 0 ? openNoteQuery(before: selection.location, in: contentRange) : nil
         noteLinkOpen = noteQuery != nil
+        let caret = caretRect(selection.location)
+        if let revealed, revealed.selection != selection || revealed.length != ns.length {
+            host.reveal(caret)
+        }
+        revealed = (selection, ns.length)
         session?.update(EditorState(
             selection: InlineSelection.read(host.storage, range: selection, typing: host.typing),
             blockType: currentStyle.type,
             slashQuery: query,
             slashInline: slashRange.map { $0.location > contentRange.location } ?? false,
             slashLineEmpty: slashRange.map { $0.length == contentRange.length } ?? false,
-            caret: caretRect(selection.location),
+            caret: caret,
             selectionRect: selection.length > 0 ? firstLineRect(selection) : nil,
             noteQuery: noteQuery,
             caretLink: selection.length == 0 ? link(around: selection.location) : nil,
             table: tableAtCursor?.style,
             tableColumn: tableAtCursor?.column ?? 0,
-            tableColumns: tableAtCursor?.columns ?? 0
+            tableColumns: tableAtCursor?.columns ?? 0,
+            textWidth: host.container.size.width + host.containerOrigin.x,
+            inTask: currentStyle.type == .checkbox,
+            taskDue: currentStyle.type == .checkbox ? TaskDue.split(ns.substring(with: contentRange)).due : nil
         ))
     }
 
-    private func caretRect(_ location: Int) -> CGRect {
+    // MARK: Tasks
+
+    /// Sets, changes or removes the due day at the end of the task at the cursor: `📅 JJJJ-MM-TT`.
+    /// The cursor stays where it was, or at the end of the text before the day. See ADR 0060.
+    func setDue(_ due: String?) {
+        let cursor = host.selection
+        let current = paragraph(at: cursor.location)
+        let currentStyle = style(of: current)
+        guard currentStyle.type == .checkbox else { return }
+        let contentRange = content(of: current)
+        let text = ns.substring(with: contentRange)
+        let old = TaskDue.trailingRange(in: text)?.whole
+        let bare = old.map { (text as NSString).substring(to: $0.location) } ?? text
+        let suffix: String
+        if let due, TaskDue.isDay(due) {
+            suffix = (bare.isEmpty || bare.hasSuffix(" ") ? "" : " ") + "\(TaskDue.marker) \(due)"
+        } else {
+            suffix = ""
+        }
+        let range = NSRange(
+            location: contentRange.location + (old?.location ?? contentRange.length),
+            length: old?.length ?? 0
+        )
+        guard (ns.substring(with: range)) != suffix else { return }
+        let replacement = NSAttributedString(string: suffix, attributes: NoteDocument.typingAttributes(currentStyle))
+        edit(range, replacement: suffix) { host.storage.replaceCharacters(in: range, with: replacement) }
+        let bareEnd = contentRange.location + (bare as NSString).length
+        host.selection = NSRange(location: min(cursor.location, bareEnd), length: 0)
+        restyle(paragraph(at: range.location))
+        applyTypingForCursor()
+        publish()
+    }
+
+    /// Where the insertion point stands, as high as the text of its line: menus open right below it.
+    /// Not the whole line fragment, which starts at the left edge and carries the spacing. See ADR 0062.
+    func caretRect(_ location: Int) -> CGRect {
         let layout = host.markers
         layout.ensureLayout(for: host.container)
         let origin = host.containerOrigin
-        let rect: CGRect
-        if paragraph(at: location).length == 0 || ns.length == 0 {
-            rect = layout.extraLineFragmentRect
-        } else {
-            let glyph = layout.glyphIndexForCharacter(at: min(location, ns.length - 1))
-            rect = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let current = paragraph(at: location)
+        let currentStyle = style(of: current)
+        let font = EditorFont.font(for: currentStyle.type, bold: false, italic: false, code: currentStyle.type == .code)
+        let height = EditorFont.lineHeight(of: font)
+        if current.length == 0 || ns.length == 0 {
+            // The empty last line: its fragment holds no glyph to measure.
+            let fragment = layout.extraLineFragmentRect
+            let x = NoteDocument.gutter + NoteDocument.listIndent(currentStyle.type)
+            let top = fragment.maxY - EditorFont.lineSpacing(for: currentStyle.type) - height
+            return CGRect(x: x, y: top, width: 1, height: height).offsetBy(dx: origin.x, dy: origin.y)
         }
-        return rect.offsetBy(dx: origin.x, dy: origin.y)
+        let atEnd = location >= ns.length
+        let glyph = layout.glyphIndexForCharacter(at: atEnd ? ns.length - 1 : location)
+        let fragment = layout.lineFragmentRect(forGlyphAt: glyph, effectiveRange: nil)
+        let point = layout.location(forGlyphAt: glyph)
+        var x = fragment.minX + point.x
+        if atEnd {
+            x = layout.boundingRect(forGlyphRange: NSRange(location: glyph, length: 1), in: host.container).maxX
+        }
+        let glyphFont = host.storage.attribute(.font, at: atEnd ? ns.length - 1 : location, effectiveRange: nil) as? PlatformFont ?? font
+        let top = fragment.minY + point.y - glyphFont.ascender
+        return CGRect(x: x, y: top, width: 1, height: EditorFont.lineHeight(of: glyphFont)).offsetBy(dx: origin.x, dy: origin.y)
     }
 
     private func firstLineRect(_ range: NSRange) -> CGRect {

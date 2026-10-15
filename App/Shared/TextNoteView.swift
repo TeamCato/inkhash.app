@@ -6,6 +6,8 @@ struct TextNoteView: View {
     @Environment(AppModel.self) private var model
     @State private var compact = false
     @State private var showsPaper = false
+    @AppStorage(TextAppearance.familyKey) private var family = TextFamily.standard.rawValue
+    @AppStorage(TextAppearance.sizeKey) private var size = TextAppearance.defaultSize
 
     /// Title and path start where the text starts, right of the marker column.
     static var gutter: CGFloat { NoteDocument.gutter }
@@ -17,8 +19,7 @@ struct TextNoteView: View {
     var body: some View {
         let record = model.library.record(session.noteID)
         let state = session.state
-        ScrollViewReader { proxy in
-            ScrollView {
+        ScrollView {
                 // The sheet is the whole surface, see ADR 0018. The column keeps lines readable.
                 VStack(alignment: .leading, spacing: 0) {
                     NoteHeader(noteID: session.noteID)
@@ -31,7 +32,12 @@ struct TextNoteView: View {
                             .padding(.leading, Self.gutter)
                     }
                     NoteTextView(session: session, version: session.version)
-                        .overlay(alignment: .topLeading) { overlays(state) }
+                        .overlay(alignment: .topLeading) {
+                            // Every menu is placed by offset from the top left of the text. Without a
+                            // stack of its own SwiftUI centred some of them first. See PITFALLS P-061.
+                            ZStack(alignment: .topLeading) { overlays(state) }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+                        }
                         // Menus hang below the text; they must stay above the empty area after it.
                         .zIndex(1)
                     Color.clear
@@ -44,17 +50,15 @@ struct TextNoteView: View {
                 .padding(.top, compact ? 12 : 22)
                 .frame(maxWidth: 760, alignment: .top)
                 .frame(maxWidth: .infinity)
-            }
-            .onChange(of: state.caret) { _, _ in
-                // Without an anchor the scroll view moves only as far as needed.
-                proxy.scrollTo(Self.caretID)
-            }
         }
+        // The text view keeps the cursor in sight itself (`EditorHost.reveal`); a scroll proxy from
+        // SwiftUI threw the note to the top. See PITFALLS P-062.
         // A text note has a colour only, no pattern. See ADR 0042.
         .background((record?.note.shownPaper ?? .standard).fill.ignoresSafeArea())
         .compactWidth($compact)
         .navigationTitle("")
         .toolbar {
+            UndoToolbar(history: session.history)
             ToolbarItem(placement: .primaryAction) {
                 Button { showsPaper = true } label: { Image(systemName: "paintpalette") }
                     .accessibilityLabel("Papierfarbe")
@@ -79,20 +83,17 @@ struct TextNoteView: View {
         .onChange(of: model.inlineImpulse) { _, impulse in
             if let impulse { session.toggleInline(impulse.action) }
         }
+        // A new font or size from the settings applies to the open note at once. See ADR 0061.
+        .onChange(of: family) { _, _ in session.engine?.textSizeChanged() }
+        .onChange(of: size) { _, _ in session.engine?.textSizeChanged() }
         .onChange(of: model.linkPromptToken) { _, _ in
             if session.state.selection.length > 0 { session.linkPrompt = true }
         }
     }
 
-    private static let caretID = "caret"
 
     @ViewBuilder
     private func overlays(_ state: EditorState) -> some View {
-        Color.clear
-            .frame(width: 1, height: max(state.caret.height, 1))
-            .offset(x: state.caret.minX, y: state.caret.minY)
-            .id(Self.caretID)
-            .allowsHitTesting(false)
         // `/Link` asks for target and label at the cursor. See ADR 0031.
         Color.clear
             .allowsHitTesting(false)
@@ -122,6 +123,11 @@ struct TextNoteView: View {
             OpenLinkChip(target: target)
                 .offset(x: max(0, state.caret.minX - 8), y: max(-34, state.caret.minY - 32))
         }
+        if state.inTask, state.selection.length == 0, state.slashQuery == nil, state.noteQuery == nil {
+            TaskDueButton(due: state.taskDue) { session.setDue($0) }
+                .frame(maxWidth: .infinity, alignment: .trailing)
+                .offset(x: compact ? 0 : 30, y: state.caret.minY + (state.caret.height - 24) / 2)
+        }
         if let table = state.table {
             TableMenu(format: table, column: state.tableColumn, columns: state.tableColumns) { change in
                 session.changeTable(change)
@@ -132,15 +138,22 @@ struct TextNoteView: View {
             NoteLinkMenu(notes: session.noteSuggestions, index: session.noteIndex) {
                 session.applyNoteLink($0)
             }
-            .offset(x: Self.gutter, y: state.caret.maxY)
+            .offset(x: menuX(state, width: 300), y: state.caret.maxY)
         }
         if state.slashQuery != nil {
             SlashMenu(commands: session.commands, index: session.slashIndex) {
                 session.slashIndex = $0
                 session.applySlash()
             }
-            .offset(x: Self.gutter, y: state.caret.maxY)
+            .offset(x: menuX(state, width: 280), y: state.caret.maxY)
         }
+    }
+
+    /// A menu starts at the cursor, a little left of it so its text lines up, and stays inside the text.
+    private func menuX(_ state: EditorState, width: CGFloat) -> CGFloat {
+        let wanted = state.caret.minX - 12
+        let limit = state.textWidth > 0 ? state.textWidth - width : wanted
+        return max(Self.gutter - 12, min(wanted, limit))
     }
 }
 

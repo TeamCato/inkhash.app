@@ -1,6 +1,6 @@
 # 0047 Abstand des Papiermusters wählbar
 
-Status: angenommen
+Status: angenommen, Startpunkt und Vorschau geändert durch 0055
 
 Ändert 0042 („kein frei wählbarer Abstand“).
 

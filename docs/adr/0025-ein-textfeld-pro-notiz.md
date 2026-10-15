@@ -1,6 +1,6 @@
 # 0025 Ein Textfeld pro Notiz
 
-Status: angenommen
+Status: angenommen. Lage der Marker geändert durch 0062.
 
 Ändert 0018 (Text) und 0023. Das Speicherformat aus 0004 bleibt.
 
@@ -14,7 +14,7 @@ Status: angenommen
 
 **Marker zeichnet der Layout-Manager.** Aufzählungspunkt, Nummer und Kästchen stehen im linken Einzug jedes Absatzes, gezeichnet von `MarkerLayoutManager`. Ein Klick oder Tipp auf das Kästchen hakt ab. Der Text aller Absätze beginnt am selben Einzug wie Titel und Pfad.
 
-**Eingabe-Regeln.** Return fügt das Textfeld selbst ein, der Editor setzt danach die Stile (P-038). Return in einer Liste setzt die Liste fort, in einem leeren Listenpunkt beendet es sie. Return in einer Überschrift beginnt einen normalen Absatz. Backspace am Anfang eines Listenpunkts, einer Überschrift oder einer Code-Zeile macht daraus zuerst normalen Text. Block-Kürzel (`# `, `- `, `[ ] `, `1. `, ```` ``` ````) wirken am Anfang eines normalen Absatzes. Mehrzeiliges Einfügen wird als Markdown gelesen; formatierter Text aus anderen Apps kommt als reiner Text.
+**Eingabe-Regeln.** Return fügt das Textfeld selbst ein, der Editor setzt danach die Stile (P-038). Return in einer Liste setzt die Liste fort, in einem leeren Listenpunkt beendet es sie. Return in einer Überschrift beginnt einen normalen Absatz. Backspace am Anfang eines Listenpunkts, einer Überschrift oder einer Code-Zeile macht daraus zuerst normalen Text. Block-Kürzel (`# `, `- `, `[ ] `, `1. `, ```` ``` ````) wirken am Anfang eines normalen Absatzes. Mehrzeiliges Einfügen wird als Markdown gelesen; formatierter Text aus anderen Apps kommt als reiner Text. Was man in einer Textnotiz kopiert, kommt mit Stil zurück (ADR 0063).
 
 **Formatleiste und `/`-Menü** hängen an der Auswahl beziehungsweise am Cursor im einen Textfeld. Die Blocktyp-Auswahl der Leiste gilt für alle markierten Absätze.
 

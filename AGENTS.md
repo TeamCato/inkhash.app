@@ -31,13 +31,14 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 - Nichts in der App darf einen Server voraussetzen. Ohne Anmeldung muss alles außer dem Abgleich gehen.
 - Kein iCloud als Ablage oder Abgleich (iCloud Drive, CloudKit), kein zweites Sync-Ziel, kein Assistent und kein Embedding-Modell in der App. Das iCloud-Backup des Geräts ist erlaubt und erwünscht (ADR 0051).
 - Keine Notion-Datenbanken, keine Whiteboards.
-- Das iOS-Ziel läuft auf iPad und iPhone, das Layout folgt der Breite, nicht dem Gerät (ADR 0026). Auf dem Mac gibt es keine Zeichenfläche: macOS PencilKit kann `PKDrawing` lesen und zeichnen, aber kein `PKCanvasView`.
+- Das iOS-Ziel läuft auf iPad und iPhone, das Layout folgt der Breite, nicht dem Gerät (ADR 0026). Auf dem Mac gibt es kein `PKCanvasView`: macOS PencilKit kann `PKDrawing` lesen, rendern und Striche bauen. Der Mac zeichnet mit der Maus über eine eigene Fläche (ADR 0058), ohne Elemente zu bearbeiten.
 - Projektstruktur kommt aus `project.yml`. Die `xcodeproj` nicht von Hand editieren. Nach Änderungen an `project.yml`: `make generate`.
 
 ## Befehle
 
 - `make test` — Swift-Paket, Server und der Vertragstest zwischen beiden (`make contract-test`)
 - `make app-test` — App-Tests im iPad-Simulator (Editor, Bibliothek, Export)
+- `make mac-test` — Mac-Editor und Notizblatt ohne App-Host, mit eigener Wegwerf-Bibliothek. Schreibt Bilder nach `/tmp/inkhash-*.png` zum Ansehen
 - `make server` — API auf `127.0.0.1:8787`, Daten in `.data/`. Ohne Accounts steht der Setup-Token für `/admin` im Log
 - `make server-lan` — bindet `0.0.0.0`
 - `make server-test` — Testserver aus `.test-env/env`: eigener Port, alle Interfaces, eigene Daten. Die Datei ist lokal und nicht eingecheckt

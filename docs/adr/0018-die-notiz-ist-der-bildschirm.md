@@ -1,6 +1,6 @@
 # 0018 Die Notiz ist der Bildschirm
 
-Status: angenommen
+Status: angenommen, Zoom begrenzt durch 0057
 
 Ergänzt 0011 und 0012. Titel und Pfad stehen seit 0022 oben links auf dem Blatt. Eine Leiste, die nur bei markiertem Text erscheint, regelt 0023. Der Text ist seit 0025 ein einziges Textfeld.
 

@@ -1,6 +1,6 @@
 # 0035 Ausschnitte in beide Richtungen, auch mit neuer Notiz
 
-Status: angenommen. Ziel, Auswahl, Ablage und Titel neuer Notizen geändert durch 0037: Das Element trägt kein `section` mehr, sondern das Ausschnitt-Ziel in `link`; neue Notizen haben keinen vorgegebenen Titel und liegen unter der Ausgangsnotiz.
+Status: angenommen. Auf dem Mac gibt es „Neue Handschrift“ seit 0058. Ziel, Auswahl, Ablage und Titel neuer Notizen geändert durch 0037: Das Element trägt kein `section` mehr, sondern das Ausschnitt-Ziel in `link`; neue Notizen haben keinen vorgegebenen Titel und liegen unter der Ausgangsnotiz.
 
 Ergänzt 0032 (Ausschnitte aus Handschrift im Text). Ändert 0028 („kein Textelement“): Ein Text-Ausschnitt ist kein Textfeld, sondern ein Fenster auf eine Textnotiz.
 

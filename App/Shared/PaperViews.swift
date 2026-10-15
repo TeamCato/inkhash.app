@@ -22,7 +22,7 @@ extension Paper {
 }
 
 /// Lines, grid and dots, drawn in page points so they sit at the same place of the writing on
-/// every device. See ADR 0042 and, for the spacing, ADR 0047.
+/// every device. See ADR 0042 and, for spacing and start, ADR 0047 and 0055.
 enum PaperArt {
     private static let ink = CGColor(srgbRed: 0.11, green: 0.115, blue: 0.125, alpha: 1)
 
@@ -32,7 +32,7 @@ enum PaperArt {
         let pattern = paper.pattern
         let spacing = CGFloat(paper.shownSpacing)
         guard spacing > 0, !visible.isEmpty else { return }
-        let start = CGFloat(pattern.start(spacing: Double(spacing)))
+        let start = CGFloat(paper.shownStart)
         let firstRow = max(0, Int(((visible.minY - start) / spacing).rounded(.down)))
         let lastRow = Int(((visible.maxY - start) / spacing).rounded(.up))
         guard lastRow >= firstRow else { return }
@@ -133,10 +133,12 @@ enum PageImage {
 #if os(iOS)
 /// The pattern under the visible part of a page. It covers only what is on screen and follows the
 /// scrolling: a view over a whole 10 000 point page would hold a bitmap far too large. See ADR 0042.
+/// Where the page is narrower than the surface, it also draws the page's left and right edge (ADR 0057).
 final class PaperPatternView: UIView {
     private var paper: Paper = .standard
     private var pageWidth: CGFloat = PageGeometry.width
     private var scale: CGFloat = 1
+    private var edges = false
 
     override init(frame: CGRect) {
         super.init(frame: frame)
@@ -149,18 +151,27 @@ final class PaperPatternView: UIView {
     required init?(coder: NSCoder) { nil }
 
     /// `visible` is the visible rectangle in content points of the canvas.
-    func show(_ paper: Paper, visible: CGRect, pageWidth: CGFloat, scale: CGFloat) {
-        isHidden = paper.pattern == .blank
-        guard paper != self.paper || visible != frame || pageWidth != self.pageWidth || scale != self.scale else { return }
+    func show(_ paper: Paper, visible: CGRect, pageWidth: CGFloat, scale: CGFloat, edges: Bool) {
+        isHidden = paper.pattern == .blank && !edges
+        guard paper != self.paper || visible != frame || pageWidth != self.pageWidth || scale != self.scale || edges != self.edges else { return }
         self.paper = paper
         self.pageWidth = pageWidth
         self.scale = scale
+        self.edges = edges
         frame = visible
         setNeedsDisplay()
     }
 
     override func draw(_ rect: CGRect) {
-        guard paper.pattern != .blank, scale > 0, let context = UIGraphicsGetCurrentContext() else { return }
+        guard scale > 0, let context = UIGraphicsGetCurrentContext() else { return }
+        if edges {
+            // In view points, a hairline wide, where the page begins and ends.
+            context.setFillColor(UIColor(Ink.hairline).cgColor)
+            for x in [0, pageWidth * scale - 1] {
+                context.fill(CGRect(x: x - frame.minX, y: rect.minY, width: 1, height: rect.height))
+            }
+        }
+        guard paper.pattern != .blank else { return }
         // View points to content points to page points.
         context.translateBy(x: -frame.minX, y: -frame.minY)
         context.scaleBy(x: scale, y: scale)
@@ -193,21 +204,22 @@ struct PaperPatternCanvas: View {
     }
 }
 
-/// Colour and, for handwriting, pattern and spacing of a note. See ADR 0042 and 0047.
+/// Colour and, for handwriting, pattern, spacing and start of a note. See ADR 0042, 0047 and 0055.
 struct PaperPicker: View {
     var paper: Paper
     /// Text notes choose a colour only.
     var patterns: Bool
     var choose: (Paper) -> Void
+    /// The paper while a slider moves, nil when it is let go. The page shows it so the pattern can
+    /// be lined up with the writing; only `choose` changes the note.
+    var preview: (Paper?) -> Void = { _ in }
 
-    /// The spacing while the slider moves. Only the end of a drag changes the note, so one drag is
+    /// The paper while a slider moves. Only the end of a drag changes the note, so one drag is
     /// one change to save and sync, not one per step.
-    @State private var draftSpacing: Int?
+    @State private var draft: Paper?
 
-    /// The paper as the picker shows it, the spacing still being dragged included.
-    private var shown: Paper {
-        Paper(color: paper.color, pattern: paper.pattern, spacing: draftSpacing ?? paper.spacing)
-    }
+    /// The paper as the picker shows it, a slider still being dragged included.
+    private var shown: Paper { draft ?? paper }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 14) {
@@ -218,7 +230,7 @@ struct PaperPicker: View {
                 ForEach(Paper.palette, id: \.color) { entry in
                     let chosen = entry.color == paper.color
                     Button {
-                        choose(Paper(color: entry.color, pattern: paper.pattern, spacing: paper.spacing))
+                        choose(paper.with(color: entry.color))
                     } label: {
                         Circle()
                             .fill(Paper(color: entry.color).fill)
@@ -236,9 +248,9 @@ struct PaperPicker: View {
                 HStack(spacing: 10) {
                     ForEach(PaperPattern.allCases, id: \.self) { pattern in
                         let chosen = pattern == paper.pattern
-                        let sample = Paper(color: paper.color, pattern: pattern, spacing: shown.spacing)
+                        let sample = shown.with(pattern: pattern)
                         Button {
-                            choose(Paper(color: paper.color, pattern: pattern, spacing: paper.spacing))
+                            choose(paper.with(pattern: pattern))
                         } label: {
                             VStack(spacing: 6) {
                                 RoundedRectangle(cornerRadius: 8, style: .continuous)
@@ -261,25 +273,55 @@ struct PaperPicker: View {
                     }
                 }
                 if paper.pattern != .blank {
-                    spacingSlider
+                    slider(
+                        "Abstand",
+                        value: shown.shownSpacing,
+                        isDefault: shown.spacing == nil,
+                        range: Paper.spacingRange,
+                        step: Paper.spacingStep,
+                        reset: Paper(color: paper.color, pattern: paper.pattern, start: paper.start)
+                    ) { Paper(color: paper.color, pattern: paper.pattern, spacing: $0, start: paper.start) }
+                    slider(
+                        "Erste Linie",
+                        value: shown.shownStart,
+                        isDefault: shown.start == nil,
+                        range: Paper.startRange,
+                        step: 1,
+                        reset: Paper(color: paper.color, pattern: paper.pattern, spacing: paper.spacing)
+                    ) { Paper(color: paper.color, pattern: paper.pattern, spacing: paper.spacing, start: $0) }
                 }
             }
         }
         .padding(18)
         .presentationCompactAdaptation(.popover)
+        .onDisappear {
+            draft = nil
+            preview(nil)
+        }
     }
 
-    private var spacingSlider: some View {
+    /// One whole-point setting of the pattern. `make` builds the paper for a value; `reset` is the
+    /// paper with that setting back at the pattern's default.
+    private func slider(
+        _ title: String,
+        value: Int,
+        isDefault: Bool,
+        range: ClosedRange<Int>,
+        step: Int,
+        reset: Paper,
+        make: @escaping (Int) -> Paper
+    ) -> some View {
         VStack(alignment: .leading, spacing: 6) {
             HStack {
-                Text("Abstand")
+                Text(title)
                     .font(.system(size: 13, weight: .semibold))
                     .foregroundStyle(Ink.muted)
                 Spacer()
-                if shown.spacing != nil {
+                if !isDefault {
                     Button("Standard") {
-                        draftSpacing = nil
-                        choose(Paper(color: paper.color, pattern: paper.pattern))
+                        draft = nil
+                        preview(nil)
+                        choose(reset)
                     }
                     .font(.system(size: 13))
                     .buttonStyle(.plain)
@@ -288,24 +330,29 @@ struct PaperPicker: View {
             }
             Slider(
                 value: Binding(
-                    get: { Double(shown.shownSpacing) },
-                    set: { draftSpacing = Int($0.rounded()) }
+                    get: { Double(value) },
+                    set: {
+                        let next = make(Int($0.rounded()))
+                        draft = next
+                        preview(next)
+                    }
                 ),
-                in: Double(Paper.spacingRange.lowerBound)...Double(Paper.spacingRange.upperBound),
-                step: Double(Paper.spacingStep)
+                in: Double(range.lowerBound)...Double(range.upperBound),
+                step: Double(step)
             ) {
-                Text("Abstand")
+                Text(title)
             } minimumValueLabel: {
                 Image(systemName: "minus").foregroundStyle(Ink.muted)
             } maximumValueLabel: {
                 Image(systemName: "plus").foregroundStyle(Ink.muted)
             } onEditingChanged: { editing in
-                guard !editing, let draft = draftSpacing else { return }
-                choose(Paper(color: paper.color, pattern: paper.pattern, spacing: draft))
-                draftSpacing = nil
+                guard !editing, let next = draft else { return }
+                choose(next)
+                draft = nil
+                preview(nil)
             }
             .tint(Ink.accent)
-            .accessibilityValue("\(shown.shownSpacing) Punkte")
+            .accessibilityValue("\(value) Punkte")
         }
     }
 }

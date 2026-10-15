@@ -20,8 +20,12 @@ final class InkEditorState {
     var selection: Selection?
     /// Scroll position of the page, in screen points. Badges follow it.
     var offset: CGPoint = .zero
+    /// Screen points per page point while the page is zoomed in, 0 before the first pinch. Badges follow it.
+    var zoom: CGFloat = 0
     var maskDrawing: UUID?
     var linkPrompt = false
+    /// The page's undo steps, for the buttons in the bar. See ADR 0059.
+    let history = UndoHistory()
 
     @ObservationIgnored weak var controller: InkPageControlling?
 

@@ -61,6 +61,41 @@ final class PaperTests: XCTestCase {
         XCTAssertNil(try InkhashJSON.decode(Paper.self, from: Data(fraction.utf8)).spacing)
     }
 
+    func testStartIsNormalizedAndRoundTrips() throws {
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .lines).shownStart, 72)
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .grid, spacing: 40).shownStart, 40, "grid and dots start one spacing down")
+        XCTAssertNil(Paper(color: "#FDFDFC", pattern: .lines, start: 72).start, "the default is not stored")
+        XCTAssertNil(Paper(color: "#FDFDFC", pattern: .dots, spacing: 40, start: 40).start)
+        XCTAssertNil(Paper(color: "#FDFDFC", pattern: .blank, start: 90).start, "blank paper has no start")
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .lines, start: -5).start, 0)
+        XCTAssertEqual(Paper(color: "#FDFDFC", pattern: .lines, start: 900).start, 200)
+
+        let shifted = Paper(color: "#FDFDFC", pattern: .lines, spacing: 40, start: 90)
+        XCTAssertEqual(shifted.shownStart, 90)
+        XCTAssertEqual(try InkhashJSON.decode(Paper.self, from: try InkhashJSON.encode(shifted)), shifted)
+        let plain = String(decoding: try InkhashJSON.encode(Paper(color: "#FDFDFC", pattern: .lines)), as: UTF8.self)
+        XCTAssertFalse(plain.contains("start"), "the default start stays off the wire")
+
+        let odd = ##"{"color":"#FDFDFC","pattern":"lines","start":500}"##
+        XCTAssertNil(try InkhashJSON.decode(Paper.self, from: Data(odd.utf8)).start, "out of range reads as default")
+        let fraction = ##"{"color":"#FDFDFC","pattern":"lines","start":80.5}"##
+        XCTAssertNil(try InkhashJSON.decode(Paper.self, from: Data(fraction.utf8)).start)
+    }
+
+    func testStartFollowsPatternChangesButNotBlank() {
+        let shifted = Paper(color: "#FDFDFC", pattern: .lines, start: 90)
+        XCTAssertEqual(shifted.with(pattern: .dots).start, 90)
+        XCTAssertNil(shifted.with(pattern: .blank).start)
+        XCTAssertEqual(shifted.with(color: "#FAF5E8").start, 90)
+
+        let (note, _) = inkNote(pages: 1)
+        var lined = note
+        XCTAssertTrue(lined.setPaper(Paper(color: "#FDFDFC", pattern: .lines)))
+        var moved = lined
+        XCTAssertTrue(moved.setPaper(shifted))
+        XCTAssertFalse(moved.sameContent(as: lined), "the start counts as content")
+    }
+
     func testSpacingCountsAsContentAndTextNotesDropIt() {
         let (note, _) = inkNote(pages: 1)
         var dotted = note

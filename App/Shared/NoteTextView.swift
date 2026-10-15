@@ -1,5 +1,6 @@
 import InkhashCore
 import SwiftUI
+import UniformTypeIdentifiers
 
 #if os(macOS)
 import AppKit
@@ -67,6 +68,8 @@ struct MacNoteText: NSViewRepresentable {
         session.engine = engine
         DispatchQueue.main.async {
             view.window?.makeFirstResponder(view)
+            view.undoManager?.levelsOfUndo = 100
+            session.history.follow(view.undoManager)
             engine.updateState()
         }
         return view
@@ -77,6 +80,11 @@ struct MacNoteText: NSViewRepresentable {
     }
 
     func makeCoordinator() -> MacNoteCoordinator { MacNoteCoordinator() }
+
+    /// The window's undo manager outlives the note; its steps must not. See ADR 0059 and P-063.
+    static func dismantleNSView(_ view: InkNoteTextView, coordinator: MacNoteCoordinator) {
+        view.undoManager?.removeAllActions()
+    }
 
     func sizeThatFits(_ proposal: ProposedViewSize, nsView view: InkNoteTextView, context: Context) -> CGSize? {
         let width = max(proposal.width ?? 640, 80)
@@ -141,8 +149,45 @@ final class InkNoteTextView: NSTextView, EditorHost {
         needsDisplay = true
     }
 
+    func reveal(_ rect: CGRect) {
+        // Some room below, so a menu under the cursor has a line to start in.
+        scrollToVisible(rect.insetBy(dx: 0, dy: -24))
+    }
+
     /// Plain text only. Formatting from other apps would bring fonts the note cannot store.
     override var readablePasteboardTypes: [NSPasteboard.PasteboardType] { [.string] }
+
+    /// Where copying writes and pasting reads. Tests hand in a pasteboard of their own.
+    var pasteboard: NSPasteboard = .general
+
+    /// Copying keeps the style: Markdown for inkhash, RTF for other apps. See ADR 0063.
+    override func copy(_ sender: Any?) {
+        guard let clip = engine?.clipboard(for: selectedRange()) else { return super.copy(sender) }
+        write(clip)
+    }
+
+    override func cut(_ sender: Any?) {
+        guard let clip = engine?.clipboard(for: selectedRange()) else { return super.cut(sender) }
+        write(clip)
+        delete(sender)
+    }
+
+    override func paste(_ sender: Any?) {
+        if let engine, let markdown = pasteboard.string(forType: .inkhashMarkdown) {
+            engine.paste(markdown: markdown)
+        } else if pasteboard == .general {
+            super.paste(sender)
+        } else {
+            readSelection(from: pasteboard)
+        }
+    }
+
+    private func write(_ clip: ClipboardContent) {
+        pasteboard.clearContents()
+        pasteboard.setString(clip.markdown, forType: .inkhashMarkdown)
+        pasteboard.setString(clip.markdown, forType: .string)
+        if let rtf = clip.rtf { pasteboard.setData(rtf, forType: .rtf) }
+    }
 
     override func insertLineBreak(_ sender: Any?) {
         insertNewline(sender)
@@ -253,6 +298,7 @@ struct IOSNoteText: UIViewRepresentable {
         }
         DispatchQueue.main.async {
             view.becomeFirstResponder()
+            session.history.follow(view.undoManager)
             engine.updateState()
         }
         return view
@@ -275,7 +321,8 @@ final class IOSNoteCoordinator: NSObject, UITextViewDelegate {
     var engine: EditorEngine?
 
     func textView(_ textView: UITextView, shouldChangeTextIn range: NSRange, replacementText text: String) -> Bool {
-        engine?.shouldChange(range, replacement: text) ?? true
+        (textView as? InkNoteTextView)?.recordTyping(range, replacement: text)
+        return engine?.shouldChange(range, replacement: text) ?? true
     }
 
     func textViewDidChange(_ textView: UITextView) {
@@ -291,6 +338,51 @@ final class InkNoteTextView: UITextView, EditorHost {
     var engine: EditorEngine?
     /// A text view built on a given container does not retain the storage at the top of the stack.
     var ownedStorage: NSTextStorage?
+    /// The note's own undo steps. UIKit drops its typing steps whenever the engine changes the text
+    /// itself, so typing is recorded here too, and UIKit's manager stays unused. See ADR 0059 and P-060.
+    private let history: UndoManager = {
+        let manager = UndoManager()
+        manager.levelsOfUndo = 100
+        return manager
+    }()
+    /// Where the current run of typing ends. A change that starts there joins the run's undo step.
+    private var typingEnd: Int?
+
+    override var undoManager: UndoManager? { history }
+
+    /// Where copying writes and pasting reads. Tests hand in a pasteboard of their own.
+    var pasteboard: UIPasteboard = .general
+
+    /// Copying keeps the style: Markdown for inkhash, RTF for other apps. See ADR 0063.
+    override func copy(_ sender: Any?) {
+        guard let clip = engine?.clipboard(for: selectedRange) else { return super.copy(sender) }
+        write(clip)
+    }
+
+    /// Deleting goes the keyboard's way, through the delegate, so it is one undo step.
+    override func cut(_ sender: Any?) {
+        guard let clip = engine?.clipboard(for: selectedRange) else { return super.cut(sender) }
+        write(clip)
+        deleteBackward()
+    }
+
+    override func paste(_ sender: Any?) {
+        if let engine, let data = pasteboard.data(forPasteboardType: ClipboardContent.markdownType),
+           let markdown = String(data: data, encoding: .utf8) {
+            engine.paste(markdown: markdown)
+        } else {
+            super.paste(sender)
+        }
+    }
+
+    private func write(_ clip: ClipboardContent) {
+        var item: [String: Any] = [
+            ClipboardContent.markdownType: Data(clip.markdown.utf8),
+            UTType.utf8PlainText.identifier: clip.markdown,
+        ]
+        if let rtf = clip.rtf { item[UTType.rtf.identifier] = rtf }
+        pasteboard.setItems([item])
+    }
 
     var storage: NSTextStorage { textStorage }
     var markers: MarkerLayoutManager { layoutManager as! MarkerLayoutManager }
@@ -316,14 +408,42 @@ final class InkNoteTextView: UITextView, EditorHost {
     }
 
     func performEdit(_ range: NSRange, replacement: String?, _ body: () -> Void) {
+        typingEnd = nil
+        let before = engine?.snapshot()
         // Tell the keyboard, or its autocorrect buffer still holds the old text. See P-038.
         inputDelegate?.textWillChange(self)
         storage.beginEditing()
         body()
         storage.endEditing()
         inputDelegate?.textDidChange(self)
-        // Direct storage edits do not reach UITextView's undo stack; an old entry would now undo the wrong text.
-        undoManager?.removeAllActions()
+        if let before { registerRestore(before) }
+    }
+
+    /// One undo step per run of typing: it starts with the first change and goes on while each change
+    /// starts where the last one ended. A new line, a jump of the cursor or an edit of the engine ends it.
+    func recordTyping(_ range: NSRange, replacement: String) {
+        guard engine?.programmatic != true, !history.isUndoing, !history.isRedoing else { return }
+        if typingEnd != NSMaxRange(range), let before = engine?.snapshot() {
+            registerRestore(before)
+        }
+        typingEnd = replacement.contains("\n") ? nil : range.location + (replacement as NSString).length
+    }
+
+    /// Undo puts `snapshot` back and leaves the text it replaced as the redo step.
+    private func registerRestore(_ snapshot: EditorEngine.Snapshot) {
+        undoManager?.registerUndo(withTarget: self) { view in
+            MainActor.assumeIsolated { view.restore(snapshot) }
+        }
+    }
+
+    private func restore(_ snapshot: EditorEngine.Snapshot) {
+        guard let engine else { return }
+        typingEnd = nil
+        let current = engine.snapshot()
+        inputDelegate?.textWillChange(self)
+        engine.restore(snapshot)
+        inputDelegate?.textDidChange(self)
+        registerRestore(current)
     }
 
     func focus() {
@@ -333,6 +453,14 @@ final class InkNoteTextView: UITextView, EditorHost {
     func contentChanged() {
         invalidateIntrinsicContentSize()
         setNeedsDisplay()
+    }
+
+    /// The text view does not scroll; the sheet's scroll view around it does, just far enough.
+    func reveal(_ rect: CGRect) {
+        var ancestor = superview
+        while let view = ancestor, !(view is UIScrollView) { ancestor = view.superview }
+        guard let scroll = ancestor as? UIScrollView else { return }
+        scroll.scrollRectToVisible(convert(rect.insetBy(dx: 0, dy: -24), to: scroll), animated: false)
     }
 
     override func deleteBackward() {
@@ -440,5 +568,11 @@ final class CheckboxTapDelegate: NSObject, UIGestureRecognizerDelegate {
     func gestureRecognizer(_ gesture: UIGestureRecognizer, shouldBeRequiredToFailBy other: UIGestureRecognizer) -> Bool {
         true
     }
+}
+#endif
+
+#if os(macOS)
+extension NSPasteboard.PasteboardType {
+    static let inkhashMarkdown = NSPasteboard.PasteboardType(ClipboardContent.markdownType)
 }
 #endif

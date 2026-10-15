@@ -16,6 +16,9 @@ Diese Wörter heißen im Code so.
 | section | Abschnitt einer Textnotiz: von einer Überschrift bis zur nächsten gleicher oder höherer Ebene (ADR 0035, 0037). |
 | TableFormat | Ausrichtung, Breiten, Kopfzeile und Zebra einer Tabelle, an ihrer ersten Zeile (ADR 0036). |
 | tableRow | Eine Zeile einer Markdown-Tabelle im Editor; Zellen durch Tabulator getrennt, die erste Zeile ist der Kopf. |
+| Aufgabe | Etwas zu tun, das man abhaken kann (`TaskItem`). Im Text ein Kästchen `- [ ]`/`- [x]` (ADR 0027), in der Handschrift ein gemaltes Kästchen vor einer Zeile (`InkTask` in `tasks` der Seite, ADR 0060). |
+| Fälligkeit | Tag, an dem eine Aufgabe fällig ist (`due`, `JJJJ-MM-TT`). Im Text `📅 JJJJ-MM-TT` am Zeilenende (`TaskDue`). Keine Uhrzeit. |
+| Aufgabenliste | Alle Aufgaben eines Workspace auf einem Blatt, gelesen aus den Notizen, nicht gespeichert (`TaskList`, ADR 0060). |
 | transcript | Von der Texterkennung gelesene Handschrift. Pro Seite und als Zusammenfassung auf der Notiz. |
 | tag | Schlagwort ohne `#`, kleingeschrieben, erste Fundstelle gewinnt. |
 | title | Titel der Notiz. Automatisch aus dem Inhalt, bis man ihn setzt (ADR 0019). |

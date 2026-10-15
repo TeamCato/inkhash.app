@@ -8,6 +8,15 @@ public enum NoteKind: String, Codable, Sendable, Equatable {
 public enum PageGeometry {
     public static let width: Double = 768
     public static let height: Double = 1024
+    /// The largest zoom a page is shown with: a 13 inch iPad held upright. Wider surfaces, an iPad
+    /// on its side or a wide Mac window, show the page at this scale in the middle. See ADR 0057.
+    public static let maxScale: Double = 1.35
+
+    /// Screen points per page point for a page on a surface of the given width.
+    public static func scale(surfaceWidth: Double, pageWidth: Double) -> Double {
+        guard surfaceWidth > 0, pageWidth > 0 else { return 0.01 }
+        return max(0.01, min(surfaceWidth / pageWidth, maxScale))
+    }
 }
 
 public struct InkPage: Equatable, Sendable, Identifiable {
@@ -19,6 +28,8 @@ public struct InkPage: Equatable, Sendable, Identifiable {
     public var tags: [String]
     /// Photos, shapes, tape and link areas, under the ink. See ADR 0028.
     public var elements: [PageElement]
+    /// Drawn boxes with the line beside them, read with the transcript. See ADR 0060.
+    public var tasks: [InkTask]
 
     public init(
         id: UUID = UUID(),
@@ -27,9 +38,11 @@ public struct InkPage: Equatable, Sendable, Identifiable {
         height: Double = PageGeometry.height,
         transcript: String = "",
         tags: [String] = [],
-        elements: [PageElement] = []
+        elements: [PageElement] = [],
+        tasks: [InkTask] = []
     ) {
         self.elements = elements
+        self.tasks = tasks
         self.id = id
         self.blob = blob
         self.width = width
@@ -216,13 +229,15 @@ public struct Note: Equatable, Sendable, Identifiable {
     /// An empty reading of a page that still has ink keeps the transcript it had: recognition
     /// failed, the words did not go away. See PITFALLS P-015.
     @discardableResult
-    public mutating func applyInkReading(pageID: UUID, transcript: String, tags: [String], pageHasInk: Bool = false) -> Bool {
+    public mutating func applyInkReading(pageID: UUID, transcript: String, tags: [String], tasks: [InkTask] = [], pageHasInk: Bool = false) -> Bool {
         guard var pages, let index = pages.firstIndex(where: { $0.id == pageID }) else { return false }
-        if pageHasInk, transcript.isEmpty, tags.isEmpty { return false }
+        if pageHasInk, transcript.isEmpty, tags.isEmpty, tasks.isEmpty { return false }
         let nextTags = Hashtags.unique(tags)
-        if pages[index].transcript == transcript, pages[index].tags == nextTags { return false }
+        let nextTasks = Array(InkTask.carryingOver(tasks, from: pages[index].tasks).prefix(InkTask.perPage))
+        if pages[index].transcript == transcript, pages[index].tags == nextTags, pages[index].tasks == nextTasks { return false }
         pages[index].transcript = transcript
         pages[index].tags = nextTags
+        pages[index].tasks = nextTasks
         self.pages = pages
         self.kind = .ink
         self.markdown = nil
@@ -238,7 +253,7 @@ public struct Note: Equatable, Sendable, Identifiable {
     @discardableResult
     public mutating func setPaper(_ next: Paper) -> Bool {
         var next = next
-        // A text note has only a colour, so neither pattern nor spacing.
+        // A text note has only a colour, so neither pattern nor spacing nor start.
         if kind == .text { next = Paper(color: next.color) }
         let stored: Paper? = next == .standard ? nil : next
         guard stored != paper else { return false }
@@ -370,7 +385,7 @@ extension Note: Codable {
 
 extension InkPage: Codable {
     enum CodingKeys: String, CodingKey {
-        case id, blob, width, height, transcript, tags, elements
+        case id, blob, width, height, transcript, tags, elements, tasks
     }
 
     public init(from decoder: Decoder) throws {
@@ -387,6 +402,8 @@ extension InkPage: Codable {
         // A link area whose target could not be repaired has nothing left to be. See ADR 0031.
         self.elements = (try container.decodeIfPresent([PageElement].self, forKey: .elements) ?? [])
             .filter { $0.kind != .link || $0.link != nil }
+        // Pages from before ADR 0060 carry none.
+        self.tasks = try container.decodeIfPresent([InkTask].self, forKey: .tasks) ?? []
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -398,6 +415,7 @@ extension InkPage: Codable {
         try container.encode(transcript, forKey: .transcript)
         try container.encode(tags, forKey: .tags)
         try container.encode(elements, forKey: .elements)
+        try container.encode(tasks, forKey: .tasks)
     }
 }
 

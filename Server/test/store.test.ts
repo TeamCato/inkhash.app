@@ -480,6 +480,22 @@ test("paper is checked, stored and part of the retry comparison", () => {
       () => store.putNote(inkId, 1, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 40 } }),
       Conflict,
     );
+
+    // Start of the first row (ADR 0055): same rules as the spacing.
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "lines", start: -1 }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "lines", start: 201 }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "lines", start: 80.5 }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "lines", start: "80" }), "paper");
+    assert.equal(inkReason({ color: "#FDFDFC", pattern: "blank", start: 80 }), "paper");
+    assert.equal(reason({ ...textNote(noteId), paper: { color: "#FAF5E8", start: 80 } }), "paper");
+
+    const [, shifted] = store.putNote(inkId, 2, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 48, start: 0 } });
+    assert.deepEqual(asPlain(shifted).paper, { color: "#FDFDFC", pattern: "lines", spacing: 48, start: 0 });
+    assert.deepEqual(asPlain(store.getNote(inkId)).paper, { color: "#FDFDFC", pattern: "lines", spacing: 48, start: 0 });
+    assert.throws(
+      () => store.putNote(inkId, 2, { ...inkNote(inkId), paper: { color: "#FDFDFC", pattern: "lines", spacing: 48, start: 4 } }),
+      Conflict,
+    );
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
@@ -522,4 +538,57 @@ test("createdAt is checked, kept when left out, and part of the retry comparison
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
+});
+
+const T1 = "8888aaaa-1111-4222-8333-444455556666";
+
+function taskNote(id: string, tasks: unknown): Record<string, unknown> {
+  const note = inkNote(id);
+  (note.pages as Record<string, unknown>[])[0].tasks = tasks;
+  return note;
+}
+
+test("page tasks round trip, and pages without them get an empty list", () => {
+  withRoot((root) => {
+    const store = new Store(root);
+    const task = { checked: false, text: "Angebot schicken", id: T1.toUpperCase(), x: 64, y: 180, width: 22, height: 22, due: "2026-10-20" };
+    const [, created] = store.putNote(B, 0, taskNote(B, [task, { ...task, id: E1, due: null, checked: true }]));
+    const stored = asPlain(created).pages?.[0]?.tasks;
+    assert.deepEqual(stored, [
+      { id: T1, x: 64, y: 180, width: 22, height: 22, text: "Angebot schicken", checked: false, due: "2026-10-20" },
+      { id: E1, x: 64, y: 180, width: 22, height: 22, text: "Angebot schicken", checked: true },
+    ]);
+    const [status] = store.putNote(B, 0, taskNote(B, stored));
+    assert.equal(status, 200, "tasks take part in the retry comparison");
+
+    const [, plain] = store.putNote(A, 0, inkNote(A));
+    assert.deepEqual(asPlain(plain).pages?.[0]?.tasks, []);
+  });
+});
+
+test("bad tasks are rejected", () => {
+  withRoot((root) => {
+    const store = new Store(root);
+    const good = { id: T1, x: 64, y: 180, width: 22, height: 22, text: "Milch", checked: false };
+    const bad: unknown[] = [
+      { ...good, id: "nope" },
+      { ...good, width: 0 },
+      { ...good, x: 40001 },
+      { ...good, text: "x".repeat(1001) },
+      { ...good, checked: "no" },
+      { ...good, due: "2026-02-30" },
+      { ...good, due: "20.10.2026" },
+      { ...good, colour: "red" },
+    ];
+    for (const task of bad) {
+      assert.throws(
+        () => store.putNote(B, 0, taskNote(B, [task])),
+        (error: unknown) => error instanceof StoreError && error.status === 400 && error.extra.reason === "task",
+        JSON.stringify(task),
+      );
+    }
+    assert.throws(() => store.putNote(B, 0, taskNote(B, Array.from({ length: 201 }, () => good))), StoreError);
+    assert.throws(() => store.putNote(B, 0, taskNote(B, {})), StoreError);
+    assert.equal(store.cursor, 0);
+  });
 });

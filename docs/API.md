@@ -110,7 +110,7 @@ Der Inhalt in `sealed` ist für den Server ohne Bedeutung. Für die Geräte: Byt
 
 `folder` ist ein Pfad aus Segmenten mit `/`, jedes 1–60 Zeichen ohne Rand-Leerzeichen, insgesamt höchstens 200; leer heißt kein Ordner. `favorite` ist ein Boolean. Fehlen beide, gelten `""` und `false`. Gespeicherte Notizen von vorher werden so ausgeliefert. Beide zählen zum Inhalt für den Retry-Vergleich.
 
-`paper` ist optional und gilt für die ganze Notiz (ADR 0042): `color` als `#RRGGBB` (der Server speichert groß) und `pattern` aus `blank`, `grid`, `lines`, `dots`; fehlt `pattern`, gilt `blank`. Eine Textnotiz hat nur `blank`. `spacing` ist optional (ADR 0047): der Abstand des Musters als ganze Zahl von 20 bis 64 Seitenpunkten, nur bei einem anderen Muster als `blank`. Fehlt es, gilt der Standard des Musters, und der Server lässt den Schlüssel weg. Fehlt `paper` oder ist es `null`, gilt das Standardpapier, und der Server lässt den Schlüssel weg. Der Server prüft nur die Form, nicht die Palette der App. Ein ungültiges Papier ergibt 400 `bad-request` mit `reason: "paper"`. `paper` zählt zum Inhalt für den Retry-Vergleich.
+`paper` ist optional und gilt für die ganze Notiz (ADR 0042): `color` als `#RRGGBB` (der Server speichert groß) und `pattern` aus `blank`, `grid`, `lines`, `dots`; fehlt `pattern`, gilt `blank`. Eine Textnotiz hat nur `blank`. `spacing` ist optional (ADR 0047): der Abstand des Musters als ganze Zahl von 20 bis 64 Seitenpunkten, nur bei einem anderen Muster als `blank`. Fehlt es, gilt der Standard des Musters, und der Server lässt den Schlüssel weg. `start` ist optional (ADR 0055): wo die erste Zeile des Musters liegt, als ganze Zahl von 0 bis 200 Seitenpunkten von oben, nur bei einem anderen Muster als `blank`. Fehlt es, gilt 72 für Linien und der Abstand für Karos und Punkte, und der Server lässt den Schlüssel weg. Fehlt `paper` oder ist es `null`, gilt das Standardpapier, und der Server lässt den Schlüssel weg. Der Server prüft nur die Form, nicht die Palette der App. Ein ungültiges Papier ergibt 400 `bad-request` mit `reason: "paper"`. `paper` zählt zum Inhalt für den Retry-Vergleich.
 
 `createdAt` ist optional und setzt der Client (ADR 0048): Zeitstempel in UTC als `YYYY-MM-DDTHH:MM:SSZ`, sonst 400 `bad-request` mit `reason: "createdAt"`. Fehlt es beim `PUT`, behält der Server das gespeicherte; hatte die Notiz keines, lässt er den Schlüssel weg, und der Client nimmt `updatedAt`. `createdAt` zählt zum Inhalt für den Retry-Vergleich.
 
@@ -139,9 +139,20 @@ Der Inhalt in `sealed` ist für den Server ohne Bedeutung. Für die Geräte: Byt
       "x": 200, "y": 700, "width": 240, "height": 80, "rotation": 0, "z": 1,
       "link": "inkhash://note/6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10"
     }
+  ],
+  "tasks": [
+    {
+      "id": "7777eeee-1111-4222-8333-444455556666",
+      "x": 64, "y": 180, "width": 22, "height": 22,
+      "text": "Angebot schicken",
+      "checked": false,
+      "due": "2026-10-20"
+    }
   ]
 }
 ```
+
+`tasks` sind die Aufgaben, die das Gerät auf der Seite erkannt hat: gemalte Kästchen mit der Zeile daneben (ADR 0060). `x`/`y` ist die linke obere Ecke des Kästchens, `width`/`height` seine Größe, alles in Seitenkoordinaten (−20000…40000, Größe über 0 bis 20000). `id` ist eine UUID (wird kleingeschrieben), `text` höchstens 1000 Zeichen, `checked` ein Boolean, `due` optional ein Tag als `JJJJ-MM-TT`. Höchstens 200 je Seite. Fehlt die Liste, gilt `[]`; der Server liefert sie immer. `null` bei `due` heißt dasselbe wie ein fehlendes Feld, der Server lässt es weg. Ein ungültiger Eintrag ergibt 400 `bad-request` mit `reason: "task"`. `tasks` zählt zum Inhalt für den Retry-Vergleich.
 
 `elements` liegt unter der Tinte, siehe ADR 0028. Höchstens 500 je Seite. Fehlt die Liste, gilt `[]`; der Server liefert sie immer, auch für Seiten, die vorher gespeichert wurden. `elements` zählt zum Inhalt für den Retry-Vergleich.
 
@@ -157,7 +168,7 @@ Jedes Element darf `link` tragen: höchstens 2000 Zeichen, beginnend mit `https:
 
 Tags enthalten kein `#`, kein Leerzeichen, höchstens 40 Zeichen. Der Server prüft die Form und leitet sie nicht aus dem Text ab.
 
-Markdown, das der Client schreibt, ist die kanonische Teilmenge aus `MarkdownCodec`: Überschriften mit Leerzeichen nach den Rauten, Listen, Aufgaben, Code-Zäune, Tabellen (ADR 0027) mit Ausrichtung in der Trennzeile und einer Kommentarzeile `<!-- inkhash:table … -->` direkt danach (ADR 0036), `**`, `*`, `` ` `` Links `[Text](Ziel)` (ADR 0024, 0031) und Ausschnitte `![Label](Ausschnitt-Ziel)` als eigener Absatz, auf eine Seite oder auf Text (ADR 0032, 0037). Der Server prüft Ausschnitte nicht. `#wort` bleibt im Absatz stehen und ist ein Tag.
+Markdown, das der Client schreibt, ist die kanonische Teilmenge aus `MarkdownCodec`: Überschriften mit Leerzeichen nach den Rauten, Listen, Aufgaben, Code-Zäune, Tabellen (ADR 0027) mit Ausrichtung in der Trennzeile und einer Kommentarzeile `<!-- inkhash:table … -->` direkt danach (ADR 0036), `**`, `*`, `` ` `` Links `[Text](Ziel)` (ADR 0024, 0031) und Ausschnitte `![Label](Ausschnitt-Ziel)` als eigener Absatz, auf eine Seite oder auf Text (ADR 0032, 0037). Der Server prüft Ausschnitte nicht. `#wort` bleibt im Absatz stehen und ist ein Tag. Eine Aufgabe darf am Ende `📅 JJJJ-MM-TT` tragen, ihre Fälligkeit (ADR 0060); für den Server ist das Text.
 
 ### Grenzen
 
@@ -172,6 +183,7 @@ Längen zählt der Server in UTF-16-Einheiten (JavaScript `length`); ein Emoji k
 | `pages` | höchstens 100 | `pages` |
 | `width`, `height` einer Seite | 1–10 000 | `page size` |
 | `elements` einer Seite | höchstens 500 | `element` |
+| `tasks` einer Seite | höchstens 200, `text` höchstens 1000 | `task` |
 | `folder` | höchstens 200, Segmente 1–60 | `folder` |
 
 Ein JSON-Body darf 2 MiB haben (ohne Sitzung 16 KiB), ein Blob 20 MiB; darüber antwortet der Server 413 `too-large`. Die App kappt Schlagwörter bei 50 (die ersten gewinnen), teilt einen PDF-Import ab 100 Seiten auf mehrere Notizen und kürzt sehr hohe Seiten auf 10 000. Lehnt der Server eine Notiz trotzdem mit 400 oder 413 ab, bleibt sie auf dem Gerät ungesendet, der Abgleich der übrigen läuft weiter, und der Status nennt sie.

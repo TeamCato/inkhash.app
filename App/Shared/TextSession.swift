@@ -11,6 +11,8 @@ final class TextSession {
     /// What the editor starts with. Not kept in sync; the editor owns the text after that.
     let initialBlocks: [Block]
     @ObservationIgnored weak var engine: EditorEngine?
+    /// The text view's undo steps, for the buttons in the bar. See ADR 0059.
+    let history = UndoHistory()
     var state = EditorState()
     var version = 0
     var slashIndex = 0
@@ -140,6 +142,12 @@ final class TextSession {
 
     func setType(_ type: BlockType) {
         engine?.setType(type)
+    }
+
+    /// Due day of the task at the cursor, as `JJJJ-MM-TT`; nil removes it. See ADR 0060.
+    func setDue(_ due: String?) {
+        engine?.setDue(due)
+        engine?.host.focus()
     }
 
     func toggleInline(_ action: EditorAction) {

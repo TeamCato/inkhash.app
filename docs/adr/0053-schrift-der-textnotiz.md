@@ -1,6 +1,6 @@
 # 0053 Schrift der Textnotiz
 
-Status: angenommen
+Status: angenommen. Wählbare Schrift und Größe geändert durch 0061.
 
 ## Entscheidung
 

@@ -51,10 +51,14 @@ final class AppModel {
     @ObservationIgnored private let syncer: SyncCoordinator
     private let statusLine: StatusLine
 
-    var selectedID: UUID?
+    var selectedID: UUID? {
+        didSet { if selectedID != nil { showsTasks = false } }
+    }
     var section: LibrarySection = .notes {
         didSet { if oldValue != section { selectedID = nil } }
     }
+    /// The task list fills the detail instead of a note. See ADR 0060.
+    var showsTasks = false
     var query = ""
     var editorEpoch = 0
     var searchFocusToken = 0
@@ -72,14 +76,19 @@ final class AppModel {
             .appendingPathComponent("inkhash", isDirectory: true)
     }
 
-    init() {
-        let base = Self.storageBase
+    convenience init() {
         let defaults = UserDefaults.standard
         let legacy = LegacySignIn(
             url: defaults.string(forKey: "inkhash.baseURL") ?? "",
             accountName: defaults.string(forKey: "inkhash.accountName") ?? "",
             accountID: ServerAddress.accountID(defaults.string(forKey: "inkhash.accountID") ?? "") ?? ""
         )
+        self.init(base: Self.storageBase, legacy: legacy)
+    }
+
+    /// The model over the libraries at `base`. Tests hand in a folder of their own.
+    init(base: URL, legacy: LegacySignIn?) {
+        let defaults = UserDefaults.standard
         let status = StatusLine()
         let registry: WorkspaceRegistry
         do {
@@ -275,6 +284,16 @@ final class AppModel {
     }
 
     // MARK: Workspaces
+
+    /// Shows the task list of the workspace, or closes it again.
+    func toggleTasks() {
+        if showsTasks, selectedID == nil {
+            showsTasks = false
+        } else {
+            selectedID = nil
+            showsTasks = true
+        }
+    }
 
     func switchWorkspace(_ id: UUID) {
         guard registry.select(id) else { return }

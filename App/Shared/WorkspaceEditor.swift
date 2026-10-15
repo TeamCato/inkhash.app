@@ -123,7 +123,7 @@ struct WorkspaceEditor: View {
                         : "Die Notizen verschwinden von diesem Gerät. Auf dem Server bleiben sie.")
                 }
             }
-            if !model.status.isEmpty, model.status != StatusLine.localOnly, model.status != "Abgeglichen." {
+            if !StatusLine.isRoutine(model.status) {
                 Text(model.status)
                     .font(.system(size: 12))
                     .foregroundStyle(Ink.muted)

@@ -38,6 +38,22 @@ final class InkPageCanvasTests: XCTestCase {
     }
 
     /// P-034: what is still waiting to be saved goes to the page it was drawn on.
+    /// Undo steps of the page before must not reach the page after. See P-063.
+    func testTurningThePageDropsTheUndoStepsOfTheOldOne() throws {
+        // A view controller gives the canvas its undo manager, like in the app.
+        let window = UIWindow(frame: CGRect(x: 0, y: 0, width: 768, height: 1024))
+        let controller = UIViewController()
+        controller.view.addSubview(canvas)
+        window.rootViewController = controller
+        window.makeKeyAndVisible()
+        let undo = try XCTUnwrap(canvas.undoManager)
+        undo.registerUndo(withTarget: self) { _ in }
+        XCTAssertTrue(undo.canUndo)
+        coordinator.turn(to: UUID(), height: PageGeometry.height)
+        XCTAssertFalse(undo.canUndo)
+        XCTAssertNotEqual(coordinator.pageID, page)
+    }
+
     func testAWaitingDrawingIsSavedForItsPage() {
         canvas.drawing = PKDrawing(strokes: [stroke(at: 100)])
         coordinator.canvasViewDrawingDidChange(canvas)
