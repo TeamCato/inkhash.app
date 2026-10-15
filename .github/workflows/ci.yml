@@ -1,5 +1,5 @@
 # Agents push their own branch, never main, no pull requests. This Mac tests everything,
-# fast-forwards main on green and installs the apps. See ADR 0064 and docs/RELEASE.md.
+# and fast-forwards main on green. Installing is not its job. See ADR 0064 and docs/RELEASE.md.
 # The repository is public: never add a pull_request or pull_request_target trigger here,
 # it would run fork code on the Mac.
 name: CI
@@ -62,16 +62,3 @@ jobs:
             exit 1
           }
           git push "$remote" "$GITHUB_SHA:refs/heads/main"
-
-  install:
-    needs: main
-    runs-on: [self-hosted, macOS]
-    concurrency:
-      group: install
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v5
-        with:
-          fetch-depth: 0
-          clean: false
-      - run: tools/install-local.sh

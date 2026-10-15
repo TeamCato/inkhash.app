@@ -9,7 +9,7 @@ Agenten und Maintainer schieben ihre Arbeit auf einen eigenen Branch, nie direkt
 1. Prüfen, dass der Branch `main` vorspult. Liegt er hinter `main`, schlägt der Lauf fehl; der Branch wird auf `origin/main` umgebaut und neu geschoben.
 2. `make test` (Swift-Paket, Server, Vertragstest), `make app-test`, dann `make mac`, `make ipad` und `make iphone`.
 3. Alles grün: `main` wird per Fast-Forward auf den Commit gesetzt. Kein Merge-Commit von CI, kein Squash.
-4. Danach baut `tools/install-local.sh` die Apps signiert mit Dominiks Team und installiert sie nach `/Applications`, nach `/Volumes/Dominik` und auf die eingetragenen Geräte. Ein gesperrtes oder nicht erreichbares Gerät ist eine Warnung, kein Fehler: `main` steht dann schon.
+4. Der Runner installiert nichts. Ist `main` grün vorgespult, ruft der Agent auf dem Mac `tools/install-local.sh` auf: Es baut die Apps signiert mit Dominiks Team und installiert sie nach `/Applications`, nach `/Volumes/Dominik` und auf die eingetragenen Geräte. Ein gesperrtes oder nicht erreichbares Gerät ist eine Warnung, kein Fehler.
 
 Die Build-Nummer ist die Zahl der Commits auf dem gebauten Stand (`git rev-list --count HEAD`). Die Marketing-Version in `project.yml` und Tags `server-vX.Y.Z` ändern sich nur, wenn Dominik „Release“ sagt (`docs/RELEASE.md`).
 
@@ -17,7 +17,9 @@ Der Server-Workflow `server.yml` läuft weiter auf `ubuntu-latest`, weil er den 
 
 ## Warum
 
-Die Arbeit kommt fast ganz von Agenten, die Prüfung macht der Rechner. Ein Pull Request fügt nur einen Klick hinzu, den niemand mit mehr Wissen als die Tests drückt. Die App-Tests und Builds für iPad, iPhone und Mac brauchen Xcode und Simulatoren; auf gehosteten macOS-Runnern ist das langsam, und die signierte Installation geht ohnehin nur auf dem Mac mit dem Apple-Konto.
+Die Arbeit kommt fast ganz von Agenten, die Prüfung macht der Rechner. Ein Pull Request fügt nur einen Klick hinzu, den niemand mit mehr Wissen als die Tests drückt. Die App-Tests und Builds für iPad, iPhone und Mac brauchen Xcode und Simulatoren; auf gehosteten macOS-Runnern ist das langsam.
+
+Installieren bleibt beim Agenten in Dominiks Sitzung: Nur dort sind Schlüsselbund und Geräte sicher erreichbar, und der Agent sieht und meldet, was angekommen ist. Der Runner läuft als Dienst in einer eigenen Sicherheitssitzung und braucht so keinen Zugriff auf das Signierzertifikat.
 
 Fast-Forward statt Merge hält `main` linear: Was auf `main` steht, ist genau der Commit, den der Runner getestet hat.
 

@@ -1,6 +1,6 @@
 #!/bin/bash
 # Builds the apps signed with the team in ~/.config/inkhash/install.env and installs them
-# on this Mac and the listed devices. Called by CI after main moved. See ADR 0064.
+# on this Mac and the listed devices. The agent on the Mac runs it once main is green. See ADR 0064.
 set -euo pipefail
 
 config="${INKHASH_INSTALL_ENV:-$HOME/.config/inkhash/install.env}"

@@ -36,7 +36,7 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 
 ## Abgabe
 
-Keine Pull Requests, nie direkt auf `main` pushen. Eigener Branch auf `origin/main`, `make test`, dann `git push -u origin <branch>`. Die CI auf Dominiks Mac testet, spult `main` vor und installiert die Apps (ADR 0064, `docs/RELEASE.md`). Versionen ändern sich nur bei einem Release.
+Keine Pull Requests, nie direkt auf `main` pushen. Eigener Branch auf `origin/main`, `make test`, dann `git push -u origin <branch>`. Die CI auf Dominiks Mac testet und spult `main` vor. Ist `main` grün, installiert der Agent auf dem Mac die Apps mit `tools/install-local.sh` (ADR 0064, `docs/RELEASE.md`). Versionen ändern sich nur bei einem Release.
 
 ## Befehle
 
