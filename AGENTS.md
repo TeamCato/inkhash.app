@@ -34,6 +34,10 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 - Das iOS-Ziel läuft auf iPad und iPhone, das Layout folgt der Breite, nicht dem Gerät (ADR 0026). Auf dem Mac gibt es kein `PKCanvasView`: macOS PencilKit kann `PKDrawing` lesen, rendern und Striche bauen. Der Mac zeichnet mit der Maus über eine eigene Fläche (ADR 0058), ohne Elemente zu bearbeiten.
 - Projektstruktur kommt aus `project.yml`. Die `xcodeproj` nicht von Hand editieren. Nach Änderungen an `project.yml`: `make generate`.
 
+## Abgabe
+
+Keine Pull Requests, nie direkt auf `main` pushen. Eigener Branch auf `origin/main`, `make test`, dann `git push -u origin <branch>`. Die CI auf Dominiks Mac testet, spult `main` vor und installiert die Apps (ADR 0064, `docs/RELEASE.md`). Versionen ändern sich nur bei einem Release.
+
 ## Befehle
 
 - `make test` — Swift-Paket, Server und der Vertragstest zwischen beiden (`make contract-test`)

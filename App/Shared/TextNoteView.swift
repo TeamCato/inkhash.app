@@ -8,6 +8,9 @@ struct TextNoteView: View {
     @State private var showsPaper = false
     @AppStorage(TextAppearance.familyKey) private var family = TextFamily.standard.rawValue
     @AppStorage(TextAppearance.sizeKey) private var size = TextAppearance.defaultSize
+    /// Height of the text itself and of the open `/` or `[[` menu, to keep the menu inside the sheet.
+    @State private var textHeight: CGFloat = 0
+    @State private var menuHeight: CGFloat = 0
 
     /// Title and path start where the text starts, right of the marker column.
     static var gutter: CGFloat { NoteDocument.gutter }
@@ -32,6 +35,7 @@ struct TextNoteView: View {
                             .padding(.leading, Self.gutter)
                     }
                     NoteTextView(session: session, version: session.version)
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { textHeight = $0 }
                         .overlay(alignment: .topLeading) {
                             // Every menu is placed by offset from the top left of the text. Without a
                             // stack of its own SwiftUI centred some of them first. See PITFALLS P-061.
@@ -40,8 +44,9 @@ struct TextNoteView: View {
                         }
                         // Menus hang below the text; they must stay above the empty area after it.
                         .zIndex(1)
+                    // Grows while a menu hangs past the end, so the scroll view can show all of it.
                     Color.clear
-                        .frame(height: 240)
+                        .frame(height: max(240, (menuEnd(state) ?? 0) + Self.menuMargin - textHeight))
                         .contentShape(Rectangle())
                         .onTapGesture { session.focusEnd() }
                 }
@@ -91,6 +96,13 @@ struct TextNoteView: View {
         }
     }
 
+    private static let menuMargin: CGFloat = 24
+
+    /// Bottom edge of the open menu below the cursor line, nil while none is open.
+    private func menuEnd(_ state: EditorState) -> CGFloat? {
+        guard state.slashQuery != nil || state.noteQuery != nil else { return nil }
+        return state.caret.maxY + menuHeight
+    }
 
     @ViewBuilder
     private func overlays(_ state: EditorState) -> some View {
@@ -138,6 +150,7 @@ struct TextNoteView: View {
             NoteLinkMenu(notes: session.noteSuggestions, index: session.noteIndex) {
                 session.applyNoteLink($0)
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
             .offset(x: menuX(state, width: 300), y: state.caret.maxY)
         }
         if state.slashQuery != nil {
@@ -145,6 +158,7 @@ struct TextNoteView: View {
                 session.slashIndex = $0
                 session.applySlash()
             }
+            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { menuHeight = $0 }
             .offset(x: menuX(state, width: 280), y: state.caret.maxY)
         }
     }

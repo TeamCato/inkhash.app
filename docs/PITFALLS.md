@@ -279,7 +279,6 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Ursache.** macOS maskiert App-Icons nicht. Ein randloses Quadrat wie für iOS gilt seit macOS 26 als nicht passend und wird auf eine Standardplatte gesetzt. Im Katalog stand für den Mac zudem nur 512@2x.
 **Wache.** `make icon` rendert mit `--mac` eine eigene Platte auf Apples Raster (824 von 1024, Radius 185, Schatten) in allen Mac-Größen (`AppIcon-mac-*.png`). Die iOS-Datei `AppIcon.png` bleibt das volle Quadrat. Kein automatischer Test; nach `make icon` die Renditions mit `xcrun assetutil --info …/Assets.car` prüfen.
 
-
 ## P-047 · „lese Handschrift…“ hört nicht auf
 
 **Symptom.** In einer Handschriftnotiz steht dauerhaft „lese Handschrift…“, auch ohne zu schreiben.
@@ -315,7 +314,6 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Speicher läuft voll oder die App wird beendet, sobald eine lange Handnotiz Linien oder Punkte hat. Oder sie stürzt beim Zeichnen des Musters ab.
 **Ursache.** Eine Ebene über die ganze Seite hält ein Bitmap von Seitenhöhe mal Zoom mal Bildschirmskala, bei 10 000 Punkten mehrere hundert MB. `CATiledLayer` zeichnet in Hintergrund-Threads, und unter Swift 6 ist `draw(_:)` einer `UIView` an den Main Actor gebunden.
 **Wache.** `PaperPatternView` deckt nur `canvas.bounds` und wird in `scrollViewDidScroll` neu gesetzt (`Coordinator.layoutPaper`). Nach jedem Update setzt `layoutLayers` sie einen Takt später noch einmal: SwiftUI ruft `updateUIView` mitunter, bevor die Zeichenfläche ihre Größe hat, und das Muster blieb dann bis zum ersten Scrollen unsichtbar. Kein automatischer Test; im Gerät eine lange Seite mit Punkten scrollen.
-
 
 ## P-053 · Eigener Push wird zum Konflikt
 
@@ -359,7 +357,6 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Ursache.** Nach jedem Zeichen liest der Editor die Zeile als Inline-Markdown neu (`reconcileInline`). Zwei Backticks sind dort leerer Inline-Code und wurden entfernt, bevor der dritte und das Leerzeichen das Block-Kürzel (`BlockShortcut`) erreichen konnten.
 **Wache.** `EditorEngine.reconcileInline` lässt einen Absatz in Ruhe, der nur aus ein bis drei Backticks besteht. Test `BlockEditingTests.testCodeBlockKeepsItsLines`.
 
-
 ## P-060 · UIKit wirft seinen Verlauf weg, sobald der Editor Text ändert
 
 **Symptom.** Im Text auf iPad und iPhone geht Rückgängig nur bis zur letzten Formatierung, zum letzten Kürzel oder zur letzten Tabellenzelle. Davor Getipptes lässt sich nicht mehr zurücknehmen.
@@ -383,3 +380,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Auf dem iPad: Strich auf Seite 1, umblättern, Rückgängig; Seite 2 bekommt die Tinte von Seite 1 und verliert ihre eigene. Auf dem Mac: nach dem Wechsel in eine andere Notiz ist ↶ aktiv und ändert unsichtbar die geschlossene Notiz, der Verlauf hält beliebig viele volle Kopien der Zeichnung.
 **Ursache.** Der `PKCanvasView` bleibt beim Blättern derselbe, sein `UndoManager` mit ihm. Auf dem Mac ist `@Environment(\.undoManager)` der Manager des Fensters; `NSTextView` benutzt ebenfalls den des Fensters. Seit ADR 0059 sind diese Schritte über Knöpfe sichtbar und erreichbar.
 **Wache.** `InkPageCanvas.updateUIView` leert den Manager des Canvas beim Seitenwechsel. Auf dem Mac nimmt die Zeichenfläche ihre Schritte beim Verschwinden zurück (`removeAllActions(withTarget: history)`), das Textfeld beim Abbau (`dismantleNSView`); beide setzen `levelsOfUndo = 100`. Test `InkPageCanvasTests.testTurningThePageDropsTheUndoStepsOfTheOldOne`.
+
+## P-064 · `/`-Menü am Dokumentende abgeschnitten
+
+**Symptom.** Steht der Cursor in den letzten Zeilen einer Textnotiz, zeigt das `/`-Menü (oder `[[`) nur seine oberen Einträge; der Rest lässt sich nicht hinscrollen.
+**Ursache.** Das Menü hängt als Overlay unter der Cursorzeile und vergrößert den Inhalt der `ScrollView` nicht. Der Leerraum nach dem Text war fest 240 pt, das volle Menü ist rund 470 pt hoch, und gescrollt wurde nur bis zum Cursor.
+**Wache.** `TextNoteView` misst Text und offenes Menü, lässt den Leerraum bis unter das Menü wachsen, sodass sich das ganze Menü hinscrollen lässt. Automatisch gescrollt wird nur bis zum Cursor, durch das Textfeld selbst: Ein Scroll-Proxy von SwiftUI warf die Notiz nach oben (P-062). Das Menü bleibt unter der Cursorzeile (P-010). Kein automatischer Test; in einer langen Notiz in der letzten Zeile `/` tippen, auf Mac, iPad und iPhone.
