@@ -328,21 +328,21 @@ enum RichText {
 
     static var accentColor: PlatformColor {
         #if os(macOS)
-        NSColor(srgbRed: 0.24, green: 0.435, blue: 0.66, alpha: 1)
+        NSColor(srgbRed: 0.306, green: 0.420, blue: 0.478, alpha: 1)
         #else
-        UIColor(red: 0.24, green: 0.435, blue: 0.66, alpha: 1)
+        UIColor(red: 0.306, green: 0.420, blue: 0.478, alpha: 1)
         #endif
     }
 
     static var mutedColor: PlatformColor {
-        PlatformColor(red: 0.42, green: 0.44, blue: 0.47, alpha: 1)
+        PlatformColor(red: 0.404, green: 0.447, blue: 0.482, alpha: 1)
     }
 
     static var inkColor: PlatformColor {
         #if os(macOS)
-        NSColor(srgbRed: 0.11, green: 0.115, blue: 0.125, alpha: 1)
+        NSColor(srgbRed: 0.059, green: 0.129, blue: 0.220, alpha: 1)
         #else
-        UIColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 1)
+        UIColor(red: 0.059, green: 0.129, blue: 0.220, alpha: 1)
         #endif
     }
 

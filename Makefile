@@ -1,41 +1,14 @@
-.PHONY: icon test contract-test app-test mac-test server server-lan server-test server-package generate mac ipad iphone ipad-device import-spike
+.PHONY: icon test contract-test app-test mac-test generate mac ipad iphone ipad-device import-spike
 
-PORT ?= 8787
-
+# The Swift package, then the client against Kennel's module inkhash (ADR 0067).
 test:
 	swift test --package-path Packages/InkhashCore
-	@test -d Server/node_modules || npm --prefix Server ci
-	npm --prefix Server test
 	tools/contract-test.sh
 
-# The Swift client against the real server on a free port. Part of `make test`. See ADR 0052.
+# The Swift client against Kennel's test server on a free port. Needs a Kennel checkout in
+# KENNEL_DIR, by default ../kennel; without one it is skipped with a warning.
 contract-test:
-	@test -d Server/node_modules || npm --prefix Server ci
-	npm --prefix Server run build
 	tools/contract-test.sh
-
-server:
-	@test -d Server/node_modules || npm --prefix Server ci
-	npm --prefix Server run build
-	INKHASH_DATA=$(CURDIR)/.data INKHASH_HOST=127.0.0.1 INKHASH_PORT=$(PORT) node Server/dist/inkhashd.js
-
-# Until the first account exists, the server logs a setup token for /admin. See ADR 0021.
-server-lan:
-	@test -d Server/node_modules || npm --prefix Server ci
-	npm --prefix Server run build
-	INKHASH_DATA=$(CURDIR)/.data INKHASH_HOST=0.0.0.0 INKHASH_PORT=$(PORT) node Server/dist/inkhashd.js
-
-# Test environment from .test-env/env: random port, all interfaces, own data directory.
-server-test:
-	@test -f .test-env/env || { echo ".test-env/env fehlt."; exit 1; }
-	@test -d Server/node_modules || npm --prefix Server ci
-	npm --prefix Server run build
-	set -a && . ./.test-env/env && set +a && node Server/dist/inkhashd.js
-
-# Release package as GitHub Releases has it: make server-package VERSION=0.1.0 -> .build/release/. See ADR 0039.
-server-package:
-	@test -n "$(VERSION)" || { echo "VERSION=X.Y.Z setzen."; exit 1; }
-	deploy/package.sh $(VERSION)
 
 generate:
 	xcodegen generate
@@ -66,7 +39,7 @@ ipad-device: generate
 	xcrun devicectl device process launch --device $(DEVICE) local.inkhash.ipad
 
 
-# Renders the app icon from InkhashMark in App/Shared/Theme.swift.
+# Lays out the painted app icon from tools/AppIconArtwork.png. See ADR 0066.
 icon:
 	mkdir -p .build/icon
 	swiftc -parse-as-library -O App/Shared/Theme.swift tools/RenderIcon.swift -o .build/icon/render-icon

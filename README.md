@@ -1,14 +1,14 @@
 # inkhash
 
-> **In Entwicklung.** inkhash ist noch nicht fertig. Speicherformat, API und Oberfläche können sich ändern, und es gibt noch keine App im App Store. Wer den Server schon betreibt, sichert seine Daten (siehe `docs/DEPLOY.md`).
+> **In Entwicklung.** inkhash ist noch nicht fertig. Speicherformat, API und Oberfläche können sich ändern, und es gibt noch keine App im App Store. Abgeglichen wird über Kennel, den Server des Haushalts (siehe `docs/DEPLOY.md`).
 
-Notizen für iPad, iPhone und Mac. Handschrift auf dem iPad, Text auf beiden, Ablage auf dem eigenen Server. Die Bibliothek durchsucht Text und Handschrift, ohne auf den exakten Wortlaut zu bestehen, und erkennt Schlagwörter.
+Notizen für iPad, iPhone und Mac. Handschrift auf dem iPad, Text auf beiden, Abgleich über den eigenen Server. Die Bibliothek durchsucht Text und Handschrift, ohne auf den exakten Wortlaut zu bestehen, und erkennt Schlagwörter.
 
-Die App braucht keinen Server, alles bleibt auf dem Gerät. Ein selbst betriebener Server gleicht optional Geräte ab (`docs/adr/0017-lokal-zuerst.md`).
+Die App braucht keinen Server, alles bleibt auf dem Gerät. Kennel, ein selbst betriebener Server, gleicht optional Geräte ab (`docs/adr/0017-lokal-zuerst.md`, `docs/adr/0067-abgleich-ueber-kennel.md`).
 
-## Server installieren
+## Server
 
-Linux mit systemd oder Docker: **[docs/DEPLOY.md](docs/DEPLOY.md)**. Eingerichtet wird im Heimnetz, erreichbar unter `http://<lan-adresse>:8787`.
+inkhash gleicht über das Modul `inkhash` von Kennel ab: **[docs/DEPLOY.md](docs/DEPLOY.md)**.
 
 ## Entwickeln
 
@@ -17,8 +17,6 @@ make test
 make generate
 make mac
 make ipad
-make server       # lokal auf 127.0.0.1:8787, Setup-Token im Log
-make server-lan   # für ein echtes iPad im LAN
 ```
 
 Das Xcode-Projekt kommt aus `project.yml`. Nicht die `xcodeproj` von Hand ändern.

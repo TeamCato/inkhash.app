@@ -42,7 +42,7 @@ final class SyncCoordinator {
 
     static func waitingForVault(_ state: VaultState) -> String {
         switch state {
-        case .serverTooOld: "Der Server kann noch nicht verschlüsseln. Der Abgleich ruht bis zum Update."
+        case .noInkhash: "Der Server ist kein Kennel mit inkhash. Der Abgleich ruht."
         case .failed(let reason): reason
         default: "Der Abgleich wartet auf den Tresor."
         }

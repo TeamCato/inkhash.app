@@ -1,6 +1,8 @@
 # API
 
-Basis: `http://host:8787`. `GET /v1/health`, das Einrichten, das Anmelden und die Seite `/admin` sind offen. Alles andere verlangt `Authorization: Bearer <sitzung>`.
+Die App gleicht mit Kennel ab, dem Server des Haushalts, und dort mit dessen Modul `inkhash` (ADR 0067). Einen eigenen inkhash-Server gibt es nicht mehr. Kennel führt den Vertrag des Moduls in `docs/modules/inkhash.md` und verweist für Tresor, Notizen, Änderungen und Reihenfolge hierher. Diese Datei beschreibt, worauf sich die App verlässt.
+
+Basis: `http://host:8790`. Anmelden, Sitzungen, Passwort und Accounts gehören Kennels Kern unter `/v1`. Alles, was nur inkhash betrifft, liegt unter `/v1/apps/inkhash`. `GET /v1/health`, das Einrichten, das Anmelden und die Seite `/admin` sind offen. Alles andere verlangt `Authorization: Bearer <sitzung>`.
 
 Solange es keinen Account gibt, erzeugt der Server beim Start einen zufälligen Setup-Token und schreibt ihn in sein Log. Er ist kein Login und legt nur den ersten Account an, den Admin (`POST /v1/setup`). Danach gilt er nicht mehr. Weitere Accounts legt nur der Admin an (`POST /v1/accounts`), mit Name und Startpasswort. Es gibt keine E-Mail und keine Selbstregistrierung. Siehe ADR 0021.
 
@@ -12,41 +14,41 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 
 | Methode | Pfad | Bedeutung |
 | --- | --- | --- |
-| GET | `/v1/health` | `{ "ok": true, "registration": "setup" \| "closed", "version", "vault": true }`, ohne Sitzung. `version` ist das Release des Servers, z. B. `0.5.0`; Server vor 0.5.0 lassen es weg. `vault` sagen Server, die Tresore führen (ADR 0052); die App gleicht nur mit ihnen ab |
+| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "modules": { "inkhash": { "title", "encryption": "required", "vault": true, "workspaces": true, "pairing": true } } }`, ohne Sitzung. Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
 | POST | `/v1/setup` | `{ "setupToken", "name", "password" }` → 201 `{ "token", "account": { "id", "name", "admin": true } }`, ohne Sitzung |
 | POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
 | DELETE | `/v1/session` | Sitzung beenden |
-| GET | `/v1/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
-| PUT | `/v1/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neuer Wiederherstellungsschlüssel). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
-| DELETE | `/v1/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts wandern nach `deleted/vault-reset-<zeit>/`, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
-| PUT | `/v1/vault/pairings/<id>` | `{ "sealed" }` → 201 `{ "expiresAt" }`. Legt den versiegelten Account-Schlüssel für ein neues Gerät ab, fünf Minuten, höchstens einer pro Account; ein neuer ersetzt den alten. 404 `no-vault` ohne Tresor (ADR 0054) |
-| GET | `/v1/vault/pairings/<id>` | `{ "sealed" }` einmal, danach ist er weg. 404, wenn abgelaufen, schon abgeholt, zurückgezogen oder unbekannt |
-| DELETE | `/v1/vault/pairings/<id>` | Zieht die Kopplung zurück → 204, auch wenn sie schon weg ist |
+| GET | `/v1/apps/inkhash/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
+| PUT | `/v1/apps/inkhash/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neuer Wiederherstellungsschlüssel). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
+| DELETE | `/v1/apps/inkhash/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts werden archiviert und sind für alle Routen weg, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
+| PUT | `/v1/apps/inkhash/vault/pairings/<id>` | `{ "sealed" }` → 201 `{ "expiresAt" }`. Legt den versiegelten Account-Schlüssel für ein neues Gerät ab, fünf Minuten, höchstens einer pro Account; ein neuer ersetzt den alten. 404 `no-vault` ohne Tresor (ADR 0054) |
+| GET | `/v1/apps/inkhash/vault/pairings/<id>` | `{ "sealed" }` einmal, danach ist er weg. 404, wenn abgelaufen, schon abgeholt, zurückgezogen oder unbekannt |
+| DELETE | `/v1/apps/inkhash/vault/pairings/<id>` | Zieht die Kopplung zurück → 204, auch wenn sie schon weg ist |
 | PUT | `/v1/password` | `{ "current", "password" }` → 204. Das eigene Passwort ändern. Die anderen Sitzungen des Accounts enden, die fragende bleibt (ADR 0050) |
 | GET | `/v1/accounts` | nur Admin: `{ "accounts": [{ "id", "name", "admin", "createdAt" }], "me" }`, nach Name; `me` ist der fragende Account |
 | POST | `/v1/accounts` | nur Admin: `{ "name", "password" }` → 201 `{ "id", "name", "admin": false, "createdAt" }`. Keine Sitzung für den neuen Account |
 | PATCH | `/v1/accounts/{id}` | nur Admin: `{ "name"?, "password"?, "admin"? }` → der Account. Ein neues Passwort beendet seine Sitzungen außer der fragenden |
-| DELETE | `/v1/accounts/{id}` | nur Admin: 204. Identität und Sitzungen weg, Daten nach `deleted-accounts/` |
-| GET | `/admin` | Verwaltungsseite, HTML. Skript unter `/admin/client.js` |
-| GET | `/v1/workspaces` | `{ "workspaces": [Workspace], "ordered" }` in der Reihenfolge des Accounts |
-| POST | `/v1/workspaces` | `{ "name" }` → 201 Workspace. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main` |
-| PATCH | `/v1/workspaces/{id}` | `{ "name"?, "symbol"?, "icon"? }` → Workspace |
-| DELETE | `/v1/workspaces/{id}` | 204. Der Workspace verschwindet für den Account; der letzte ist 400 mit `reason: "last workspace"` |
-| PUT | `/v1/workspace-order` | `{ "ids": [...] }` → wie `GET /v1/workspaces` |
-| GET | `/v1/changes?after=<cursor>&limit=<n>` | `{ "cursor", "hasMore", "changes": [{ "cursor", "noteId", "revision", "deleted" }] }` |
-| GET | `/v1/notes/{id}` | die Notiz, auch wenn sie gelöscht ist |
-| PUT | `/v1/notes/{id}` | Body `{ "baseRevision", "note" }`. 201 beim Anlegen, 200 beim Aktualisieren, 409 bei Konflikt, 404 bei unbekannter Notiz mit `baseRevision` > 0 |
-| DELETE | `/v1/notes/{id}?baseRevision=<n>` | Grabstein. Der Inhalt bleibt erhalten |
-| PUT | `/v1/blobs/{sha256}` | Rohbytes. 400, wenn der Hash nicht passt. 204, wenn er liegt |
-| GET | `/v1/blobs/{sha256}` | Rohbytes |
+| DELETE | `/v1/accounts/{id}` | nur Admin: 204. Identität und Sitzungen weg, die Daten der Module bleiben für den Betreiber |
+| GET | `/admin` | Kennels Verwaltungsseite, HTML |
+| GET | `/v1/apps/inkhash/workspaces` | `{ "workspaces": [Workspace], "ordered" }` in der Reihenfolge des Accounts |
+| POST | `/v1/apps/inkhash/workspaces` | `{ "name" }` → 201 Workspace. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main` |
+| PATCH | `/v1/apps/inkhash/workspaces/{id}` | `{ "name"?, "symbol"?, "icon"? }` → Workspace |
+| DELETE | `/v1/apps/inkhash/workspaces/{id}` | 204. Der Workspace verschwindet für den Account; der letzte ist 400 mit `reason: "last workspace"` |
+| PUT | `/v1/apps/inkhash/workspace-order` | `{ "ids": [...] }` → wie `GET /v1/apps/inkhash/workspaces` |
+| GET | `/v1/apps/inkhash/changes?after=<cursor>&limit=<n>` | `{ "cursor", "hasMore", "changes": [{ "cursor", "noteId", "revision", "deleted" }] }` |
+| GET | `/v1/apps/inkhash/notes/{id}` | die Notiz, auch wenn sie gelöscht ist |
+| PUT | `/v1/apps/inkhash/notes/{id}` | Body `{ "baseRevision", "note" }`. 201 beim Anlegen, 200 beim Aktualisieren, 409 bei Konflikt, 404 bei unbekannter Notiz mit `baseRevision` > 0 |
+| DELETE | `/v1/apps/inkhash/notes/{id}?baseRevision=<n>` | Grabstein. Der Inhalt bleibt erhalten |
+| PUT | `/v1/apps/inkhash/blobs/{sha256}` | Rohbytes. 400, wenn der Hash nicht passt. 204, wenn er liegt |
+| GET | `/v1/apps/inkhash/blobs/{sha256}` | Rohbytes |
 
 Ein Workspace ist `{ "id", "name", "symbol", "icon", "updatedAt" }`. `symbol` ist der Name eines SF Symbols (`[a-z0-9]` in Teilen mit `.`, höchstens 64 Zeichen), `icon` der sha256 eines Blobs im selben Workspace, `updatedAt` die letzte Änderung über `PATCH`. Alle drei sind `null`, solange kein Gerät das Aussehen gesetzt hat. `PATCH` ändert nur die genannten Felder, mindestens eines; `"icon": null` entfernt das Bild. Ein `icon`, das nicht als Blob im Workspace liegt, ist 400 mit `reason: "icon"`, ein ungültiges Symbol 400 mit `reason: "symbol"`. Siehe ADR 0043.
 
-`DELETE /v1/workspaces/{id}` nimmt den Workspace aus Liste und Reihenfolge; seine Routen antworten danach mit 404, bei `main` auch die ohne Präfix. Der Server verschiebt seine Dateien nach `deleted/<id>-<zeit>` im Account, statt sie zu löschen. Ein Workspace muss bleiben. Geräte erkennen das Löschen daran, dass der Workspace in `GET /v1/workspaces` fehlt. Siehe ADR 0045.
+`DELETE /v1/apps/inkhash/workspaces/{id}` nimmt den Workspace aus Liste und Reihenfolge; seine Routen antworten danach mit 404, bei `main` auch die ohne Präfix. Der Server markiert ihn als gelöscht, statt Notizen und Blobs zu löschen. Ein Workspace muss bleiben. Geräte erkennen das Löschen daran, dass der Workspace in `GET /v1/apps/inkhash/workspaces` fehlt. Siehe ADR 0045.
 
-`ordered` ist falsch, solange der Account keine Reihenfolge gespeichert hat; dann kommt `main` zuerst, die übrigen in der Reihenfolge des Anlegens. `PUT /v1/workspace-order` ordnet die genannten Workspaces unter den Plätzen, die sie schon haben; nicht genannte bleiben stehen. Ein neuer Workspace kommt ans Ende. Unbekannte oder doppelte IDs sind 400 mit `reason: "order"`.
+`ordered` ist falsch, solange der Account keine Reihenfolge gespeichert hat; dann kommt `main` zuerst, die übrigen in der Reihenfolge des Anlegens. `PUT /v1/apps/inkhash/workspace-order` ordnet die genannten Workspaces unter den Plätzen, die sie schon haben; nicht genannte bleiben stehen. Ein neuer Workspace kommt ans Ende. Unbekannte oder doppelte IDs sind 400 mit `reason: "order"`.
 
-Die Routen für Änderungen, Notizen und Blobs gelten für den Workspace `main`. Dieselben Routen unter `/v1/workspaces/{ws}/` gelten für den Workspace `ws`, jeder mit eigenem Cursor. Ein unbekannter Workspace ist 404. Server ohne Workspaces antworten auf `GET /v1/workspaces` mit 404; die App kennt dort nur `main`. Siehe ADR 0020.
+Die Routen für Änderungen, Notizen und Blobs gelten für den Workspace `main`. Dieselben Routen unter `/v1/apps/inkhash/workspaces/{ws}/` gelten für den Workspace `ws`, jeder mit eigenem Cursor. Ein unbekannter Workspace ist 404. Siehe ADR 0020.
 
 409 liefert `{ "error": "conflict", "note": { ...aktuelle Fassung } }`.
 
@@ -68,11 +70,11 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
 
 ## Tresor und verschlüsselte Notizen
 
-Siehe ADR 0052 und 0054. Der Tresor hält den Schlüssel des Accounts, verpackt mit einem Wiederherstellungsschlüssel, den nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl der Resets. `DELETE /v1/vault` antwortet bei falschem Passwort mit 403 `wrong-password` und zählt Fehlversuche wie das Anmelden; ohne Tresor 404.
+Siehe ADR 0052 und 0054. Der Tresor hält den Schlüssel des Accounts, verpackt mit einem Wiederherstellungsschlüssel, den nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl der Resets. `DELETE /v1/apps/inkhash/vault` antwortet bei falschem Passwort mit 403 `wrong-password` und zählt Fehlversuche wie das Anmelden; ohne Tresor 404.
 
 Kopplungen (ADR 0054) liegen nur im Speicher des Servers und gehören zum Account der Sitzung; ein anderer Account bekommt 404. `<id>` ist eine UUID, sonst 400 `reason: "pairing"`. `sealed` ist Base64 bis 512 Zeichen, sonst 400 `reason: "sealed"`. Der Server kann `sealed` nicht öffnen: Das Geheimnis dafür steht nur im QR-Code. Ein Reset des Tresors, das Löschen des Accounts und ein Neustart des Servers verwerfen offene Kopplungen.
 
-Hat ein Account einen Tresor, nehmen alle seine Workspaces nur verschlüsselte Notizen an:
+Alle Workspaces nehmen nur verschlüsselte Notizen an:
 
 ```json
 { "schemaVersion": 2, "id": "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10", "sealed": "AXk3…", "deleted": false }
@@ -80,7 +82,7 @@ Hat ein Account einen Tresor, nehmen alle seine Workspaces nur verschlüsselte N
 
 So geht sie beim `PUT` hin. Zurück kommt `{ "schemaVersion": 2, "id", "revision", "updatedAt", "deletedAt", "sealed" }`, auch in Konflikten (409) und in `GET`. `sealed` ist Base64 mit Länge durch vier teilbar, höchstens 2 000 000 Zeichen, sonst 400 `reason: "sealed"`. `deleted: true` speichert die Notiz als Grabstein (`deletedAt` bleibt oder wird gesetzt); fehlt es oder ist es `false`, ist sie danach nicht gelöscht. Der Retry-Vergleich gilt für dasselbe `sealed` mit demselben Grabstein-Zustand. `DELETE` funktioniert wie bei Klartext-Notizen.
 
-Eine Notiz mit `schemaVersion: 1` ist dann 400 `reason: "sealed"`. Ohne Tresor ist eine Notiz mit `schemaVersion: 2` 400 `reason: "no vault"`. Klartext-Notizen von vorher bleiben lesbar, bis ein Gerät sie verschlüsselt neu schreibt.
+Kennel nimmt keine Klartext-Notizen an: Eine Notiz mit `schemaVersion: 1` ist 400 `reason: "sealed"`, mit oder ohne Tresor. Ohne Tresor ist eine Notiz mit `schemaVersion: 2` 400 `reason: "no vault"`, ein Blob ebenso. Die App legt deshalb zuerst den Tresor an und gleicht erst dann ab. Klartext-Notizen aus dem Umzug eines alten inkhashd bleiben lesbar, bis ein Gerät sie verschlüsselt neu schreibt.
 
 Blobs eines Accounts mit Tresor heißen nach dem HMAC, den nur die Geräte bilden können, nicht nach ihrem SHA-256. Der Server prüft dann den Hash nicht, lehnt aber einen Blob ab, dessen Name sein eigener SHA-256 ist: Das wäre Klartext (400 `reason: "sealed"`). Hat ein Workspace keine Klartext-Notiz mehr, löscht der Server dort beim nächsten Zugriff einmal alle Klartext-Blobs außer dem aktuellen Bild des Workspace. Ein ersetztes oder entferntes Klartext-Bild löscht `PATCH` gleich mit.
 
@@ -190,7 +192,7 @@ Ein JSON-Body darf 2 MiB haben (ohne Sitzung 16 KiB), ein Blob 20 MiB; darüber 
 
 ## Änderungen
 
-`/v1/changes` liefert pro Notiz nur den letzten Eintrag, aufsteigend nach `cursor`. `limit` ist 1–1000, ohne Angabe 500. Bei `hasMore: true` ist `cursor` der letzte gelieferte Eintrag, und der Client fragt mit diesem Cursor weiter. Sonst ist `cursor` der aktuelle Stand des Servers. Server ohne Seiten lassen `hasMore` weg, der Client liest das als `false`.
+`/v1/apps/inkhash/changes` liefert pro Notiz nur den letzten Eintrag, aufsteigend nach `cursor`. `limit` ist 1–1000, ohne Angabe 500. Bei `hasMore: true` ist `cursor` der letzte gelieferte Eintrag, und der Client fragt mit diesem Cursor weiter. Sonst ist `cursor` der aktuelle Stand des Servers. Server ohne Seiten lassen `hasMore` weg, der Client liest das als `false`.
 
 Ein `after` jenseits des aktuellen Standes, etwa nach einem Restore, zählt als 0: der Server liefert alle Notizen, und das Gerät prüft jede einmal. Siehe ADR 0015.
 

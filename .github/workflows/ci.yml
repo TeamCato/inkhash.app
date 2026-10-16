@@ -52,7 +52,7 @@ jobs:
           clean: false
           persist-credentials: false
       # SSH key of the Mac user, not GITHUB_TOKEN: the token may not touch workflow files,
-      # and its pushes would not start server.yml on main.
+      # and its pushes would not start other workflows on main.
       - name: Fast-forward main
         run: |
           remote=git@github.com:${{ github.repository }}.git

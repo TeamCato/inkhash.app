@@ -1,6 +1,6 @@
 # 0039 Der Server kommt als Release und als Image
 
-Status: angenommen
+Status: angenommen. Ersetzt durch 0067: Der Server ist Kennel.
 
 ## Entscheidung
 

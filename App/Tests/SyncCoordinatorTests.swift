@@ -44,6 +44,6 @@ final class SyncCoordinatorTests: LibraryTestCase {
         let vaults = VaultSessions(sessions: sessions, status: status)
         let coordinator = SyncCoordinator(registry: registry, sessions: sessions, vaults: vaults, library: library, status: status)
         XCTAssertEqual(coordinator.statusAtRest, "Der Abgleich wartet auf den Tresor.")
-        XCTAssertEqual(SyncCoordinator.waitingForVault(.serverTooOld), "Der Server kann noch nicht verschlüsseln. Der Abgleich ruht bis zum Update.")
+        XCTAssertEqual(SyncCoordinator.waitingForVault(.noInkhash), "Der Server ist kein Kennel mit inkhash. Der Abgleich ruht.")
     }
 }

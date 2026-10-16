@@ -153,6 +153,8 @@ final class ServerSessions {
         return try? await APIClient(baseURL: url, token: "").health().version
     }
 
+    static let noInkhash = "Unter dieser Adresse läuft kein Kennel mit inkhash. Ist das Modul in der Verwaltung eingeschaltet?"
+
     /// Checks the address as it is typed, after a short pause.
     func addressChanged(_ text: String) {
         probeTask?.cancel()
@@ -168,7 +170,8 @@ final class ServerSessions {
             do {
                 let health = try await APIClient(baseURL: url, token: "").health()
                 guard !Task.isCancelled else { return }
-                connection = .reachable(health.registration)
+                // inkhash syncs only with Kennel's module, not with the old inkhashd. See ADR 0067.
+                connection = health.inkhash == nil ? .failed(Self.noInkhash) : .reachable(health.registration)
             } catch {
                 guard !Task.isCancelled else { return }
                 connection = .failed(StatusLine.describe(error))

@@ -28,7 +28,7 @@ struct ServerConnectView: View {
         Form {
             Section {
                 HStack {
-                    TextField("Adresse", text: $url, prompt: Text(verbatim: "http://192.168.1.10:8787"))
+                    TextField("Adresse", text: $url, prompt: Text(verbatim: "http://192.168.1.10:8790"))
                         .labelsHidden()
                         .textContentType(.URL)
 #if os(iOS)
@@ -72,7 +72,7 @@ struct ServerConnectView: View {
         case .checking:
             ProgressView().controlSize(.small)
         case .reachable:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(.green)
+            Image(systemName: "checkmark.circle.fill").foregroundStyle(Ink.sage)
         case .failed:
             Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
         case .unknown:

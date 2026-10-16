@@ -1,18 +1,24 @@
 import SwiftUI
 
-/// The palette follows the mark: anthracite and greys, one quiet blue as accent. No warm tones.
+/// The palette of the app family (ADR 0066): deep blue ink on warm paper, blue grey as accent,
+/// sage for what went well, warm sand for what needs a look. The desk is paper beige like the icon.
 enum Ink {
-    static let paper = Color(red: 0.992, green: 0.992, blue: 0.988)
-    static let deskTop = Color(red: 0.965, green: 0.966, blue: 0.970)
-    static let deskBottom = Color(red: 0.925, green: 0.932, blue: 0.942)
-    static let ink = Color(red: 0.11, green: 0.115, blue: 0.125)
-    static let muted = Color(red: 0.42, green: 0.44, blue: 0.47)
-    static let accent = Color(red: 0.24, green: 0.435, blue: 0.66)
-    static let wordmark = Color(red: 0.353, green: 0.380, blue: 0.424)
-    static let mark = Color(red: 0.11, green: 0.11, blue: 0.12)
-    static let markLight = Color(red: 0.55, green: 0.57, blue: 0.60)
+    static let paper = Color(red: 0.992, green: 0.984, blue: 0.969)
+    static let deskTop = Color(red: 0.984, green: 0.973, blue: 0.945)
+    static let deskBottom = Color(red: 0.953, green: 0.902, blue: 0.824)
+    static let ink = Color(red: 0.059, green: 0.129, blue: 0.220)
+    static let muted = Color(red: 0.404, green: 0.447, blue: 0.482)
+    static let accent = Color(red: 0.306, green: 0.420, blue: 0.478)
+    static let sage = Color(red: 0.486, green: 0.604, blue: 0.522)
+    static let amber = Color(red: 0.914, green: 0.718, blue: 0.427)
+    /// Amber dark enough to read as text on paper.
+    static let warning = Color(red: 0.580, green: 0.388, blue: 0.165)
+    /// The quiet half of the wordmark, `hash`. `ink` stands in `Ink.ink`.
+    static let wordmark = Color(red: 0.235, green: 0.271, blue: 0.302)
+    static let mark = Color(red: 0.118, green: 0.141, blue: 0.149)
+    static let markLight = Color(red: 0.639, green: 0.557, blue: 0.478)
     /// The edge of paper on paper. White alone vanishes on the sheet, so a trace of ink joins it.
-    static let hairline = Color(red: 0.11, green: 0.115, blue: 0.125).opacity(0.09)
+    static let hairline = Color(red: 0.059, green: 0.129, blue: 0.220).opacity(0.09)
 
     static let serif = Font.system(.body, design: .serif)
 
@@ -108,12 +114,12 @@ extension View {
         buttonStyle(InkButtonStyle(prominent: false))
     }
 
-    /// The main action: anthracite with paper text. Website `.button.primary`.
+    /// The main action: navy ink with paper text. Website `.button.primary`.
     func inkPrimaryButton() -> some View {
         buttonStyle(InkButtonStyle(prominent: true))
     }
 
-    /// Pen tools are anthracite like the ink, the active one filled. The blue accent stays for selection.
+    /// Pen tools are navy like the ink, the active one filled. The slate accent stays for selection.
     func inkToolButton(isActive: Bool) -> some View {
         buttonStyle(InkToolButtonStyle(isActive: isActive))
     }
@@ -157,8 +163,8 @@ struct InkToolButtonStyle: ButtonStyle {
     }
 }
 
-/// The mark is a drawn `#`: two dark horizontals, a dark right vertical and a
-/// lighter left vertical behind them. No extra slash. Strokes taper like a brush.
+/// The mark is a drawn `#`, traced from the brush strokes of the app icon: two dark horizontals rising to the right,
+/// a dark right vertical and a lighter left vertical behind them. No extra slash. Strokes taper like a brush.
 struct InkhashMark: View {
     var body: some View {
         Canvas { context, size in
@@ -194,7 +200,7 @@ struct InkhashMark: View {
                 // Full width through most of the stroke, a short attack and a longer lift-off.
                 let attack = sin(min(1, t / 0.18) * .pi / 2)
                 let release = sin(min(1, (1 - t) / 0.45) * .pi / 2)
-                return maxHalf * (0.55 + 0.45 * attack) * (0.22 + 0.78 * release)
+                return maxHalf * (0.55 + 0.45 * attack) * (0.34 + 0.66 * release)
             }
             for i in 0...steps {
                 let t = CGFloat(i) / CGFloat(steps)
@@ -214,10 +220,10 @@ struct InkhashMark: View {
     }
 
     private static let strokes: [Stroke] = [
-        Stroke(from: CGPoint(x: 0.40, y: 0.05), to: CGPoint(x: 0.19, y: 0.95), width: 0.085, color: Ink.markLight),
-        Stroke(from: CGPoint(x: 0.12, y: 0.40), to: CGPoint(x: 0.96, y: 0.29), width: 0.09, color: Ink.mark),
-        Stroke(from: CGPoint(x: 0.03, y: 0.67), to: CGPoint(x: 0.88, y: 0.57), width: 0.09, color: Ink.mark),
-        Stroke(from: CGPoint(x: 0.70, y: 0.03), to: CGPoint(x: 0.43, y: 0.93), width: 0.095, color: Ink.mark),
+        Stroke(from: CGPoint(x: 0.392, y: 0.154), to: CGPoint(x: 0.202, y: 0.928), width: 0.076, color: Ink.markLight),
+        Stroke(from: CGPoint(x: 0.094, y: 0.586), to: CGPoint(x: 0.905, y: 0.268), width: 0.069, color: Ink.mark),
+        Stroke(from: CGPoint(x: 0.094, y: 0.744), to: CGPoint(x: 0.862, y: 0.463), width: 0.069, color: Ink.mark),
+        Stroke(from: CGPoint(x: 0.645, y: 0.03), to: CGPoint(x: 0.375, y: 0.97), width: 0.097, color: Ink.mark),
     ]
 }
 
@@ -253,9 +259,11 @@ struct InkhashLogo: View {
     }
 
     private var word: some View {
-        Text("inkhash")
+        // Like the icon family: `ink` in full ink, `hash` quieter.
+        Text("\(Text("ink").foregroundColor(Ink.ink))hash")
+            .foregroundColor(Ink.wordmark)
             .font(.system(size: wordSize, weight: .semibold))
             .tracking(-0.4)
-            .foregroundStyle(Ink.wordmark)
+            .accessibilityLabel("inkhash")
     }
 }

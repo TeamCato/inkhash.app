@@ -1,8 +1,7 @@
 import AppKit
 import SwiftUI
 
-// Renders the app icon from InkhashMark in App/Shared/Theme.swift, so the icon
-// and the in-app mark share one drawing. Run via `make icon`.
+// Lays out the painted app icon (tools/AppIconArtwork.png) for iOS and macOS. Run via `make icon`.
 //
 //   render-icon <AppIcon.png>              iOS: full square, the system rounds the corners
 //   render-icon --mac <appiconset folder>  macOS: rounded plate on Apple's grid, every size
@@ -10,33 +9,32 @@ import SwiftUI
 // macOS does not mask icons. A full-bleed square is shown as a foreign icon: shrunk onto a
 // grey plate since macOS 26. The Mac icon therefore carries its own shape.
 
-private let paper = Color(red: 0.976, green: 0.973, blue: 0.965)
+/// The painted icon: brush strokes and paper from Dominik's icon sheet (ADR 0066), 1024 square.
+/// Brush grain and paper cannot be drawn by hand in code, so the artwork is a file, and this tool
+/// only lays it out for each platform. The in-app mark `InkhashMark` follows its strokes.
+@MainActor private let artwork: NSImage = {
+    let url = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("AppIconArtwork.png")
+    guard let image = NSImage(contentsOf: url) else { fatalError("missing \(url.path)") }
+    return image
+}()
 
 struct IconFace: View {
     var body: some View {
-        ZStack {
-            paper
-            InkhashMark()
-                .frame(width: 600, height: 600)
-                .offset(x: 6)
-        }
-        .frame(width: 1024, height: 1024)
+        Image(nsImage: artwork)
+            .resizable()
+            .frame(width: 1024, height: 1024)
     }
 }
 
 /// Apple's macOS grid on 1024: an 824 plate centred, corner radius 185, a soft shadow below.
 struct MacIconFace: View {
     var body: some View {
-        ZStack {
-            RoundedRectangle(cornerRadius: 185, style: .continuous)
-                .fill(paper)
-                .frame(width: 824, height: 824)
-                .shadow(color: .black.opacity(0.28), radius: 14, y: 8)
-            InkhashMark()
-                .frame(width: 600 * 824 / 1024, height: 600 * 824 / 1024)
-                .offset(x: 6 * 824 / 1024)
-        }
-        .frame(width: 1024, height: 1024)
+        Image(nsImage: artwork)
+            .resizable()
+            .frame(width: 824, height: 824)
+            .clipShape(RoundedRectangle(cornerRadius: 185, style: .continuous))
+            .shadow(color: .black.opacity(0.28), radius: 14, y: 8)
+            .frame(width: 1024, height: 1024)
     }
 }
 

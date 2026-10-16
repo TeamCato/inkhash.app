@@ -1,6 +1,6 @@
 # 0011 Helles Papier, Glas nur auf dem Chrom
 
-Status: angenommen. Der Glas-Teil ist durch 0029 ersetzt: Über dem Blatt liegt Papier.
+Status: angenommen. Der Glas-Teil ist durch 0029 ersetzt: Über dem Blatt liegt Papier. Der Farb-Absatz ist durch 0066 ersetzt: Palette der App-Familie.
 
 ## Entscheidung
 

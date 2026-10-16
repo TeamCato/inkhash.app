@@ -31,9 +31,9 @@ struct VaultSheet: View {
                     setup
                 case .needsKey:
                     if resetting { reset } else { unlock }
-                case .serverTooOld:
+                case .noInkhash:
                     Section {
-                        Text("\(host) kann noch nicht verschlüsseln. Ab jetzt gehen Notizen nur verschlüsselt zum Server, deshalb ruht der Abgleich, bis der Server aktualisiert ist. Auf diesem Gerät geht alles weiter.")
+                        Text("Auf \(host) läuft kein Kennel mit dem Modul inkhash, oder das Modul ist ausgeschaltet. Der Abgleich ruht, bis es dort läuft. Auf diesem Gerät geht alles weiter.")
                     }
                 case .ready:
                     Section { Text("Der Tresor ist offen.") }
@@ -258,9 +258,9 @@ struct VaultSection: View {
                 Button("Tresor anlegen…") { showsVault = true }
             case .needsKey:
                 Button("Tresor öffnen…") { showsVault = true }
-            case .serverTooOld:
-                Label("Der Server kann noch nicht verschlüsseln. Bitte aktualisieren.", systemImage: "exclamationmark.triangle")
-                    .foregroundStyle(.orange)
+            case .noInkhash:
+                Label("Auf diesem Server läuft inkhash nicht. Das Modul in Kennel einschalten.", systemImage: "exclamationmark.triangle")
+                    .foregroundStyle(Ink.warning)
             case .failed(let reason):
                 Text(reason).foregroundStyle(Ink.muted)
             case .unknown:

@@ -37,18 +37,37 @@ final class APIClientTests: XCTestCase {
         let page = #"{"cursor":0,"changes":[],"hasMore":false}"#
         let (main, mainRequests) = HTTPStub.client { _ in HTTPStub.json(200, page) }
         _ = try await main.changes(after: 3)
-        XCTAssertEqual(mainRequests().first?.path, "/v1/changes")
+        XCTAssertEqual(mainRequests().first?.path, "/v1/apps/inkhash/changes")
         XCTAssertEqual(mainRequests().first?.query, "after=3")
         let (other, otherRequests) = HTTPStub.client(workspace: "abc") { _ in HTTPStub.json(200, page) }
         _ = try await other.changes(after: 0)
-        XCTAssertEqual(otherRequests().first?.path, "/v1/workspaces/abc/changes")
+        XCTAssertEqual(otherRequests().first?.path, "/v1/apps/inkhash/workspaces/abc/changes")
+    }
+
+    func testHealthReadsTheModuleOfKennel() async throws {
+        let kennel = #"{"ok":true,"server":"kennel","version":"0.1.0","registration":"closed","modules":{"inkhash":{"title":"inkhash","encryption":"required","vault":true,"workspaces":true,"pairing":true}}}"#
+        let (client, requests) = HTTPStub.client { _ in HTTPStub.json(200, kennel) }
+        let health = try await client.health()
+        XCTAssertEqual(requests().first?.path, "/v1/health")
+        XCTAssertEqual(health.server, "kennel")
+        XCTAssertEqual(health.inkhash?.pairing, true)
+        XCTAssertTrue(health.vault)
+    }
+
+    func testHealthWithoutTheModuleHasNoVault() async throws {
+        // The old inkhashd, or a Kennel with inkhash switched off.
+        let old = #"{"ok":true,"registration":"closed","version":"0.6.0","vault":true}"#
+        let (client, _) = HTTPStub.client { _ in HTTPStub.json(200, old) }
+        let health = try await client.health()
+        XCTAssertNil(health.inkhash)
+        XCTAssertFalse(health.vault)
     }
 
     func testVaultIsNilWithoutOne() async throws {
         let (client, requests) = HTTPStub.client { _ in HTTPStub.json(404, #"{"error":"no-vault"}"#) }
         let vault = try await client.vault()
         XCTAssertNil(vault)
-        XCTAssertEqual(requests().first?.path, "/v1/vault")
+        XCTAssertEqual(requests().first?.path, "/v1/apps/inkhash/vault")
     }
 
     func testCreatingASecondVaultHandsBackTheFirst() async throws {

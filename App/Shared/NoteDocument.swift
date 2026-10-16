@@ -414,8 +414,8 @@ final class MarkerLayoutManager: NSLayoutManager {
         #endif
     }
 
-    private static var capsuleFill: PlatformColor { PlatformColor(red: 0.992, green: 0.992, blue: 0.988, alpha: 1) }
-    private static var capsuleRule: PlatformColor { PlatformColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 0.12) }
+    private static var capsuleFill: PlatformColor { PlatformColor(red: 0.992, green: 0.984, blue: 0.969, alpha: 1) }
+    private static var capsuleRule: PlatformColor { PlatformColor(red: 0.059, green: 0.129, blue: 0.220, alpha: 0.12) }
 
     private func draw(_ text: String, font: PlatformFont, color: PlatformColor, right: CGFloat, baseline: CGFloat) {
         let string = NSAttributedString(string: text, attributes: [.font: font, .foregroundColor: color])
@@ -499,10 +499,10 @@ final class MarkerLayoutManager: NSLayoutManager {
         }
     }
 
-    private static var headerWash: PlatformColor { PlatformColor(red: 0.24, green: 0.435, blue: 0.66, alpha: 0.05) }
-    private static var headerRule: PlatformColor { PlatformColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 0.28) }
-    private static var rowRule: PlatformColor { PlatformColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 0.09) }
-    private static var zebraWash: PlatformColor { PlatformColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 0.03) }
+    private static var headerWash: PlatformColor { PlatformColor(red: 0.306, green: 0.420, blue: 0.478, alpha: 0.05) }
+    private static var headerRule: PlatformColor { PlatformColor(red: 0.059, green: 0.129, blue: 0.220, alpha: 0.28) }
+    private static var rowRule: PlatformColor { PlatformColor(red: 0.059, green: 0.129, blue: 0.220, alpha: 0.09) }
+    private static var zebraWash: PlatformColor { PlatformColor(red: 0.059, green: 0.129, blue: 0.220, alpha: 0.03) }
 
     private func fill(_ rect: CGRect) {
         #if os(macOS)
@@ -529,10 +529,10 @@ final class MarkerLayoutManager: NSLayoutManager {
     }
 
     private static var mutedColor: PlatformColor {
-        PlatformColor(red: 0.42, green: 0.44, blue: 0.47, alpha: 1)
+        PlatformColor(red: 0.404, green: 0.447, blue: 0.482, alpha: 1)
     }
 
     private static var codeColor: PlatformColor {
-        PlatformColor(red: 0.11, green: 0.115, blue: 0.125, alpha: 0.045)
+        PlatformColor(red: 0.059, green: 0.129, blue: 0.220, alpha: 0.045)
     }
 }

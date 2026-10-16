@@ -5,13 +5,47 @@ public enum RegistrationMode: String, Codable, Sendable {
     case closed
 }
 
+/// What Kennel says about itself. The app syncs only with a Kennel that runs the module `inkhash` (ADR 0067).
 public struct ServerHealth: Codable, Equatable, Sendable {
     public var ok: Bool
     public var registration: RegistrationMode
-    /// The server's release, e.g. `0.4.0`. Nil for servers that do not tell yet.
+    /// `kennel`. Nil for anything else, e.g. the old inkhashd.
+    public var server: String?
+    /// The server's release.
     public var version: String?
-    /// True for servers that keep vaults (ADR 0052). Older servers leave it out.
+    /// Switched-on modules and what each can do.
+    public var modules: [String: ModuleInfo]?
+
+    public init(ok: Bool, registration: RegistrationMode, server: String? = nil, version: String? = nil, modules: [String: ModuleInfo]? = nil) {
+        self.ok = ok
+        self.registration = registration
+        self.server = server
+        self.version = version
+        self.modules = modules
+    }
+
+    /// The module of this app, nil if the server does not run it.
+    public var inkhash: ModuleInfo? { modules?[APIClient.module] }
+
+    /// True when the server keeps vaults for inkhash (ADR 0052). Kennel's module always does.
+    public var vault: Bool { inkhash?.vault == true }
+}
+
+/// One module in `/v1/health`: its title and the capabilities the app asks for instead of versions.
+public struct ModuleInfo: Codable, Equatable, Sendable {
+    public var title: String?
+    public var encryption: String?
     public var vault: Bool?
+    public var workspaces: Bool?
+    public var pairing: Bool?
+
+    public init(title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil) {
+        self.title = title
+        self.encryption = encryption
+        self.vault = vault
+        self.workspaces = workspaces
+        self.pairing = pairing
+    }
 }
 
 public struct ServerAccount: Codable, Equatable, Sendable {
@@ -74,6 +108,10 @@ public struct WorkspaceLook: Equatable, Sendable {
 public struct APIClient: NoteTransport, Sendable {
     /// The workspace every account has. Its notes are also served without the workspace prefix.
     public static let mainWorkspace = "main"
+    /// This app's module on Kennel.
+    public static let module = "inkhash"
+    /// Where the module's routes live. Signing in, sessions and passwords stay in Kennel's core under `/v1`.
+    public static let appPrefix = "/v1/apps/\(module)"
 
     public var baseURL: URL
     public var token: String
@@ -88,9 +126,9 @@ public struct APIClient: NoteTransport, Sendable {
         self.session = session
     }
 
-    /// `main` keeps the old unprefixed routes, so it also works against servers without workspaces.
+    /// `main` keeps the routes without `/workspaces/{ws}`.
     private var notePrefix: String {
-        workspace == Self.mainWorkspace ? "/v1" : "/v1/workspaces/\(workspace)"
+        workspace == Self.mainWorkspace ? Self.appPrefix : "\(Self.appPrefix)/workspaces/\(workspace)"
     }
 
     /// Servers before workspaces answer 404; they only have `main`.
@@ -100,7 +138,7 @@ public struct APIClient: NoteTransport, Sendable {
 
     public func workspaceList() async throws -> RemoteWorkspaceList {
         do {
-            let data = try await send(url: try endpoint("/v1/workspaces"), method: "GET", body: nil, contentType: nil)
+            let data = try await send(url: try endpoint("\(Self.appPrefix)/workspaces"), method: "GET", body: nil, contentType: nil)
             return try InkhashJSON.decode(RemoteWorkspaceList.self, from: data)
         } catch APIError.notFound {
             return RemoteWorkspaceList(workspaces: [RemoteWorkspace(id: Self.mainWorkspace, name: "Privat")], ordered: nil)
@@ -109,7 +147,7 @@ public struct APIClient: NoteTransport, Sendable {
 
     public func createWorkspace(name: String) async throws -> RemoteWorkspace {
         let data = try await send(
-            url: try endpoint("/v1/workspaces"),
+            url: try endpoint("\(Self.appPrefix)/workspaces"),
             method: "POST",
             body: try InkhashJSON.encode(["name": name]),
             contentType: "application/json"
@@ -122,7 +160,7 @@ public struct APIClient: NoteTransport, Sendable {
         var body: [String: Any] = ["name": look.name, "symbol": look.symbol]
         body["icon"] = look.icon ?? NSNull()
         let data = try await send(
-            url: try endpoint("/v1/workspaces/\(id)"),
+            url: try endpoint("\(Self.appPrefix)/workspaces/\(id)"),
             method: "PATCH",
             body: try JSONSerialization.data(withJSONObject: body, options: [.sortedKeys]),
             contentType: "application/json"
@@ -132,7 +170,7 @@ public struct APIClient: NoteTransport, Sendable {
 
     /// Deletes a workspace on the server, for every device. `main` cannot be deleted. See ADR 0045.
     public func deleteWorkspace(id: String) async throws {
-        _ = try await send(url: try endpoint("/v1/workspaces/\(id)"), method: "DELETE", body: nil, contentType: nil)
+        _ = try await send(url: try endpoint("\(Self.appPrefix)/workspaces/\(id)"), method: "DELETE", body: nil, contentType: nil)
     }
 
     /// How many notes outside the trash a workspace on the server holds, read from its change log.
@@ -153,7 +191,7 @@ public struct APIClient: NoteTransport, Sendable {
 
     public func orderWorkspaces(ids: [String]) async throws -> RemoteWorkspaceList {
         let data = try await send(
-            url: try endpoint("/v1/workspace-order"),
+            url: try endpoint("\(Self.appPrefix)/workspace-order"),
             method: "PUT",
             body: try InkhashJSON.encode(["ids": ids]),
             contentType: "application/json"
@@ -211,7 +249,7 @@ public struct APIClient: NoteTransport, Sendable {
     /// The account's vault, or nil while it has none.
     public func vault() async throws -> VaultRecord? {
         do {
-            let data = try await send(url: try endpoint("/v1/vault"), method: "GET", body: nil, contentType: nil)
+            let data = try await send(url: try endpoint("\(Self.appPrefix)/vault"), method: "GET", body: nil, contentType: nil)
             return try InkhashJSON.decode(VaultRecord.self, from: data)
         } catch APIError.notFound {
             return nil
@@ -222,7 +260,7 @@ public struct APIClient: NoteTransport, Sendable {
     public func putVault(_ record: VaultRecord) async throws -> VaultRecord {
         var sent = record
         sent.epoch = nil
-        let data = try await send(url: try endpoint("/v1/vault"), method: "PUT", body: try InkhashJSON.encode(sent), contentType: "application/json")
+        let data = try await send(url: try endpoint("\(Self.appPrefix)/vault"), method: "PUT", body: try InkhashJSON.encode(sent), contentType: "application/json")
         return try InkhashJSON.decode(VaultRecord.self, from: data)
     }
 
@@ -230,7 +268,7 @@ public struct APIClient: NoteTransport, Sendable {
     public func resetVault(password: String) async throws {
         do {
             _ = try await send(
-                url: try endpoint("/v1/vault"), method: "DELETE",
+                url: try endpoint("\(Self.appPrefix)/vault"), method: "DELETE",
                 body: try InkhashJSON.encode(["password": password]), contentType: "application/json"
             )
         } catch let APIError.badStatus(code, body) where code == 403 && body.contains("wrong-password") {
@@ -247,7 +285,7 @@ public struct APIClient: NoteTransport, Sendable {
     /// Leaves the sealed account key on the server for five minutes, replacing an open pairing.
     public func offerPairing(_ id: UUID, sealed: String) async throws {
         _ = try await send(
-            url: try endpoint("/v1/vault/pairings/\(id.uuidString.lowercased())"), method: "PUT",
+            url: try endpoint("\(Self.appPrefix)/vault/pairings/\(id.uuidString.lowercased())"), method: "PUT",
             body: try InkhashJSON.encode(PairingBody(sealed: sealed)), contentType: "application/json"
         )
     }
@@ -255,7 +293,7 @@ public struct APIClient: NoteTransport, Sendable {
     /// Takes the sealed account key off the server. Nil if it expired, was taken or withdrawn.
     public func takePairing(_ id: UUID) async throws -> String? {
         do {
-            let data = try await send(url: try endpoint("/v1/vault/pairings/\(id.uuidString.lowercased())"), method: "GET", body: nil, contentType: nil)
+            let data = try await send(url: try endpoint("\(Self.appPrefix)/vault/pairings/\(id.uuidString.lowercased())"), method: "GET", body: nil, contentType: nil)
             return try InkhashJSON.decode(PairingBody.self, from: data).sealed
         } catch APIError.notFound {
             return nil
@@ -263,7 +301,7 @@ public struct APIClient: NoteTransport, Sendable {
     }
 
     public func withdrawPairing(_ id: UUID) async throws {
-        _ = try await send(url: try endpoint("/v1/vault/pairings/\(id.uuidString.lowercased())"), method: "DELETE", body: nil, contentType: nil)
+        _ = try await send(url: try endpoint("\(Self.appPrefix)/vault/pairings/\(id.uuidString.lowercased())"), method: "DELETE", body: nil, contentType: nil)
     }
 
     // MARK: Notes as they lie on the server

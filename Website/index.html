@@ -8,16 +8,18 @@
   <link rel="icon" href="mark.svg" type="image/svg+xml">
   <link rel="apple-touch-icon" href="app-icon.png">
   <style>
-    /* Palette mirrors App/Shared/Theme.swift (Ink) and ADR 0011: light only, anthracite, one quiet blue. */
+    /* Palette mirrors App/Shared/Theme.swift (Ink) and ADR 0066: deep blue ink on warm paper, blue grey, sage, warm sand. Light only. */
     :root {
-      --paper: #fdfdfc;
-      --desk-top: #f6f6f7;
-      --desk-bottom: #eceef0;
-      --ink: #1c1d20;
-      --muted: #6b7078;
-      --accent: #3d6fa8;
-      --wordmark: #5a616c;
-      --line: rgba(28, 29, 32, 0.08);
+      --paper: #fdfbf7;
+      --desk-top: #fbf8f1;
+      --desk-bottom: #f3e6d2;
+      --ink: #0f2138;
+      --muted: #67727b;
+      --accent: #4e6b7a;
+      --wordmark: #3c454d;
+      --sage: #7c9a85;
+      --amber: #e9b76d;
+      --line: rgba(15, 33, 56, 0.08);
       color-scheme: light;
     }
 
@@ -61,6 +63,7 @@
     .logo:hover { text-decoration: none; }
     .logo img { width: 26px; height: 26px; }
     .logo span { font-size: 19px; font-weight: 600; letter-spacing: -0.4px; }
+    .logo b { font-weight: inherit; color: var(--ink); }
 
     header nav { display: flex; gap: 20px; font-size: 15px; }
     header nav a { color: var(--muted); }
@@ -104,7 +107,7 @@
     }
     .button:hover { text-decoration: none; background: rgba(255, 255, 255, 0.85); }
     .button.primary { background: var(--ink); color: var(--paper); border-color: var(--ink); }
-    .button.primary:hover { background: #2c2e33; }
+    .button.primary:hover { background: #22364f; }
     .button[aria-disabled="true"] { cursor: default; }
     .button small { font-weight: 500; font-size: 13px; opacity: 0.6; }
     .button svg { width: 18px; height: 18px; flex: none; }
@@ -161,7 +164,7 @@
   <header>
     <a class="logo" href="#top" aria-label="inkhash">
       <img src="mark.svg" alt="">
-      <span>inkhash</span>
+      <span><b>ink</b>hash</span>
     </a>
     <nav>
       <a class="hide-sm" href="#app">App</a>
@@ -224,19 +227,19 @@
 
     <section class="sheet" id="server">
       <h2>Dein Server, oder keiner.</h2>
-      <p class="intro">Es gibt keine inkhash-Cloud. Wer Geräte abgleichen will, betreibt einen kleinen Container selbst. Er speichert und gleicht ab – lesen, erkennen und rendern tut er nicht.</p>
+      <p class="intro">Es gibt keine inkhash-Cloud. Wer Geräte abgleichen will, betreibt Kennel selbst, den Server für den ganzen Haushalt. Er speichert und gleicht ab – lesen, erkennen und rendern tut er nicht.</p>
       <div class="grid">
         <div>
           <h3>Ein Container</h3>
-          <p><code>docker compose up</code>, Setup-Token aus dem Log, Admin im Browser anlegen. Fertig.</p>
+          <p>Kennel starten, Setup-Token aus dem Log, Admin im Browser anlegen, Modul inkhash einschalten. Fertig.</p>
         </div>
         <div>
           <h3>Accounts ohne E-Mail</h3>
           <p>Name und Passwort. Der Admin legt weitere Accounts an, jeder hat seine eigenen Notizen.</p>
         </div>
         <div>
-          <h3>Sicherung ist ein Ordner</h3>
-          <p>Das Datenverzeichnis kopieren. Kein iCloud, kein zweites Sync-Ziel, nichts dazwischen.</p>
+          <h3>Eine Sicherung für alles</h3>
+          <p>Kennel sichern, und alle Apps des Haushalts sind gesichert. Kein iCloud, kein zweites Sync-Ziel.</p>
         </div>
       </div>
     </section>

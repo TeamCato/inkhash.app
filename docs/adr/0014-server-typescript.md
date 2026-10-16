@@ -1,6 +1,6 @@
 # 0014 Server ist TypeScript auf Node
 
-Status: angenommen
+Status: angenommen. Ersetzt durch 0067: Der Server ist Kennel.
 
 Ersetzt 0007.
 

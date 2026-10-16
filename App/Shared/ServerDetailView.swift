@@ -42,12 +42,12 @@ struct ServerDetailView: View {
             Section {
                 LabeledContent("Adresse", value: server.url)
                 LabeledContent("Account", value: server.accountName)
-                LabeledContent("Server-Version", value: loadingRemotes ? "…" : version ?? "unbekannt, älter als 0.5.0")
+                LabeledContent("Server-Version", value: loadingRemotes ? "…" : version ?? "unbekannt")
             }
             if !loadingRemotes, !keepsLooks {
                 Section {
-                    Label("Dieser Server ist älter als Version 0.2.0. Bild, Symbol und Reihenfolge bleiben auf jedem Gerät für sich, und Workspaces lassen sich nicht löschen. Bitte den Server aktualisieren.", systemImage: "exclamationmark.triangle")
-                        .foregroundStyle(.orange)
+                    Label("Dieser Server merkt sich Bild, Symbol und Reihenfolge der Workspaces nicht, und Workspaces lassen sich nicht löschen.", systemImage: "exclamationmark.triangle")
+                        .foregroundStyle(Ink.warning)
                 }
             }
             VaultSection(serverID: serverID)

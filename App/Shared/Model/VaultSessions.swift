@@ -11,8 +11,8 @@ enum VaultState: Equatable {
     case needsKey(VaultRecord)
     /// The key is in the keychain and matches the server's vault.
     case ready(VaultKey)
-    /// The server keeps no vaults. Syncing waits for an update.
-    case serverTooOld
+    /// The server is no Kennel running the module inkhash. Syncing rests. See ADR 0067.
+    case noInkhash
     case failed(String)
 }
 
@@ -56,8 +56,8 @@ final class VaultSessions {
         guard let client = sessions.client(for: server) else { return }
         do {
             let health = try await client.health()
-            guard health.vault == true else {
-                set(.serverTooOld, for: server)
+            guard health.vault else {
+                set(.noInkhash, for: server)
                 return
             }
             let stored = Self.storedKey(for: server)
@@ -218,7 +218,7 @@ final class VaultSessions {
     private func set(_ state: VaultState, for server: UUID) {
         states[server] = state
         switch state {
-        case .needsSetup, .needsKey, .serverTooOld:
+        case .needsSetup, .needsKey, .noInkhash:
             if prompt == nil, !postponed.contains(server) { prompt = server }
         case .ready:
             if prompt == server { prompt = nil }

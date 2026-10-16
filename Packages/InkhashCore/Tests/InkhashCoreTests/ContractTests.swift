@@ -1,8 +1,8 @@
 import XCTest
 @testable import InkhashCore
 
-/// The Swift client against the real server, started by `tools/contract-test.sh`. Skipped
-/// without it. Each test uses accounts of its own on the shared server.
+/// The Swift client against a real Kennel with the module inkhash, started by
+/// `tools/contract-test.sh`. Skipped without it. See ADR 0067. Each test uses accounts of its own on the shared server.
 @MainActor
 final class ContractTests: XCTestCase {
     private static let rounds = 100_000
@@ -74,22 +74,24 @@ final class ContractTests: XCTestCase {
 
     func testHealthSaysVault() async throws {
         let health = try await APIClient(baseURL: url, token: "").health()
-        XCTAssertEqual(health.vault, true)
+        XCTAssertTrue(health.vault)
+        XCTAssertEqual(health.server, "kennel")
     }
 
-    func testAPlainAccountMovesToItsVaultAndASecondDeviceReadsIt() async throws {
+    func testNotesNeedAVaultAndASecondDeviceReadsThem() async throws {
         let client = try await account()
         let store = try freshStore()
         let notes = try fill(store)
-        // Before the vault: an app from before syncs plain, then trashes one note.
-        _ = try await Syncer.sync(store: store, transport: client)
-        var trashed = try XCTUnwrap(store.note(id: notes[2].id))
-        trashed.deletedAt = "2026-10-02T08:00:00Z"
-        try store.save(note: trashed, meta: LocalMeta(dirty: true, conflict: false))
-        _ = try await Syncer.sync(store: store, transport: client)
-        guard case .plain = try await client.fetchWire(id: notes[0].id) else { return XCTFail("expected plain") }
+        // Kennel takes no plain notes, with or without a vault.
+        do {
+            _ = try await client.putNote(notes[0], baseRevision: 0)
+            XCTFail("plain note accepted")
+        } catch let APIError.badStatus(code, body) {
+            XCTAssertEqual(code, 400)
+            XCTAssertTrue(body.contains("sealed"))
+        }
 
-        // The vault, then the move.
+        // The vault, then the first sync, sealed.
         let none = try await client.vault()
         XCTAssertNil(none)
         let recoveryKey = RecoveryKey.generate()
@@ -101,19 +103,18 @@ final class ContractTests: XCTestCase {
         let report = try await Syncer.sync(store: store, transport: SealedTransport(wire: client, sealer: sealer), sealedWith: key.keyId)
         XCTAssertEqual(report.rejected, [])
         XCTAssertEqual(store.sealedKey(), key.keyId)
+        var trashed = try XCTUnwrap(store.note(id: notes[2].id))
+        trashed.deletedAt = "2026-10-02T08:00:00Z"
+        try store.save(note: trashed, meta: LocalMeta(dirty: true, conflict: false))
+        _ = try await Syncer.sync(store: store, transport: SealedTransport(wire: client, sealer: sealer), sealedWith: key.keyId)
         for note in notes {
-            guard case .sealed(let sealed) = try await client.fetchWire(id: note.id) else { return XCTFail("still plain: \(note.id)") }
+            guard case .sealed(let sealed) = try await client.fetchWire(id: note.id) else { return XCTFail("plain on the server: \(note.id)") }
             XCTAssertEqual(sealed.deletedAt != nil, note.id == notes[2].id)
         }
-        // Plain blobs are gone from the server; sealed ones are there.
         for name in try XCTUnwrap(store.note(id: notes[1].id)?.pages?.first).blobNames {
-            do {
-                _ = try await client.fetchBlob(sha256: name)
-                XCTFail("plain blob still there")
-            } catch APIError.notFound {}
             _ = try await client.fetchBlob(sha256: sealer.blobName(name))
         }
-        // A plain write is refused now.
+        // A plain write is refused with a vault too.
         do {
             _ = try await client.putNote(Note.newText(now: "2026-10-03T08:00:00Z"), baseRevision: 0)
             XCTFail("plain note accepted")

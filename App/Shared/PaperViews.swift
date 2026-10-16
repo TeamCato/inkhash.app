@@ -24,7 +24,7 @@ extension Paper {
 /// Lines, grid and dots, drawn in page points so they sit at the same place of the writing on
 /// every device. See ADR 0042 and, for spacing and start, ADR 0047 and 0055.
 enum PaperArt {
-    private static let ink = CGColor(srgbRed: 0.11, green: 0.115, blue: 0.125, alpha: 1)
+    private static let ink = CGColor(srgbRed: 0.059, green: 0.129, blue: 0.220, alpha: 1)
 
     /// Draws the pattern where it meets `visible`, a rectangle in page points. The context maps page
     /// points; `pixel` is one device pixel in page points, the thinnest a line may get.

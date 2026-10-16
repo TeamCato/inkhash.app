@@ -1,6 +1,6 @@
 # 0040 Kein Reverse-Proxy im Lieferumfang
 
-Status: angenommen
+Status: angenommen. Der Server ist jetzt Kennel, siehe 0067.
 
 ## Entscheidung
 
