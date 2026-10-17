@@ -39,12 +39,14 @@ ipad-device: generate
 	xcrun devicectl device process launch --device $(DEVICE) local.inkhash.ipad
 
 
-# Lays out the painted app icon from tools/AppIconArtwork.png. See ADR 0066.
+# Lays out the painted app icon from tools/AppIconArtwork.png and cuts the mark out of it. See ADR 0066.
 icon:
 	mkdir -p .build/icon
 	swiftc -parse-as-library -O App/Shared/Theme.swift tools/RenderIcon.swift -o .build/icon/render-icon
 	.build/icon/render-icon App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 	.build/icon/render-icon --mac App/Resources/Assets.xcassets/AppIcon.appiconset
+	python3 tools/cut-mark.py tools/AppIconArtwork.png App/Resources/Assets.xcassets/InkhashMark.imageset/InkhashMark.png
+	python3 tools/cut-mark.py tools/AppIconArtwork.png Website/mark.png
 
 # Spike for ADR 0024 and 0041: PDF export or .goodnotes notebook to PKDrawing blobs and PNG previews.
 # make import-spike FILE=path/to/export.pdf or notebook.goodnotes  ->  .build/import-spike/<name>/

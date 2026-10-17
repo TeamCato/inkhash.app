@@ -21,7 +21,7 @@ Fehler bleiben rot. Die Farben der Tinte zum Schreiben und die Papierfarben der 
 
 Das App-Icon ist das gemalte `#` aus Dominiks Designboard (`~/dev/teamCato/Inkhash App-Icon Designboard.png`): Pinselstriche mit Struktur, Spritzer, Papierfaser. Es liegt als Bild in `tools/AppIconArtwork.png` (1024 × 1024, aus dem Blatt geschnitten, Ecken mit Papier aus dem Blatt aufgefüllt). `make icon` legt es nur noch für iOS (volles Quadrat) und macOS (Platte nach Apples Raster) aus. Pinselstruktur und Papier lassen sich im Code nicht treu nachzeichnen; ein Bild ist hier ehrlicher als eine Annäherung.
 
-Die Bildmarke `InkhashMark` in der App und `mark.svg` der Website bleiben Vektor. Ihre Striche folgen Lage, Neigung und Stärke der Pinselstriche im Icon, ohne Struktur.
+Die Bildmarke `InkhashMark` in der App und `mark.png` der Website sind dasselbe gemalte `#`, aus `tools/AppIconArtwork.png` geschnitten: `tools/cut-mark.py` macht das Papier durchsichtig, Pinselstriche und Spritzer bleiben. Eine nachgezeichnete Vektormarke sah neben dem Icon falsch aus (Dominik, 17.10.2026).
 
 Das Wort steht zweifarbig wie auf dem Blatt: `ink` in Deep Blue, `hash` in ruhigerem Grau (`Ink.wordmark`).
 

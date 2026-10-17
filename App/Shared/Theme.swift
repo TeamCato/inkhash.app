@@ -15,8 +15,6 @@ enum Ink {
     static let warning = Color(red: 0.580, green: 0.388, blue: 0.165)
     /// The quiet half of the wordmark, `hash`. `ink` stands in `Ink.ink`.
     static let wordmark = Color(red: 0.235, green: 0.271, blue: 0.302)
-    static let mark = Color(red: 0.118, green: 0.141, blue: 0.149)
-    static let markLight = Color(red: 0.639, green: 0.557, blue: 0.478)
     /// The edge of paper on paper. White alone vanishes on the sheet, so a trace of ink joins it.
     static let hairline = Color(red: 0.059, green: 0.129, blue: 0.220).opacity(0.09)
 
@@ -163,68 +161,15 @@ struct InkToolButtonStyle: ButtonStyle {
     }
 }
 
-/// The mark is a drawn `#`, traced from the brush strokes of the app icon: two dark horizontals rising to the right,
-/// a dark right vertical and a lighter left vertical behind them. No extra slash. Strokes taper like a brush.
+/// The mark is the painted `#` of the app icon without its paper, cut by `tools/cut-mark.py` (ADR 0066).
 struct InkhashMark: View {
     var body: some View {
-        Canvas { context, size in
-            for stroke in Self.strokes {
-                // Filled one by one: overlapping caps must not cancel out the body.
-                for part in stroke.parts(in: size) {
-                    context.fill(part, with: .color(stroke.color))
-                }
-            }
-        }
-        .accessibilityLabel("inkhash")
+        Image("InkhashMark")
+            .resizable()
+            .interpolation(.high)
+            .scaledToFit()
+            .accessibilityLabel("inkhash")
     }
-
-    private struct Stroke {
-        var from: CGPoint
-        var to: CGPoint
-        var width: CGFloat
-        var color: Color
-
-        /// A filled outline with round ends that thins toward its end, like a pen lifting off.
-        func parts(in size: CGSize) -> [Path] {
-            let a = CGPoint(x: from.x * size.width, y: from.y * size.height)
-            let b = CGPoint(x: to.x * size.width, y: to.y * size.height)
-            let dx = b.x - a.x
-            let dy = b.y - a.y
-            let length = max(hypot(dx, dy), 0.001)
-            let normal = CGPoint(x: -dy / length, y: dx / length)
-            let maxHalf = max(0.6, width * size.width / 2)
-            let steps = 64
-            var left: [CGPoint] = []
-            var right: [CGPoint] = []
-            func half(_ t: CGFloat) -> CGFloat {
-                // Full width through most of the stroke, a short attack and a longer lift-off.
-                let attack = sin(min(1, t / 0.18) * .pi / 2)
-                let release = sin(min(1, (1 - t) / 0.45) * .pi / 2)
-                return maxHalf * (0.55 + 0.45 * attack) * (0.34 + 0.66 * release)
-            }
-            for i in 0...steps {
-                let t = CGFloat(i) / CGFloat(steps)
-                let h = half(t)
-                let center = CGPoint(x: a.x + dx * t, y: a.y + dy * t)
-                left.append(CGPoint(x: center.x + normal.x * h, y: center.y + normal.y * h))
-                right.append(CGPoint(x: center.x - normal.x * h, y: center.y - normal.y * h))
-            }
-            var path = Path()
-            path.addLines(left + right.reversed())
-            path.closeSubpath()
-            let caps = [(a, half(0)), (b, half(1))].map { point, h in
-                Path(ellipseIn: CGRect(x: point.x - h, y: point.y - h, width: h * 2, height: h * 2))
-            }
-            return [path] + caps
-        }
-    }
-
-    private static let strokes: [Stroke] = [
-        Stroke(from: CGPoint(x: 0.392, y: 0.154), to: CGPoint(x: 0.202, y: 0.928), width: 0.076, color: Ink.markLight),
-        Stroke(from: CGPoint(x: 0.094, y: 0.586), to: CGPoint(x: 0.905, y: 0.268), width: 0.069, color: Ink.mark),
-        Stroke(from: CGPoint(x: 0.094, y: 0.744), to: CGPoint(x: 0.862, y: 0.463), width: 0.069, color: Ink.mark),
-        Stroke(from: CGPoint(x: 0.645, y: 0.03), to: CGPoint(x: 0.375, y: 0.97), width: 0.097, color: Ink.mark),
-    ]
 }
 
 struct InkhashLogo: View {
