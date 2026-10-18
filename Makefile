@@ -1,4 +1,4 @@
-.PHONY: icon test contract-test app-test mac-test generate mac ipad iphone ipad-device import-spike
+.PHONY: icon test contract-test app-test ui-test mac-test generate mac ipad iphone ipad-device import-spike
 
 # The Swift package, then the client against Kennel's module inkhash (ADR 0067).
 test:
@@ -16,6 +16,10 @@ generate:
 # Editor tests in the iPad simulator: a real UITextView, typed into through its delegate.
 app-test: generate
 	xcodebuild -scheme Inkhash -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' -derivedDataPath .build/xcode CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES test
+
+# Vault sheets in the iPhone simulator against Kennel's test server; skipped without a Kennel checkout.
+ui-test: generate
+	tools/ui-test.sh
 
 # The Mac editor and note sheet, without the app and without the real library.
 mac-test: generate

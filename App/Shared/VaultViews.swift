@@ -241,6 +241,9 @@ enum Clipboard {
 }
 
 /// The vault in a server's settings: whether it is open, adding a device, a new recovery key.
+/// Sheets hang on their buttons, not on the section: a Form hands a section's modifiers to each
+/// row, the header and the footer, so one sheet would be presented three times. See PITFALLS.
+/// The caller checks the vault; a `.task` here would run three times for the same reason.
 struct VaultSection: View {
     @Environment(AppModel.self) private var model
     var serverID: UUID
@@ -253,11 +256,16 @@ struct VaultSection: View {
             case .ready:
                 Label("Notizen gehen verschlüsselt zum Server.", systemImage: "lock")
                 Button("Gerät hinzufügen…") { showsPairing = true }
+                    .sheet(isPresented: $showsPairing) {
+                        PairingOfferSheet(serverID: serverID)
+                    }
                 NavigationLink("Neuer Wiederherstellungsschlüssel") { RecoveryKeyRenewView(serverID: serverID) }
-            case .needsSetup:
-                Button("Tresor anlegen…") { showsVault = true }
-            case .needsKey:
-                Button("Tresor öffnen…") { showsVault = true }
+            case .needsSetup, .needsKey:
+                // One button for both: resetting turns needsKey into needsSetup while the sheet is open.
+                Button(model.vaults.state(of: serverID) == .needsSetup ? "Tresor anlegen…" : "Tresor öffnen…") { showsVault = true }
+                    .sheet(isPresented: $showsVault) {
+                        VaultSheet(serverID: serverID)
+                    }
             case .noInkhash:
                 Label("Auf diesem Server läuft inkhash nicht. Das Modul in Kennel einschalten.", systemImage: "exclamationmark.triangle")
                     .foregroundStyle(Ink.warning)
@@ -270,15 +278,6 @@ struct VaultSection: View {
             Text("Verschlüsselung")
         } footer: {
             Text("Den Schlüssel kennen nur deine Geräte, nicht der Server und nicht der Admin. Workspace-Namen und -Symbole bleiben lesbar.")
-        }
-        .sheet(isPresented: $showsVault) {
-            VaultSheet(serverID: serverID)
-        }
-        .sheet(isPresented: $showsPairing) {
-            PairingOfferSheet(serverID: serverID)
-        }
-        .task(id: serverID) {
-            if model.vaults.key(for: serverID) == nil { await model.vaults.check(serverID) }
         }
     }
 }

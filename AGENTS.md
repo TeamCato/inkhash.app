@@ -42,6 +42,7 @@ Keine Pull Requests, nie direkt auf `main` pushen. Eigener Branch auf `origin/ma
 
 - `make test` — Swift-Paket und der Vertragstest gegen Kennel (`make contract-test`, braucht einen Kennel-Checkout in `KENNEL_DIR` oder `../kennel`, sonst übersprungen)
 - `make app-test` — App-Tests im iPad-Simulator (Editor, Bibliothek, Export)
+- `make ui-test` — Tresor-Sheets im iPhone-Simulator gegen Kennels Testserver (braucht Kennel wie `make contract-test`)
 - `make mac-test` — Mac-Editor und Notizblatt ohne App-Host, mit eigener Wegwerf-Bibliothek. Schreibt Bilder nach `/tmp/inkhash-*.png` zum Ansehen
 - `make ipad-device TEAM=… DEVICE=…` — signiert aufs echte iPad oder iPhone. Braucht ein Apple-Konto in Xcode
 - `make generate` — Xcode-Projekt erzeugen

@@ -35,6 +35,7 @@ jobs:
           }
       - run: make test
       - run: make app-test
+      - run: make ui-test
       - run: make mac
       - run: make ipad
       - run: make iphone

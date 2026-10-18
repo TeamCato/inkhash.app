@@ -72,6 +72,9 @@ struct ServerDetailView: View {
         .formStyle(.grouped)
         .navigationTitle(ServerAddress.host(server.url))
         .task(id: serverID) { await loadRemotes() }
+        .task(id: serverID) {
+            if model.vaults.key(for: serverID) == nil { await model.vaults.check(serverID) }
+        }
     }
 
     private func warning(for pending: Deletion) -> String {

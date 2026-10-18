@@ -393,3 +393,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Ursache.** `TaskBoxes` nahm nur Kästchen aus einem geschlossenen Strich. Auf dem iPad gezeichnet bestehen sie oft aus einem „∩“ und dem Boden, deren Enden über die Ecken hinausstehen. Nach dem Umriss der Striche gemessen ist so ein Kästchen oben so rund wie ein O.
 **Wache.** Mehrere Striche nacheinander bilden ein Kästchen über die eingeschlossene Fläche (`EnclosedArea`) und eine gerade, waagrechte Linie oben oder unten (ADR 0065). Test `TaskBoxTests.testTheBoxesOfAWrittenPageAreFound` mit den echten Strichen einer iPad-Seite aus `docs/fixtures/ink-task-boxes.json`.
 
+
+## P-066 · Ein Sheet an einer `Section` geht dreimal auf
+
+**Symptom.** Auf dem iPhone: Tresor-Abfrage mit „Später“ weggeschoben, dann in den Einstellungen des Servers „Tresor öffnen…“. Das Fenster erscheint kurz, dann schließen sich Tresor und Einstellungen zusammen, bevor man den Schlüssel eingeben kann.
+**Ursache.** `VaultSection` hing `.sheet` und `.task` an die `Section`. In einer `Form` gibt SwiftUI die Modifier einer `Section` an jede Zeile, an Kopf und Fuß weiter: Ein Tipp präsentierte dasselbe Sheet dreimal, UIKit nahm das zurück und die Einstellungen mit. Die Prüfung des Tresors lief ebenso dreimal.
+**Wache.** Sheets hängen an ihrem Knopf, nie an einer `Section`; „Tresor anlegen…“ und „Tresor öffnen…“ sind ein Knopf, damit das Zurücksetzen (needsKey → needsSetup) das offene Sheet nicht abbaut. Die Prüfung macht `ServerDetailView`. Test `VaultUITests.testOpenVaultFromSettingsAfterPostponing` im iPhone-Simulator gegen Kennels Testserver (`make ui-test`).

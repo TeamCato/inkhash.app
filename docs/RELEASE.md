@@ -13,7 +13,7 @@ git switch -c feat/etwas origin/main
 git push -u origin feat/etwas
 ```
 
-Die Action `CI` läuft auf dem Runner auf Dominiks Mac: Fast-Forward-Prüfung, `make test`, `make app-test`, Builds für Mac, iPad und iPhone. Ist alles grün, setzt sie `main` per Fast-Forward auf den Commit. Installiert wird nicht vom Runner: Danach ruft der Agent auf dem Mac `tools/install-local.sh` auf. Ist der Branch hinter `main`, schlägt der Lauf fehl: `git rebase origin/main`, dann `git push --force-with-lease`.
+Die Action `CI` läuft auf dem Runner auf Dominiks Mac: Fast-Forward-Prüfung, `make test`, `make app-test`, `make ui-test`, Builds für Mac, iPad und iPhone. Ist alles grün, setzt sie `main` per Fast-Forward auf den Commit. Installiert wird nicht vom Runner: Danach ruft der Agent auf dem Mac `tools/install-local.sh` auf. Ist der Branch hinter `main`, schlägt der Lauf fehl: `git rebase origin/main`, dann `git push --force-with-lease`.
 
 Die Build-Nummer ist `git rev-list --count HEAD`. Die Marketing-Version bleibt, bis ein Release sie hebt.
 
