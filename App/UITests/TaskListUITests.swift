@@ -5,7 +5,10 @@ final class TaskListUITests: XCTestCase {
     /// The tasks button pushes the list over the tree, and does so again after going back. It used
     /// to change only the hidden detail column. See PITFALLS.
     @MainActor
-    func testTheTasksButtonOpensTheListOnTheIPhone() {
+    func testTheTasksButtonOpensTheListOnTheIPhone() throws {
+        guard UIDevice.current.userInterfaceIdiom == .phone else {
+            throw XCTSkip("only the iPhone collapses the split view; run make ui-test")
+        }
         let app = XCUIApplication()
         app.launch()
         let summary = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", " · ")).firstMatch
