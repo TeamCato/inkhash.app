@@ -76,6 +76,59 @@ final class ContractTests: XCTestCase {
         let health = try await APIClient(baseURL: url, token: "").health()
         XCTAssertTrue(health.vault)
         XCTAssertEqual(health.server, "kennel")
+        XCTAssertEqual(health.join, true)
+        XCTAssertEqual(health.inkhash?.appScheme, JoinLink.appScheme)
+    }
+
+    /// A join code made by `token`, as Kennel's admin page makes it. See ADR 0071.
+    private func joinCode(_ kind: String, by token: String) async throws -> String {
+        var request = URLRequest(url: url.appendingPathComponent("v1/join-codes"))
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        request.httpBody = try JSONSerialization.data(withJSONObject: ["kind": kind])
+        let (data, response) = try await URLSession.shared.data(for: request)
+        XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
+        let raw = try XCTUnwrap((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["code"] as? String)
+        return try XCTUnwrap(JoinCode.normalized(raw))
+    }
+
+    func testDeviceCodeOpensASessionOfTheSameAccount() async throws {
+        let first = try await account()
+        let code = try await joinCode("device", by: first.token)
+        // Read the way a person types it: lowercase, no dashes.
+        let typed = try XCTUnwrap(JoinCode.normalized(code.lowercased().replacingOccurrences(of: "-", with: "")))
+        let session = try await APIClient(baseURL: url, token: "").join(code: typed)
+        XCTAssertNotEqual(session.token, first.token)
+        XCTAssertNotNil(ServerAddress.accountID(session.account.id))
+        _ = try await APIClient(baseURL: url, token: session.token).workspaceList()
+        do {
+            _ = try await APIClient(baseURL: url, token: "").join(code: code)
+            XCTFail("a code is good once")
+        } catch {
+            XCTAssertEqual(error as? APIError, .unauthorized)
+        }
+    }
+
+    func testInviteAsksForAnAccountThenCreatesIt() async throws {
+        let code = try await joinCode("invite", by: adminToken)
+        let open = APIClient(baseURL: url, token: "")
+        do {
+            _ = try await open.join(code: code)
+            XCTFail("an invite needs name and password")
+        } catch {
+            XCTAssertEqual(error as? JoinError, .needsAccount)
+        }
+        do {
+            _ = try await open.join(code: code, name: "admin", password: "secretsecret")
+            XCTFail("the name is taken")
+        } catch {
+            XCTAssertEqual(error as? JoinError, .nameTaken)
+        }
+        let name = "i" + UUID().uuidString.prefix(8).lowercased()
+        let session = try await open.join(code: code, name: name, password: "secretsecret")
+        XCTAssertEqual(session.account.name, name)
+        _ = try await APIClient(baseURL: url, token: "").openSession(name: name, password: "secretsecret")
     }
 
     func testNotesNeedAVaultAndASecondDeviceReadsThem() async throws {

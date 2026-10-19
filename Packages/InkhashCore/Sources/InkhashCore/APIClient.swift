@@ -15,13 +15,16 @@ public struct ServerHealth: Codable, Equatable, Sendable {
     public var version: String?
     /// Switched-on modules and what each can do.
     public var modules: [String: ModuleInfo]?
+    /// True when the server redeems join codes at `POST /v1/join` (ADR 0071).
+    public var join: Bool?
 
-    public init(ok: Bool, registration: RegistrationMode, server: String? = nil, version: String? = nil, modules: [String: ModuleInfo]? = nil) {
+    public init(ok: Bool, registration: RegistrationMode, server: String? = nil, version: String? = nil, modules: [String: ModuleInfo]? = nil, join: Bool? = nil) {
         self.ok = ok
         self.registration = registration
         self.server = server
         self.version = version
         self.modules = modules
+        self.join = join
     }
 
     /// The module of this app, nil if the server does not run it.
@@ -38,13 +41,16 @@ public struct ModuleInfo: Codable, Equatable, Sendable {
     public var vault: Bool?
     public var workspaces: Bool?
     public var pairing: Bool?
+    /// The URL scheme of the module's app, `inkhash`, for Kennel's page `/join` (ADR 0071).
+    public var appScheme: String?
 
-    public init(title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil) {
+    public init(title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil, appScheme: String? = nil) {
         self.title = title
         self.encryption = encryption
         self.vault = vault
         self.workspaces = workspaces
         self.pairing = pairing
+        self.appScheme = appScheme
     }
 }
 
@@ -354,6 +360,44 @@ public struct APIClient: NoteTransport, Sendable {
             authorize: false
         )
         return try InkhashJSON.decode(ServerSession.self, from: data)
+    }
+
+    /// Redeems a join code (ADR 0071). Without `name` and `password` a device code opens a session
+    /// of its account; an invite then throws `JoinError.needsAccount`, and with both it creates the
+    /// account. An unusable code is `APIError.unauthorized`, a taken name `JoinError.nameTaken`.
+    public func join(code: String, name: String? = nil, password: String? = nil) async throws -> ServerSession {
+        var body = ["code": code]
+        if let name, let password {
+            body["name"] = name
+            body["password"] = password
+        }
+        do {
+            let data = try await send(
+                url: try endpoint("/v1/join"),
+                method: "POST",
+                body: try InkhashJSON.encode(body),
+                contentType: "application/json",
+                authorize: false
+            )
+            return try InkhashJSON.decode(ServerSession.self, from: data)
+        } catch let APIError.badStatus(400, answer) where name == nil && Self.reason(of: answer).map(["name", "password"].contains) == true {
+            throw JoinError.needsAccount
+        } catch let APIError.badStatus(409, answer) where Self.error(of: answer) == "name-taken" {
+            throw JoinError.nameTaken
+        }
+    }
+
+    private struct ErrorBody: Decodable {
+        var error: String?
+        var reason: String?
+    }
+
+    private static func reason(of body: String) -> String? {
+        (try? JSONDecoder().decode(ErrorBody.self, from: Data(body.utf8)))?.reason
+    }
+
+    private static func error(of body: String) -> String? {
+        (try? JSONDecoder().decode(ErrorBody.self, from: Data(body.utf8)))?.error
     }
 
     /// Changes the account's own password. Its other sessions end, this one stays. See ADR 0050.

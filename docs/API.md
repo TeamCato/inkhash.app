@@ -2,9 +2,9 @@
 
 Die App gleicht mit Kennel ab, dem Server des Haushalts, und dort mit dessen Modul `inkhash` (ADR 0067). Einen eigenen inkhash-Server gibt es nicht mehr. Kennel führt den Vertrag des Moduls in `docs/modules/inkhash.md` und verweist für Tresor, Notizen, Änderungen und Reihenfolge hierher. Diese Datei beschreibt, worauf sich die App verlässt.
 
-Basis: `http://host:8790`. Anmelden, Sitzungen, Passwort und Accounts gehören Kennels Kern unter `/v1`. Alles, was nur inkhash betrifft, liegt unter `/v1/apps/inkhash`. `GET /v1/health`, das Einrichten, das Anmelden und die Seite `/admin` sind offen. Alles andere verlangt `Authorization: Bearer <sitzung>`.
+Basis: `http://host:8790`. Anmelden, Sitzungen, Passwort und Accounts gehören Kennels Kern unter `/v1`. Alles, was nur inkhash betrifft, liegt unter `/v1/apps/inkhash`. `GET /v1/health`, das Einrichten, das Anmelden, das Einlösen eines Beitrittscodes und die Seite `/admin` sind offen. Alles andere verlangt `Authorization: Bearer <sitzung>`.
 
-Solange es keinen Account gibt, erzeugt der Server beim Start einen zufälligen Setup-Token und schreibt ihn in sein Log. Er ist kein Login und legt nur den ersten Account an, den Admin (`POST /v1/setup`). Danach gilt er nicht mehr. Weitere Accounts legt nur der Admin an (`POST /v1/accounts`), mit Name und Startpasswort. Es gibt keine E-Mail und keine Selbstregistrierung. Siehe ADR 0021.
+Solange es keinen Account gibt, erzeugt der Server beim Start einen zufälligen Setup-Token und schreibt ihn in sein Log. Er ist kein Login und legt nur den ersten Account an, den Admin (`POST /v1/setup`). Danach gilt er nicht mehr. Weitere Accounts legt der Admin an (`POST /v1/accounts`), mit Name und Startpasswort, oder wer eine Einladung des Admins einlöst und Name und Passwort selbst wählt (`POST /v1/join`, ADR 0071). Es gibt keine E-Mail und keine Selbstregistrierung. Siehe ADR 0021.
 
 Ein Account sieht nur seine eigenen Notizen. Passwörter liegen als PBKDF2-HMAC-SHA256 mit 600.000 Runden. Ältere Hashes mit weniger Runden ersetzt der nächste erfolgreiche Login. Die Sitzung ist ein Zufallswert, gespeichert nur als SHA-256. Sie endet nach 90 Tagen ohne Benutzung, danach 401. Acht Fehlversuche sperren den Namen für 15 Minuten. 30 Fehlversuche von derselben Adresse (Passwort, Setup-Token) sperren Anmelden und Einrichten für 15 Minuten; bei IPv6 zählt das /64-Netz. Laufen schon zu viele Passwortprüfungen, antwortet `POST /v1/session` sofort 429 `slow-down`. Siehe ADR 0016 und 0038.
 
@@ -14,10 +14,11 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 
 | Methode | Pfad | Bedeutung |
 | --- | --- | --- |
-| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "modules": { "inkhash": { "title", "encryption": "required", "vault": true, "workspaces": true, "pairing": true } } }`, ohne Sitzung. Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
+| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "join": true, "modules": { "inkhash": { "title", "encryption": "required", "vault": true, "workspaces": true, "pairing": true, "appScheme": "inkhash" } } }`, ohne Sitzung. Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
 | POST | `/v1/setup` | `{ "setupToken", "name", "password" }` → 201 `{ "token", "account": { "id", "name", "admin": true } }`, ohne Sitzung |
 | POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
 | DELETE | `/v1/session` | Sitzung beenden |
+| POST | `/v1/join` | Beitrittscode einlösen, ohne Sitzung (ADR 0071, Kennel ADR 0018). Die App sendet zuerst `{ "code" }`: ein Code für „Gerät hinzufügen“ → 200 `{ "token", "account" }`. Eine Einladung antwortet darauf 400 mit `reason: "name"` oder `"password"` und bleibt gültig; dann `{ "code", "name", "password" }` → 201 `{ "token", "account" }` mit neuem Account. Falscher, abgelaufener oder eingelöster Code: 401. 409 `name-taken`, 429 `slow-down` |
 | GET | `/v1/apps/inkhash/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
 | PUT | `/v1/apps/inkhash/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neuer Wiederherstellungsschlüssel). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
 | DELETE | `/v1/apps/inkhash/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts werden archiviert und sind für alle Routen weg, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
