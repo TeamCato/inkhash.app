@@ -28,7 +28,7 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 
 - Der Server speichert, liefert aus und synchronisiert. Er erkennt keine Handschrift, rendert nicht und leitet keine Tags ab.
 - Suche läuft auf dem Gerät über die lokale Bibliothek, inklusive der mitgelieferten Abschriften.
-- Nichts in der App darf einen Server voraussetzen. Ohne Anmeldung muss alles außer dem Abgleich gehen.
+- **Eigenständigkeit geht immer vor.** Nichts in der App darf einen Server voraussetzen. Ohne gehosteten Kennel und ohne Anmeldung geht alles außer dem Abgleich; Kennel wertet auf, er ist nie Voraussetzung (ADR 0017, teamCato ADR 0002).
 - Kein iCloud als Ablage oder Abgleich (iCloud Drive, CloudKit), kein zweites Sync-Ziel, kein Assistent und kein Embedding-Modell in der App. Das iCloud-Backup des Geräts ist erlaubt und erwünscht (ADR 0051).
 - Keine Notion-Datenbanken, keine Whiteboards.
 - Das iOS-Ziel läuft auf iPad und iPhone, das Layout folgt der Breite, nicht dem Gerät (ADR 0026). Auf dem Mac gibt es kein `PKCanvasView`: macOS PencilKit kann `PKDrawing` lesen, rendern und Striche bauen. Der Mac zeichnet mit der Maus über eine eigene Fläche (ADR 0058), ohne Elemente zu bearbeiten.

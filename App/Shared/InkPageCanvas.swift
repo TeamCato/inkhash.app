@@ -258,11 +258,13 @@ struct InkPageCanvas: UIViewRepresentable {
         func applyMode() {
             guard let canvas else { return }
             let mode = parent.tools.mode
-            let ours = mode != .draw || maskTarget != nil
-            canvas.drawingGestureRecognizer.isEnabled = !ours
-            canvas.drawingPolicy = ours ? .pencilOnly : parent.policy
+            // The hand only holds the paper: finger and pencil scroll, nothing draws. See ADR 0070.
+            let holding = mode == .hand && maskTarget == nil
+            let ours = (mode != .draw || maskTarget != nil) && !holding
+            canvas.drawingGestureRecognizer.isEnabled = mode == .draw && maskTarget == nil
+            canvas.drawingPolicy = mode == .draw && maskTarget == nil ? parent.policy : .pencilOnly
             // When one finger draws or frames, scrolling takes two.
-            let twoFingers = ours || parent.policy == .anyInput
+            let twoFingers = !holding && (ours || parent.policy == .anyInput)
             if canvas.panGestureRecognizer.minimumNumberOfTouches != (twoFingers ? 2 : 1) {
                 canvas.panGestureRecognizer.minimumNumberOfTouches = twoFingers ? 2 : 1
             }
@@ -624,7 +626,7 @@ struct InkPageCanvas: UIViewRepresentable {
                 return
             }
             switch parent.tools.mode {
-            case .draw:
+            case .hand, .draw:
                 drag = nil
             case .shape:
                 drag = .shape(point)
@@ -899,10 +901,14 @@ struct InkPageCanvas: View {
             .frame(width: frame.width, height: frame.height, alignment: .topLeading)
             .overlay {
                 // Where the page ends beside it, in a window wider than the page. See ADR 0057.
-                HStack {
-                    Rectangle().fill(Ink.hairline).frame(width: 1)
-                    Spacer(minLength: 0)
-                    Rectangle().fill(Ink.hairline).frame(width: 1)
+                GeometryReader { proxy in
+                    Path { path in
+                        for x in [PageEdge.width / 2, proxy.size.width - PageEdge.width / 2] {
+                            path.move(to: CGPoint(x: x, y: 0))
+                            path.addLine(to: CGPoint(x: x, y: proxy.size.height))
+                        }
+                    }
+                    .stroke(PageEdge.color, style: StrokeStyle(lineWidth: PageEdge.width, lineCap: .round, dash: PageEdge.dash))
                 }
                 .allowsHitTesting(false)
             }

@@ -6,7 +6,7 @@ Status: angenommen
 
 ## Entscheidung
 
-Eine Handschriftseite öffnet eingepasst: Sie passt sich der Breite der Fläche an, aber höchstens bis zum Maßstab 1,35, knapp über dem eines 13-Zoll-iPads hochkant (1032 von 768 Punkten), das so weiter die volle Breite füllt (`PageGeometry.maxScale`). Ist die Fläche breiter, etwa ein iPad quer oder ein breites Mac-Fenster, steht die Seite in diesem Maßstab in der Mitte. Daneben liegt die Papierfarbe der Notiz; zwei Haarlinien zeigen, wo die Seite endet.
+Eine Handschriftseite öffnet eingepasst: Sie passt sich der Breite der Fläche an, aber höchstens bis zum Maßstab 1,35, knapp über dem eines 13-Zoll-iPads hochkant (1032 von 768 Punkten), das so weiter die volle Breite füllt (`PageGeometry.maxScale`). Ist die Fläche breiter, etwa ein iPad quer oder ein breites Mac-Fenster, steht die Seite in diesem Maßstab in der Mitte. Daneben liegt die Papierfarbe der Notiz; zwei leise gepunktete Linien zeigen, wo die Seite endet (0070).
 
 Auf dem iPad zoomt man mit zwei Fingern weiter hinein, bis zum Vierfachen dieses Maßstabs, um Kleines zu zeichnen. Weiter heraus als eingepasst geht es nicht. Dreht man das Gerät oder ändert sich die Breite, steht die Seite wieder eingepasst; eine andere Seite öffnet ebenso. Der Zoom wird nicht gespeichert. Der Mac zeigt die Seite nur und zoomt nicht.
 

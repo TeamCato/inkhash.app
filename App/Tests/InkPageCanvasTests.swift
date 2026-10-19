@@ -54,6 +54,27 @@ final class InkPageCanvasTests: XCTestCase {
         XCTAssertNotEqual(coordinator.pageID, page)
     }
 
+    /// ADR 0070: a note opens holding the paper. One finger scrolls, nothing draws or erases,
+    /// until a pen or the eraser is taken up.
+    func testANoteOpensWithTheHandAndOnlyAPenDraws() {
+        let tools = coordinator.parent.tools
+        XCTAssertEqual(tools.mode, .hand)
+        coordinator.applyMode()
+        XCTAssertFalse(canvas.drawingGestureRecognizer.isEnabled)
+        XCTAssertEqual(canvas.panGestureRecognizer.minimumNumberOfTouches, 1)
+
+        tools.chooseEraser()
+        coordinator.applyMode()
+        XCTAssertTrue(canvas.drawingGestureRecognizer.isEnabled)
+
+        tools.choose(.hand)
+        coordinator.applyMode()
+        XCTAssertFalse(canvas.drawingGestureRecognizer.isEnabled)
+        XCTAssertTrue(tools.erasing, "the hand keeps the eraser for later")
+        XCTAssertEqual(InkToolState().mode, .hand, "the next note opens with the hand again")
+        tools.choose(InkPen.pen)
+    }
+
     func testAWaitingDrawingIsSavedForItsPage() {
         canvas.drawing = PKDrawing(strokes: [stroke(at: 100)])
         coordinator.canvasViewDrawingDidChange(canvas)

@@ -70,8 +70,9 @@ struct InkStrokeTool: Equatable {
 }
 
 /// What the page does with a touch. Drawing is PencilKit; the rest are page elements. See ADR 0028.
+/// `hand` only holds the page: every touch scrolls and zooms, nothing is drawn or erased. See ADR 0070.
 enum InkMode: String, Codable {
-    case draw, shape, tape, select
+    case hand, draw, shape, tape, select
 }
 
 enum ImageSource {
@@ -106,9 +107,9 @@ final class InkToolState {
         let stored = UserDefaults.standard.data(forKey: Self.storageKey).flatMap {
             try? JSONDecoder().decode(Memory.self, from: $0)
         }
-        let storedMode = stored?.mode.flatMap(InkMode.init(rawValue:)) ?? .draw
-        // A new page starts writing, not selecting.
-        mode = storedMode == .select ? .draw : storedMode
+        // A note opens with the hand: the first touch moves the paper, it never draws or erases.
+        // Pen and eraser are remembered, but only a tap on them takes them up. See ADR 0070.
+        mode = .hand
         pen = InkPen(rawValue: stored?.pen ?? "") ?? .pen
         erasing = stored?.erasing ?? false
         pixelErase = stored?.pixelErase ?? false
@@ -137,7 +138,7 @@ final class InkToolState {
     /// The color the swatches show as chosen, for what is active now.
     var currentColor: String {
         switch mode {
-        case .draw, .select: color(for: pen)
+        case .hand, .draw, .select: color(for: pen)
         case .shape: shapeColor
         case .tape: tapeColor
         }
@@ -145,7 +146,7 @@ final class InkToolState {
 
     var currentWidth: Double {
         switch mode {
-        case .draw, .select: erasing ? eraserWidth : width(for: pen)
+        case .hand, .draw, .select: erasing ? eraserWidth : width(for: pen)
         case .shape: shapeWidth
         case .tape: tapeWidth
         }
@@ -154,21 +155,21 @@ final class InkToolState {
     var swatches: [String] {
         switch mode {
         case .tape: Self.tapes
-        case .draw, .select: pen == .marker ? Self.markers + Array(Self.inks.prefix(1)) : Self.inks + Array(Self.markers.prefix(1))
+        case .hand, .draw, .select: pen == .marker ? Self.markers + Array(Self.inks.prefix(1)) : Self.inks + Array(Self.markers.prefix(1))
         case .shape: Self.inks + Array(Self.markers.prefix(1))
         }
     }
 
     var widthPresets: [Double] {
         switch mode {
-        case .draw, .select: erasing ? [10, 18, 28, 44] : pen.widths
+        case .hand, .draw, .select: erasing ? [10, 18, 28, 44] : pen.widths
         case .shape: [1.5, 3, 6, 10]
         case .tape: [24, 40, 56, 72]
         }
     }
 
-    var showsColors: Bool { !(mode == .draw && erasing) && mode != .select }
-    var showsWidths: Bool { mode != .select && !(mode == .draw && erasing && !pixelErase) }
+    var showsColors: Bool { !(mode == .draw && erasing) && mode != .select && mode != .hand }
+    var showsWidths: Bool { mode != .select && mode != .hand && !(mode == .draw && erasing && !pixelErase) }
 
     var strokeTool: InkStrokeTool {
         InkStrokeTool(
@@ -200,7 +201,7 @@ final class InkToolState {
 
     func pickColor(_ hex: String) {
         switch mode {
-        case .draw, .select: colors[pen.rawValue] = hex
+        case .hand, .draw, .select: colors[pen.rawValue] = hex
         case .shape: colors["shape"] = hex
         case .tape: tapeColor = hex
         }
@@ -222,7 +223,7 @@ final class InkToolState {
 
     func pickWidth(_ value: Double) {
         switch mode {
-        case .draw, .select:
+        case .hand, .draw, .select:
             if erasing { eraserWidth = value } else { widths[pen.rawValue] = value }
         case .shape: widths["shape"] = value
         case .tape: tapeWidth = value
@@ -319,6 +320,7 @@ struct InkToolRail: View {
 
     @ViewBuilder
     private var content: some View {
+        tool("hand.raised", title: "Hand", active: tools.mode == .hand) { tools.choose(.hand) }
         ForEach(InkPen.allCases) { pen in
             tool(pen.symbol, title: pen.title, active: tools.mode == .draw && !tools.erasing && tools.pen == pen,
                  swatch: Color(inkHex: tools.color(for: pen))) { tools.choose(pen) }

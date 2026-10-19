@@ -130,6 +130,16 @@ enum PageImage {
     #endif
 }
 
+/// Where a page ends beside it, on a surface wider than the page: a dotted line, quieter than the
+/// sheet's own pattern. See ADR 0057 and 0070.
+enum PageEdge {
+    static let color = Ink.ink.opacity(0.14)
+    /// Line width in view points; round caps turn each short dash into a dot of this size.
+    static let width: CGFloat = 1
+    static let dash: [CGFloat] = [0.5, 4.5]
+    static var period: CGFloat { dash.reduce(0, +) }
+}
+
 #if os(iOS)
 /// The pattern under the visible part of a page. It covers only what is on screen and follows the
 /// scrolling: a view over a whole 10 000 point page would hold a bitmap far too large. See ADR 0042.
@@ -165,11 +175,19 @@ final class PaperPatternView: UIView {
     override func draw(_ rect: CGRect) {
         guard scale > 0, let context = UIGraphicsGetCurrentContext() else { return }
         if edges {
-            // In view points, a hairline wide, where the page begins and ends.
-            context.setFillColor(UIColor(Ink.hairline).cgColor)
-            for x in [0, pageWidth * scale - 1] {
-                context.fill(CGRect(x: x - frame.minX, y: rect.minY, width: 1, height: rect.height))
+            // In view points, a dotted hairline where the page begins and ends. The dots keep their
+            // place on the page while it scrolls, so the phase follows the content offset.
+            context.saveGState()
+            context.setStrokeColor(UIColor(PageEdge.color).cgColor)
+            context.setLineWidth(PageEdge.width)
+            context.setLineCap(.round)
+            context.setLineDash(phase: (frame.minY + rect.minY).truncatingRemainder(dividingBy: PageEdge.period), lengths: PageEdge.dash)
+            for x in [PageEdge.width / 2, pageWidth * scale - PageEdge.width / 2] {
+                context.move(to: CGPoint(x: x - frame.minX, y: rect.minY))
+                context.addLine(to: CGPoint(x: x - frame.minX, y: rect.maxY))
             }
+            context.strokePath()
+            context.restoreGState()
         }
         guard paper.pattern != .blank else { return }
         // View points to content points to page points.
