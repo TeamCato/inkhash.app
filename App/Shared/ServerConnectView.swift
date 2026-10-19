@@ -1,18 +1,24 @@
 import InkhashCore
 import SwiftUI
 
-/// Address first, checked on its own; then only the fields this server needs. See ADR 0018.
+/// Address first, checked on its own; then only the fields this server needs. The address field
+/// also takes a join link or app link, which fills in the code. See ADR 0018 and 0071.
 struct ServerConnectView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
     var presetURL: String
     var presetName = ""
+    var presetCode = ""
 
     @State private var url = ""
+    @State private var code = ""
     @State private var name = ""
     @State private var password = ""
     @State private var busy = false
     @State private var loaded = false
+    /// The code turned out to be an invite: it needs name and password for a new account.
+    @State private var invite = false
+    @State private var scanning = false
     /// A new server after signing in: its page follows here, with the workspaces to take over.
     @State private var joined: UUID?
 
@@ -28,7 +34,7 @@ struct ServerConnectView: View {
         Form {
             Section {
                 HStack {
-                    TextField("Adresse", text: $url, prompt: Text(verbatim: "http://192.168.1.10:8790"))
+                    TextField("Adresse oder Link", text: $url, prompt: Text(verbatim: "http://192.168.1.10:8790"))
                         .labelsHidden()
                         .textContentType(.URL)
 #if os(iOS)
@@ -36,9 +42,12 @@ struct ServerConnectView: View {
                         .keyboardType(.URL)
 #endif
                         .autocorrectionDisabled()
-                        .onChange(of: url) { _, value in model.sessions.addressChanged(value) }
+                        .onChange(of: url) { _, value in addressChanged(value) }
                         .onSubmit { model.sessions.addressChanged(url) }
                     connectionIndicator
+                }
+                if QRScanner.hasCamera {
+                    Button("QR-Code scannen …", systemImage: "qrcode.viewfinder") { scanning = true }
                 }
             } header: {
                 Text("Adresse")
@@ -61,9 +70,28 @@ struct ServerConnectView: View {
             loaded = true
             url = presetURL
             name = presetName
+            code = presetCode
             model.sessions.connection = .unknown
             if !url.isEmpty { model.sessions.addressChanged(url) }
         }
+        .onChange(of: code) { _, _ in invite = false }
+        .sheet(isPresented: $scanning) {
+            QRScanSheet(accepts: JoinLink.isJoinLink) { scanned in addressChanged(scanned) }
+        }
+    }
+
+    /// A pasted, scanned or opened link splits into address and code; a plain address is checked.
+    private func addressChanged(_ value: String) {
+        if let target = JoinLink.parse(value), let linked = target.code {
+            code = linked
+            let server = target.server.absoluteString
+            if url != server {
+                // Setting the field calls this again with the plain address, which checks it.
+                url = server
+                return
+            }
+        }
+        model.sessions.addressChanged(value)
     }
 
     @ViewBuilder
@@ -107,14 +135,44 @@ struct ServerConnectView: View {
             }
         case .closed:
             Section {
-                nameField
-                SecureField("Passwort", text: $password)
-                Button("Anmelden") { submit() }
-                    .disabled(busy || name.isEmpty || password.count < 8)
+                TextField("Code", text: $code, prompt: Text(verbatim: "XXXX-XXXX-XXXX"))
+                    .labelsHidden()
+#if os(iOS)
+                    .textInputAutocapitalization(.characters)
+#endif
+                    .autocorrectionDisabled()
+                    .monospaced()
+                if !code.isEmpty && !invite {
+                    Button("Beitreten") { join() }
+                        .disabled(busy || JoinCode.normalized(code) == nil)
+                }
             } header: {
-                Text("Anmelden")
+                Text("Code")
             } footer: {
-                Text("Accounts legt der Admin unter \(ServerAddress.admin(url)) an. Welche Workspaces damit abgleichen, wählst du danach pro Workspace.")
+                Text("Mit einem Code aus Kennels Verwaltung meldest du dieses Gerät ohne Passwort an oder nimmst eine Einladung an. Ohne Code meldest du dich mit Name und Passwort an.")
+            }
+            if code.isEmpty {
+                Section {
+                    nameField
+                    SecureField("Passwort", text: $password)
+                    Button("Anmelden") { submit() }
+                        .disabled(busy || name.isEmpty || password.count < 8)
+                } header: {
+                    Text("Anmelden")
+                } footer: {
+                    Text("Accounts legt der Admin unter \(ServerAddress.admin(url)) an. Welche Workspaces damit abgleichen, wählst du danach pro Workspace.")
+                }
+            } else if invite {
+                Section {
+                    nameField
+                    SecureField("Passwort", text: $password)
+                    Button("Account anlegen") { join() }
+                        .disabled(busy || name.isEmpty || password.count < 8)
+                } header: {
+                    Text("Neuer Account")
+                } footer: {
+                    Text("Du bist eingeladen. Name und Passwort wählst du selbst, das Passwort hat mindestens 8 Zeichen.")
+                }
             }
         }
     }
@@ -132,11 +190,32 @@ struct ServerConnectView: View {
         Task {
             let server = await model.signIn(url: url, name: name, password: password)
             busy = false
-            if let server {
-                password = ""
-                // A known server shows its signed-in page in place; a new one shows it here.
-                if presetURL.isEmpty { joined = server }
+            if let server { done(server) }
+        }
+    }
+
+    /// Redeems the code: first alone, and for an invite again with name and password. See ADR 0071.
+    private func join() {
+        busy = true
+        Task {
+            let outcome = await model.join(url: url, code: code, name: invite ? name : nil, password: invite ? password : nil)
+            busy = false
+            switch outcome {
+            case .joined(let server):
+                code = ""
+                done(server)
+            case .needsAccount:
+                name = ""
+                invite = true
+            case .failed:
+                break
             }
         }
+    }
+
+    private func done(_ server: UUID) {
+        password = ""
+        // A known server shows its signed-in page in place; a new one shows it here.
+        if presetURL.isEmpty || !presetCode.isEmpty { joined = server }
     }
 }

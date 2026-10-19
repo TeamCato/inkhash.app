@@ -3,9 +3,20 @@
 <plist version="1.0">
 <dict>
   <key>NSCameraUsageDescription</key>
-  <string>Mit der Kamera scannst du den QR-Code, mit dem ein anderes Gerät dieses hier koppelt.</string>
+  <string>Mit der Kamera scannst du den QR-Code, mit dem ein anderes Gerät dieses hier koppelt oder mit dem du Kennel beitrittst.</string>
   <key>NSLocalNetworkUsageDescription</key>
   <string>Inkhash spricht nur mit dem Server, den du selbst betreibst.</string>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>local.inkhash.join</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>inkhash</string>
+      </array>
+    </dict>
+  </array>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

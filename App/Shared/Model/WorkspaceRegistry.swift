@@ -186,7 +186,8 @@ final class WorkspaceRegistry {
     /// A known address keeps its entry, so workspaces linked to it continue. Returns its id.
     func signedIn(url: String, accountName: String, accountID: String) -> UUID {
         let id: UUID
-        if let index = setup.servers.firstIndex(where: { $0.url == url }) {
+        // A join link names the server without a trailing slash; the same server may be stored with one.
+        if let index = setup.servers.firstIndex(where: { Self.sameAddress($0.url, url) }) {
             id = setup.servers[index].id
             setup.servers[index].accountName = accountName
             setup.servers[index].accountID = accountID
@@ -197,6 +198,11 @@ final class WorkspaceRegistry {
         }
         persist()
         return id
+    }
+
+    private static func sameAddress(_ a: String, _ b: String) -> Bool {
+        func plain(_ text: String) -> String { text.hasSuffix("/") ? String(text.dropLast()) : text }
+        return plain(a) == plain(b)
     }
 
     func signedOut(_ server: UUID) {

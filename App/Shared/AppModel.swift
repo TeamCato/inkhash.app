@@ -67,6 +67,8 @@ final class AppModel {
     var linkPromptToken = 0
     /// Set by the menu; the sidebar shows the file picker and clears it. See ADR 0024 and 0041.
     var importRequested = false
+    /// A join link or app link the app was opened with; the settings show the connect form for it. See ADR 0071.
+    var pendingJoin: JoinTarget?
     private var impulseToken = 0
 
     /// Where the libraries live: Application Support, which the iCloud backup of iPad and iPhone
@@ -433,6 +435,21 @@ final class AppModel {
         guard let server = await sessions.signIn(url: url, name: name, password: password) else { return nil }
         await sync()
         return server
+    }
+
+    /// Redeems a join code, then syncs. See ADR 0071.
+    func join(url: String, code: String, name: String?, password: String?) async -> JoinOutcome {
+        let outcome = await sessions.join(url: url, code: code, name: name, password: password)
+        if case .joined = outcome { await sync() }
+        return outcome
+    }
+
+    /// Takes `inkhash://kennel/join?…`; other URLs are not for this. Returns whether it was one.
+    @discardableResult
+    func open(_ url: URL) -> Bool {
+        guard url.scheme?.lowercased() == JoinLink.appScheme, let target = JoinLink.parse(url.absoluteString) else { return false }
+        pendingJoin = target
+        return true
     }
 
     /// Signs out. The vault key leaves this device with the session. See ADR 0052.

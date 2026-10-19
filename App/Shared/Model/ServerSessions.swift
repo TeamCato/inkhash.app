@@ -10,6 +10,15 @@ enum ServerConnection: Equatable {
     case failed(String)
 }
 
+/// What redeeming a join code came to. See ADR 0071.
+enum JoinOutcome: Equatable {
+    case joined(UUID)
+    /// An invite: the form asks for name and password and tries again.
+    case needsAccount
+    /// The status says why.
+    case failed
+}
+
 /// Sessions with the servers of this device: signing in and out, tokens in the keychain,
 /// expired sessions, and checking an address while it is typed. See ADR 0016 and 0020.
 @MainActor
@@ -26,6 +35,7 @@ final class ServerSessions {
 
     private static let expiredKey = "inkhash.expiredServers"
     private static let invalidAddress = "Die Adresse braucht http oder https und einen Host."
+    private static let shortPassword = "Das Passwort braucht mindestens 8 Zeichen."
 
     init(registry: WorkspaceRegistry, status: StatusLine) {
         self.registry = registry
@@ -57,31 +67,75 @@ final class ServerSessions {
         return APIClient(baseURL: url, token: token, workspace: remote)
     }
 
-    /// Signs in to the server at `raw`. Accounts are created on the server's admin page,
-    /// not here (ADR 0021). Returns the server's id, or nil when it failed; the status says why.
+    /// Signs in to the server at `raw`, an address or a link to it. Accounts are created on the
+    /// server's admin page or by an invite, not here (ADR 0021, 0071). Returns the server's id, or
+    /// nil when it failed; the status says why.
     func signIn(url raw: String, name: String, password: String) async -> UUID? {
-        guard let url = ServerAddress.valid(raw) else {
+        guard let url = JoinLink.parse(raw)?.server else {
             status.message = Self.invalidAddress
             return nil
         }
         guard password.count >= 8 else {
-            status.message = "Das Passwort braucht mindestens 8 Zeichen."
+            status.message = Self.shortPassword
             return nil
         }
         do {
             let session = try await APIClient(baseURL: url, token: "")
                 .openSession(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
-            guard let accountID = ServerAddress.accountID(session.account.id) else { throw APIError.invalidResponse }
-            let server = registry.signedIn(url: url.absoluteString, accountName: session.account.name, accountID: accountID)
-            try SecretStore.set(session.token, account: SecretStore.key(for: server))
-            tokens[server] = session.token
-            dismissExpiredNotice(server)
-            status.message = "Angemeldet."
-            return server
+            return try keep(session, from: url, message: "Angemeldet.")
         } catch {
             status.message = StatusLine.describe(error)
             return nil
         }
+    }
+
+    /// Redeems a join code at the server at `raw`. Without name and password a device code signs in;
+    /// an invite answers `needsAccount`. With both, an invite creates the account. See ADR 0071.
+    func join(url raw: String, code rawCode: String, name: String?, password: String?) async -> JoinOutcome {
+        guard let url = JoinLink.parse(raw)?.server else {
+            status.message = Self.invalidAddress
+            return .failed
+        }
+        guard let code = JoinCode.normalized(rawCode) else {
+            status.message = "Der Code hat zwölf Zeichen aus Ziffern und Buchstaben, z. B. K7Q4-2MPA-XW9D."
+            return .failed
+        }
+        var account: (name: String, password: String)?
+        if let name, let password {
+            guard password.count >= 8 else {
+                status.message = Self.shortPassword
+                return .failed
+            }
+            account = (name.trimmingCharacters(in: .whitespacesAndNewlines), password)
+        }
+        do {
+            let session = try await APIClient(baseURL: url, token: "").join(code: code, name: account?.name, password: account?.password)
+            let message = account == nil ? "Angemeldet." : "Account angelegt und angemeldet."
+            return .joined(try keep(session, from: url, message: message))
+        } catch JoinError.needsAccount {
+            status.message = "Das ist eine Einladung. Wähle Name und Passwort für deinen neuen Account."
+            return .needsAccount
+        } catch JoinError.nameTaken {
+            status.message = "Diesen Namen gibt es schon. Wähle einen anderen."
+            return .failed
+        } catch APIError.unauthorized {
+            status.message = "Der Code gilt nicht mehr oder stimmt nicht. Lass dir einen neuen geben."
+            return .failed
+        } catch {
+            status.message = StatusLine.describe(error)
+            return .failed
+        }
+    }
+
+    /// Stores a new session of `url` and returns the server's id.
+    private func keep(_ session: ServerSession, from url: URL, message: String) throws -> UUID {
+        guard let accountID = ServerAddress.accountID(session.account.id) else { throw APIError.invalidResponse }
+        let server = registry.signedIn(url: url.absoluteString, accountName: session.account.name, accountID: accountID)
+        try SecretStore.set(session.token, account: SecretStore.key(for: server))
+        tokens[server] = session.token
+        dismissExpiredNotice(server)
+        status.message = message
+        return server
     }
 
     /// Changes the account's password on `server`. Nil on success, else what went wrong, in
@@ -159,7 +213,7 @@ final class ServerSessions {
     func addressChanged(_ text: String) {
         probeTask?.cancel()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = ServerAddress.valid(trimmed) else {
+        guard let url = JoinLink.parse(trimmed)?.server else {
             connection = trimmed.isEmpty ? .unknown : .failed(Self.invalidAddress)
             return
         }

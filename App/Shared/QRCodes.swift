@@ -173,12 +173,18 @@ private final class PreviewUIView: UIView {
 }
 #endif
 
-/// Scans a pairing code and hands it on. The caller opens the vault with it. See ADR 0054.
+/// Scans a QR code that `accepts` takes and hands it on: a pairing code for the vault (ADR 0054)
+/// by default, or a join link of Kennel (ADR 0071).
 struct QRScanSheet: View {
     @Environment(\.dismiss) private var dismiss
     var onCode: (String) -> Void
-    @State private var scanner = QRScanner(accepts: Pairing.isCode)
+    @State private var scanner: QRScanner
     @State private var problem: String?
+
+    init(accepts: @escaping @Sendable (String) -> Bool = Pairing.isCode, onCode: @escaping (String) -> Void) {
+        self.onCode = onCode
+        _scanner = State(initialValue: QRScanner(accepts: accepts))
+    }
 
     var body: some View {
         NavigationStack {

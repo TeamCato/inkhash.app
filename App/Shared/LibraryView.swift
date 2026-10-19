@@ -44,6 +44,11 @@ struct RootView: View {
             }
         }
         .onAppear { Task { await model.sync() } }
+        // inkhash://kennel/join?… opens the connect form in the settings, filled in. See ADR 0071.
+        .onOpenURL { url in
+            if model.open(url) { showSettings = true }
+        }
+        .handlesExternalEvents(preferring: [JoinLink.appScheme], allowing: ["*"])
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.sync() } }
         }

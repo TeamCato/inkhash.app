@@ -71,6 +71,9 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
+            .navigationDestination(item: joinBinding) { target in
+                ServerConnectView(presetURL: target.server.absoluteString, presetCode: target.code ?? "")
+            }
             .navigationTitle("Einstellungen")
             .preferredColorScheme(.light)
             .toolbar {
@@ -81,6 +84,11 @@ struct SettingsView: View {
             }
         }
         .macSheetSize(minWidth: 480, minHeight: 480)
+    }
+
+    /// A join link the app was opened with. See ADR 0071.
+    private var joinBinding: Binding<JoinTarget?> {
+        Binding(get: { model.pendingJoin }, set: { model.pendingJoin = $0 })
     }
 
     private func target(of workspace: Workspace) -> String {
