@@ -68,7 +68,12 @@ struct SettingsView: View {
                 } header: {
                     Text("Server")
                 } footer: {
-                    Text("Optional. Ohne Server bleibt alles auf diesem Gerät. Ein Account kann mehrere Workspaces abgleichen.")
+                    VStack(alignment: .leading, spacing: 0) {
+                        Text("Optional. Ohne Server bleibt alles auf diesem Gerät. Ein Account kann mehrere Workspaces abgleichen.")
+                        MadeByTeamCato()
+                            .frame(maxWidth: .infinity)
+                            .padding(.top, 32)
+                    }
                 }
             }
             .formStyle(.grouped)
@@ -148,5 +153,35 @@ struct TextSettingsSection: View {
         case .mono: .monospaced
         }
         return .system(size: size, design: design)
+    }
+}
+
+/// "made by teamCato" at the foot of the settings, like in the other apps of the family. Links to the
+/// teamCato website.
+struct MadeByTeamCato: View {
+    @ScaledMetric(relativeTo: .footnote) private var logoHeight: CGFloat = 20
+
+    /// Fraction of the logo height where the "teamCato" wordmark sits on its baseline.
+    private static let logoBaselineRatio: CGFloat = 0.88
+    private static let website = URL(string: "https://teamcato.de")!
+
+    var body: some View {
+        Link(destination: Self.website) {
+            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                Text("made by")
+                // Template image, tinted like the text.
+                Image("TeamCatoLogo")
+                    .resizable()
+                    .interpolation(.high)
+                    .scaledToFit()
+                    .frame(height: logoHeight)
+                    .alignmentGuide(.firstTextBaseline) { $0.height * Self.logoBaselineRatio }
+                    .accessibilityLabel("teamCato")
+            }
+            .font(.footnote)
+            .foregroundStyle(Ink.muted)
+        }
+        .buttonStyle(.plain)
+        .accessibilityElement(children: .combine)
     }
 }
