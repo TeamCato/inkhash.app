@@ -7,10 +7,12 @@ struct RootView: View {
     @State private var showSettings = false
     /// The tree is the way into the notes (ADR 0022); an open note gets the whole iPad (ADR 0030).
     @State private var columns = NavigationSplitViewVisibility.all
+    /// On the iPhone the split view collapses to a stack; only this pushes the sheet over the tree.
+    @State private var compactColumn = NavigationSplitViewColumn.sidebar
     @State private var windowWidth: CGFloat = 1200
 
     var body: some View {
-        NavigationSplitView(columnVisibility: $columns) {
+        NavigationSplitView(columnVisibility: $columns, preferredCompactColumn: $compactColumn) {
             SidebarView(showSettings: $showSettings)
                 .navigationSplitViewColumnWidth(min: 240, ideal: 300, max: 440)
         } detail: {
@@ -20,6 +22,10 @@ struct RootView: View {
         .onGeometryChange(for: CGFloat.self) { $0.size.width } action: { windowWidth = $0 }
         .onChange(of: model.selectedID) { _, _ in placeSidebar() }
         .onChange(of: model.showsTasks) { _, _ in placeSidebar() }
+        .onChange(of: compactColumn) { _, column in
+            // Going back on the iPhone closes the task list, so its button opens it again.
+            if column == .sidebar, model.showsTasks, model.selectedID == nil { model.showsTasks = false }
+        }
         .onAppear { placeSidebar() }
         .hidingWindowTitle()
         .inkDesk()
@@ -61,6 +67,8 @@ struct RootView: View {
         } else if sidebarFloats {
             columns = .detailOnly
         }
+        // A note in the trash is shown too, so the stack follows any selection.
+        compactColumn = model.selectedID != nil || model.showsTasks ? .detail : .sidebar
     }
 
     @ViewBuilder

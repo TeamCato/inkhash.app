@@ -399,3 +399,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Auf dem iPhone: Tresor-Abfrage mit „Später“ weggeschoben, dann in den Einstellungen des Servers „Tresor öffnen…“. Das Fenster erscheint kurz, dann schließen sich Tresor und Einstellungen zusammen, bevor man den Schlüssel eingeben kann.
 **Ursache.** `VaultSection` hing `.sheet` und `.task` an die `Section`. In einer `Form` gibt SwiftUI die Modifier einer `Section` an jede Zeile, an Kopf und Fuß weiter: Ein Tipp präsentierte dasselbe Sheet dreimal, UIKit nahm das zurück und die Einstellungen mit. Die Prüfung des Tresors lief ebenso dreimal.
 **Wache.** Sheets hängen an ihrem Knopf, nie an einer `Section`; „Tresor anlegen…“ und „Tresor öffnen…“ sind ein Knopf, damit das Zurücksetzen (needsKey → needsSetup) das offene Sheet nicht abbaut. Die Prüfung macht `ServerDetailView`. Test `VaultUITests.testOpenVaultFromSettingsAfterPostponing` im iPhone-Simulator gegen Kennels Testserver (`make ui-test`).
+
+## P-067 · Aufgaben gehen auf dem iPhone nicht auf
+
+**Symptom.** Auf dem iPhone tut der Aufgaben-Knopf in der Seitenleiste nichts; die Aufgabenliste erscheint nie.
+**Ursache.** Auf schmalem Bildschirm klappt `NavigationSplitView` zu einem Stapel zusammen. Notizen kommen über die Auswahl der `List` nach vorn, die Aufgabenliste nur über `model.showsTasks`. Das änderte den Inhalt der verdeckten Detail-Spalte; `columnVisibility` wirkt im zusammengeklappten Zustand nicht.
+**Wache.** `RootView` bindet `preferredCompactColumn` und stellt es auf `.detail`, sobald eine Notiz oder die Aufgaben zu zeigen sind. Zurück zur Seitenleiste schließt die Aufgaben, damit der Knopf sie wieder öffnet. Test `TaskListUITests.testTheTasksButtonOpensTheListOnTheIPhone` (`make ui-test`).
