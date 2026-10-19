@@ -67,6 +67,13 @@ public enum JoinLink {
         return JoinTarget(server: server, code: components.fragment.flatMap(JoinCode.normalized))
     }
 
+    /// The join link for `code` at `server`: `<server>/join#<code>`.
+    public static func link(server: URL, code: String) -> String {
+        var base = server.absoluteString
+        while base.hasSuffix("/") { base.removeLast() }
+        return "\(base)/join#\(code)"
+    }
+
     /// Whether a scanned QR code is a join link with a code. Plain addresses do not count.
     public static func isJoinLink(_ text: String) -> Bool {
         parse(text)?.code != nil
@@ -79,6 +86,32 @@ public enum JoinLink {
               let server = ServerAddress.valid(raw) else { return nil }
         let code = items.first(where: { $0.name == "code" })?.value.flatMap(JoinCode.normalized)
         return JoinTarget(server: server, code: code)
+    }
+}
+
+/// A join code the account made itself, as `POST /v1/join-codes` answers. Only then is `code`
+/// in clear text. See ADR 0072, Kennel ADR 0018.
+public struct IssuedJoinCode: Codable, Equatable, Sendable {
+    public var id: String
+    /// `device` or `invite`.
+    public var kind: String
+    public var code: String
+    public var createdAt: String?
+    public var expiresAt: String
+
+    public init(id: String, kind: String, code: String, createdAt: String? = nil, expiresAt: String) {
+        self.id = id
+        self.kind = kind
+        self.code = code
+        self.createdAt = createdAt
+        self.expiresAt = expiresAt
+    }
+
+    /// When the code stops working, nil if the server's time is unreadable.
+    public var expiry: Date? {
+        let fractional = ISO8601DateFormatter()
+        fractional.formatOptions = [.withInternetDateTime, .withFractionalSeconds]
+        return fractional.date(from: expiresAt) ?? ISO8601DateFormatter().date(from: expiresAt)
     }
 }
 

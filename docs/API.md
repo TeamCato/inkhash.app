@@ -19,6 +19,8 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
 | DELETE | `/v1/session` | Sitzung beenden |
 | POST | `/v1/join` | Beitrittscode einlösen, ohne Sitzung (ADR 0071, Kennel ADR 0018). Die App sendet zuerst `{ "code" }`: ein Code für „Gerät hinzufügen“ → 200 `{ "token", "account" }`. Eine Einladung antwortet darauf 400 mit `reason: "name"` oder `"password"` und bleibt gültig; dann `{ "code", "name", "password" }` → 201 `{ "token", "account" }` mit neuem Account. Falscher, abgelaufener oder eingelöster Code: 401. 409 `name-taken`, 429 `slow-down` |
+| POST | `/v1/join-codes` | `{ "kind": "device" }` → 201 `{ "id", "kind", "createdBy", "createdAt", "expiresAt", "code" }`. Ein Code für ein weiteres Gerät dieses Accounts, 15 Minuten, einmal (ADR 0072). Nur hier steht der Code im Klartext |
+| DELETE | `/v1/join-codes/{id}` | Zurückziehen → 204. Schon eingelöst, abgelaufen oder unbekannt: 404 |
 | GET | `/v1/apps/inkhash/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
 | PUT | `/v1/apps/inkhash/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neuer Wiederherstellungsschlüssel). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
 | DELETE | `/v1/apps/inkhash/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts werden archiviert und sind für alle Routen weg, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |

@@ -387,6 +387,22 @@ public struct APIClient: NoteTransport, Sendable {
         }
     }
 
+    /// A code for another device of this account: good once, for 15 minutes. See ADR 0072.
+    public func createDeviceCode() async throws -> IssuedJoinCode {
+        let data = try await send(
+            url: try endpoint("/v1/join-codes"),
+            method: "POST",
+            body: try InkhashJSON.encode(["kind": "device"]),
+            contentType: "application/json"
+        )
+        return try InkhashJSON.decode(IssuedJoinCode.self, from: data)
+    }
+
+    /// Withdraws an open code. One that is used, expired or gone already is `APIError.notFound`.
+    public func revokeJoinCode(id: String) async throws {
+        _ = try await send(url: try endpoint("/v1/join-codes/\(id)"), method: "DELETE", body: nil, contentType: nil)
+    }
+
     private struct ErrorBody: Decodable {
         var error: String?
         var reason: String?

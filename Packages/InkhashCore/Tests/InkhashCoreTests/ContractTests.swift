@@ -110,6 +110,32 @@ final class ContractTests: XCTestCase {
         }
     }
 
+    func testAppMakesADeviceCodeAndRevokesAnother() async throws {
+        let first = try await account()
+        let issued = try await first.createDeviceCode()
+        XCTAssertEqual(issued.kind, "device")
+        XCTAssertNotNil(issued.expiry)
+        let link = JoinLink.link(server: url, code: issued.code)
+        let target = try XCTUnwrap(JoinLink.parse(link))
+        let session = try await APIClient(baseURL: target.server, token: "").join(code: try XCTUnwrap(target.code))
+        _ = try await APIClient(baseURL: url, token: session.token).workspaceList()
+
+        let withdrawn = try await first.createDeviceCode()
+        try await first.revokeJoinCode(id: withdrawn.id)
+        do {
+            _ = try await APIClient(baseURL: url, token: "").join(code: withdrawn.code)
+            XCTFail("a withdrawn code is no good")
+        } catch {
+            XCTAssertEqual(error as? APIError, .unauthorized)
+        }
+        do {
+            try await first.revokeJoinCode(id: withdrawn.id)
+            XCTFail("withdrawn twice")
+        } catch {
+            XCTAssertEqual(error as? APIError, .notFound)
+        }
+    }
+
     func testInviteAsksForAnAccountThenCreatesIt() async throws {
         let code = try await joinCode("invite", by: adminToken)
         let open = APIClient(baseURL: url, token: "")
