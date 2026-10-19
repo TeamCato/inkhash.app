@@ -53,6 +53,7 @@ struct ServerDetailView: View {
             VaultSection(serverID: serverID)
             onServer
             Section {
+                NavigationLink("Weiteres Gerät verbinden …") { DeviceCodeView(serverID: serverID) }
                 NavigationLink("Passwort ändern") { PasswordChangeView(serverID: serverID) }
                 Button("Abmelden") { model.logout(serverID) }
                 Button("Server entfernen", role: .destructive) { confirmRemoval = true }

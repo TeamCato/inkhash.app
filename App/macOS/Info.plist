@@ -15,6 +15,12 @@
       </array>
     </dict>
   </array>
+  <key>NSLocalNetworkUsageDescription</key>
+  <string>Inkhash spricht nur mit dem Kennel, den du selbst betreibst, und sucht ihn im Heimnetz.</string>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_kennel._tcp</string>
+  </array>
   <key>NSAppTransportSecurity</key>
   <dict>
     <key>NSAllowsLocalNetworking</key>

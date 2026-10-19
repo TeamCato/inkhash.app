@@ -19,6 +19,12 @@ enum JoinOutcome: Equatable {
     case failed
 }
 
+/// Why no device code came, in words for the sheet.
+struct DeviceCodeProblem: Error, Equatable {
+    var message: String
+    init(_ message: String) { self.message = message }
+}
+
 /// Sessions with the servers of this device: signing in and out, tokens in the keychain,
 /// expired sessions, and checking an address while it is typed. See ADR 0016 and 0020.
 @MainActor
@@ -148,6 +154,37 @@ final class ServerSessions {
             return nil
         } catch APIError.wrongPassword {
             return "Das bisherige Passwort stimmt nicht."
+        } catch APIError.unauthorized {
+            expire(server, ifStill: client.token)
+            return StatusLine.describe(APIError.unauthorized)
+        } catch {
+            return StatusLine.describe(error)
+        }
+    }
+
+    /// A code for another device of the account on `server`, or what went wrong. See ADR 0072.
+    func createDeviceCode(on server: UUID) async -> Result<IssuedJoinCode, DeviceCodeProblem> {
+        guard let client = client(for: server) else { return .failure(DeviceCodeProblem("Nicht angemeldet.")) }
+        do {
+            return .success(try await client.createDeviceCode())
+        } catch APIError.unauthorized {
+            expire(server, ifStill: client.token)
+            return .failure(DeviceCodeProblem(StatusLine.describe(APIError.unauthorized)))
+        } catch APIError.notFound {
+            return .failure(DeviceCodeProblem("Dieser Kennel kann noch keine Codes für Geräte erzeugen. Ein Update von Kennel hilft."))
+        } catch {
+            return .failure(DeviceCodeProblem(StatusLine.describe(error)))
+        }
+    }
+
+    /// Withdraws a device code. Nil on success, also when it was used or expired already, else what went wrong.
+    func revokeJoinCode(_ id: String, on server: UUID) async -> String? {
+        guard let client = client(for: server) else { return "Nicht angemeldet." }
+        do {
+            try await client.revokeJoinCode(id: id)
+            return nil
+        } catch APIError.notFound {
+            return nil
         } catch APIError.unauthorized {
             expire(server, ifStill: client.token)
             return StatusLine.describe(APIError.unauthorized)

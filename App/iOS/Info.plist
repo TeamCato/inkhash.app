@@ -5,7 +5,7 @@
   <key>NSCameraUsageDescription</key>
   <string>Mit der Kamera scannst du den QR-Code, mit dem ein anderes Gerät dieses hier koppelt oder mit dem du Kennel beitrittst.</string>
   <key>NSLocalNetworkUsageDescription</key>
-  <string>Inkhash spricht nur mit dem Server, den du selbst betreibst.</string>
+  <string>Inkhash spricht nur mit dem Kennel, den du selbst betreibst, und sucht ihn im Heimnetz.</string>
   <key>CFBundleURLTypes</key>
   <array>
     <dict>
@@ -16,6 +16,10 @@
         <string>inkhash</string>
       </array>
     </dict>
+  </array>
+  <key>NSBonjourServices</key>
+  <array>
+    <string>_kennel._tcp</string>
   </array>
   <key>NSAppTransportSecurity</key>
   <dict>

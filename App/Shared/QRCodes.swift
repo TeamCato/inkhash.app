@@ -14,6 +14,7 @@ import UIKit
 /// Draws a text as a QR code, sharp at any size.
 struct QRCodeView: View {
     let text: String
+    var label = "QR-Code zum Koppeln"
 
     var body: some View {
         if let image = Self.render(text) {
@@ -23,7 +24,7 @@ struct QRCodeView: View {
                 .aspectRatio(1, contentMode: .fit)
                 .padding(12)
                 .background(Color.white, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
-                .accessibilityLabel("QR-Code zum Koppeln")
+                .accessibilityLabel(label)
         } else {
             Text("Der QR-Code ließ sich nicht erzeugen.").foregroundStyle(Ink.muted)
         }

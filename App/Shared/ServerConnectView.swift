@@ -19,6 +19,9 @@ struct ServerConnectView: View {
     /// The code turned out to be an invite: it needs name and password for a new account.
     @State private var invite = false
     @State private var scanning = false
+    /// Kennel announced in the home network; a suggestion, the address field stays. See ADR 0072.
+    @State private var finder = KennelFinder()
+    @State private var resolving: String?
     /// A new server after signing in: its page follows here, with the workspaces to take over.
     @State private var joined: UUID?
 
@@ -54,6 +57,9 @@ struct ServerConnectView: View {
             } footer: {
                 Text(connectionText)
             }
+            if !finder.found.isEmpty {
+                foundSection
+            }
             if case .reachable(let mode) = model.sessions.connection {
                 accountSection(mode)
             }
@@ -75,8 +81,45 @@ struct ServerConnectView: View {
             if !url.isEmpty { model.sessions.addressChanged(url) }
         }
         .onChange(of: code) { _, _ in invite = false }
+        .onAppear { finder.start() }
+        .onDisappear { finder.stop() }
         .sheet(isPresented: $scanning) {
             QRScanSheet(accepts: JoinLink.isJoinLink) { scanned in addressChanged(scanned) }
+        }
+    }
+
+    private var foundSection: some View {
+        Section {
+            ForEach(finder.found, id: \.self) { name in
+                Button {
+                    pick(name)
+                } label: {
+                    HStack {
+                        Label(name, systemImage: "server.rack")
+                        Spacer()
+                        if resolving == name { ProgressView().controlSize(.small) }
+                    }
+                }
+                .disabled(resolving != nil)
+            }
+        } header: {
+            Text("Im Netz gefunden")
+        } footer: {
+            Text("Ein Tipp trägt die Adresse ein. Angemeldet wird erst mit Code oder Name und Passwort.")
+        }
+    }
+
+    /// Resolves a found Kennel and puts its address into the field, which checks it.
+    private func pick(_ name: String) {
+        resolving = name
+        Task {
+            let address = await finder.address(of: name)
+            resolving = nil
+            if let address {
+                url = address.absoluteString
+            } else {
+                model.status = "„\(name)“ ließ sich nicht erreichen. Gib die Adresse von Hand ein."
+            }
         }
     }
 
