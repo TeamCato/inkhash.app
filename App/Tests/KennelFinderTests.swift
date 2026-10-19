@@ -1,4 +1,5 @@
 import XCTest
+import InkhashCore
 @testable import Inkhash
 
 /// The finder with a browser that answers like Bonjour would, without the network.

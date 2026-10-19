@@ -405,3 +405,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Auf dem iPhone tut der Aufgaben-Knopf in der Seitenleiste nichts; die Aufgabenliste erscheint nie.
 **Ursache.** Auf schmalem Bildschirm klappt `NavigationSplitView` zu einem Stapel zusammen. Notizen kommen über die Auswahl der `List` nach vorn, die Aufgabenliste nur über `model.showsTasks`. Das änderte den Inhalt der verdeckten Detail-Spalte; `columnVisibility` wirkt im zusammengeklappten Zustand nicht.
 **Wache.** `RootView` bindet `preferredCompactColumn` und stellt es auf `.detail`, sobald eine Notiz oder die Aufgaben zu zeigen sind. Zurück zur Seitenleiste schließt die Aufgaben, damit der Knopf sie wieder öffnet. Test `TaskListUITests.testTheTasksButtonOpensTheListOnTheIPhone` (`make ui-test`).
+
+## P-068 · Gefundener Kennel ohne gültige Adresse
+
+**Symptom.** Unter „Im Netz gefunden“ steht ein Kennel, aber ein Tipp trägt nichts ein; die Adresse gilt als ungültig.
+**Ursache.** Nach dem Auflösen über `NWConnection` trägt die IPv4-Adresse die Schnittstelle im Text (`192.168.1.5%en0`). Aus `"\(address)"` entsteht damit keine URL.
+**Wache.** `KennelDiscovery.address(host:port:)` baut IPv4 aus den Bytes (`rawValue`). Test `KennelDiscoveryTests.testResolvedIPv4LosesItsInterface`.

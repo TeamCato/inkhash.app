@@ -1,3 +1,4 @@
+import Network
 import XCTest
 @testable import InkhashCore
 
@@ -13,6 +14,12 @@ final class KennelDiscoveryTests: XCTestCase {
     func testIPv6GetsBracketsAndAnEscapedZone() {
         XCTAssertEqual(KennelDiscovery.address(host: "fe80::1%en0", port: 8790)?.absoluteString, "http://[fe80::1%25en0]:8790")
         XCTAssertEqual(KennelDiscovery.address(host: "fd00::5", port: 80)?.absoluteString, "http://[fd00::5]:80")
+    }
+
+    func testResolvedIPv4LosesItsInterface() throws {
+        let scoped = try XCTUnwrap(IPv4Address("192.168.1.5%en0"))
+        XCTAssertEqual(KennelDiscovery.address(host: .ipv4(scoped), port: 8790)?.absoluteString, "http://192.168.1.5:8790")
+        XCTAssertEqual(KennelDiscovery.address(host: .name("kennel-ab12.local.", nil), port: 8790)?.absoluteString, "http://kennel-ab12.local:8790")
     }
 
     func testEmptyHostOrPortIsNothing() {
