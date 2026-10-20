@@ -162,7 +162,7 @@ struct MadeByTeamCato: View {
     @ScaledMetric(relativeTo: .footnote) private var logoHeight: CGFloat = 20
 
     /// Fraction of the logo height where the "teamCato" wordmark sits on its baseline.
-    private static let logoBaselineRatio: CGFloat = 0.83
+    private nonisolated static let logoBaselineRatio: CGFloat = 0.83
     private static let website = URL(string: "https://teamcato.de")!
 
     var body: some View {
