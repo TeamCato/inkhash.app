@@ -41,6 +41,10 @@ jobs:
             echo "::error::Branch liegt hinter main. git rebase origin/main, dann git push --force-with-lease."
             exit 1
           }
+      # The build folder stays between runs (clean: false). When SwiftPM checks out a new KennelKit there, Xcode may
+      # keep its old module and the app fails against it; KennelKit builds afresh in seconds.
+      - name: Fresh KennelKit build
+        run: rm -rf .build/xcode/Build/Intermediates.noindex/KennelKit*.build .build/xcode/Build/Products/*/KennelKit*
       - run: make test
       - run: make app-test
       - run: make ui-test
