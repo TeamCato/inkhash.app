@@ -49,7 +49,7 @@ Diese Wörter heißen im Code so.
 | Beitrittscode | Einmal-Code aus Kennels Verwaltung, zwölf Zeichen, angezeigt `XXXX-XXXX-XXXX` (`JoinCode`). „Gerät hinzufügen“ meldet ohne Passwort am selben Account an, eine „Einladung“ legt einen neuen Account an (`POST /v1/join`, ADR 0071). |
 | Beitrittslink | `<server>/join#<code>`, auch als QR-Code in Kennels Verwaltung. Belegt Adresse und Code vor (`JoinLink` aus KennelKit, ADR 0073). |
 | App-Link | `inkhash://kennel/join?server=…&code=…`, öffnet das Verbinden-Fenster vorbelegt (ADR 0071). |
-| Im Netz gefunden | Kennel, die sich per Bonjour (`_kennel._tcp`) im Heimnetz ankündigen; ein Vorschlag fürs Adressfeld (`KennelFinder`, ADR 0072). |
+| Im Netz gefunden | Kennel, die sich per Bonjour (`_kennel._tcp`) im Heimnetz ankündigen; ein Vorschlag fürs Adressfeld (`KennelConnectSection` aus KennelKitUI, ADR 0072, 0074). |
 | sealed | Eine Notiz oder ein Blob, verschlüsselt mit dem Schlüssel des Accounts (`Sealer`). `schemaVersion: 2` auf dem Draht. |
 | epoch | Zahl der Resets eines Tresors. Ändert die Bindung der Bibliotheken (`Workspaces.bindingKey`). |
 

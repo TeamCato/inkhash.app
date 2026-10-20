@@ -1,4 +1,5 @@
 import InkhashCore
+import KennelKitUI
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -63,9 +64,10 @@ struct VaultSheet: View {
                 if key != nil { dismiss() }
             }
             .sheet(isPresented: $scanning) {
-                QRScanSheet { code in
+                KennelQRScanSheet(accepts: Pairing.isCode) { code in
                     run { await model.unlockVault(on: serverID, pairingCode: code) }
                 }
+                .kennelBrand(.inkhash)
             }
         }
         .macSheetSize(minWidth: 480, minHeight: 520)
@@ -100,7 +102,7 @@ struct VaultSheet: View {
             Text("Die Notizen auf \(host) sind verschlüsselt. Öffne den Tresor mit einem Gerät, auf dem er schon offen ist, oder mit dem Wiederherstellungsschlüssel.")
         }
         Section {
-            if QRScanner.hasCamera {
+            if KennelQRScanSheet.canScan {
                 Button("QR-Code scannen…") { scanning = true }
             } else {
                 Text("Dieses Gerät hat keine Kamera. Nimm den Wiederherstellungsschlüssel.")
@@ -303,7 +305,7 @@ struct PairingOfferSheet: View {
                     TimelineView(.periodic(from: .now, by: 1)) { context in
                         let left = expiresAt.timeIntervalSince(context.date)
                         VStack(spacing: 14) {
-                            QRCodeView(text: pairing.code)
+                            KennelQRCodeView(pairing.code, label: "QR-Code zum Koppeln")
                                 .frame(maxWidth: 260)
                                 .opacity(left > 0 ? 1 : 0.15)
                             if left > 0 {

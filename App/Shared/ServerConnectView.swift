@@ -1,28 +1,18 @@
 import InkhashCore
-import SwiftUI
 import KennelKit
+import KennelKitUI
+import SwiftUI
 
-/// Address first, checked on its own; then only the fields this server needs. The address field
-/// also takes a join link or app link, which fills in the code. See ADR 0018 and 0071.
+/// „Server verbinden“ with KennelKitUI's sections: found Kennels, address or link, code, name and password, and the
+/// new account of an invite. After signing in, the server's page follows. See ADR 0018, 0071, 0072, 0074.
 struct ServerConnectView: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     var presetURL: String
     var presetName = ""
     var presetCode = ""
 
-    @State private var url = ""
-    @State private var code = ""
-    @State private var name = ""
-    @State private var password = ""
-    @State private var busy = false
-    @State private var loaded = false
-    /// The code turned out to be an invite: it needs name and password for a new account.
-    @State private var invite = false
-    @State private var scanning = false
-    /// Kennel announced in the home network; a suggestion, the address field stays. See ADR 0072.
-    @State private var finder = KennelFinder()
-    @State private var resolving: String?
+    /// One instance for the form's life: the address of a found name is resolved by the browser that found it.
+    @State private var discovery = KennelDiscovery()
     /// A new server after signing in: its page follows here, with the workspaces to take over.
     @State private var joined: UUID?
 
@@ -30,235 +20,49 @@ struct ServerConnectView: View {
         if let joined {
             ServerDetailView(serverID: joined)
         } else {
-            form
-        }
-    }
-
-    private var form: some View {
-        Form {
-            Section {
-                HStack {
-                    TextField("Adresse oder Link", text: $url, prompt: Text(verbatim: "http://192.168.1.10:8790"))
-                        .labelsHidden()
-                        .textContentType(.URL)
-#if os(iOS)
-                        .textInputAutocapitalization(.never)
-                        .keyboardType(.URL)
-#endif
-                        .autocorrectionDisabled()
-                        .onChange(of: url) { _, value in addressChanged(value) }
-                        .onSubmit { model.sessions.addressChanged(url) }
-                    connectionIndicator
-                }
-                if QRScanner.hasCamera {
-                    Button("QR-Code scannen …", systemImage: "qrcode.viewfinder") { scanning = true }
-                }
-            } header: {
-                Text("Adresse")
-            } footer: {
-                Text(connectionText)
-            }
-            if !finder.found.isEmpty {
-                foundSection
-            }
-            if case .reachable(let mode) = model.sessions.connection {
-                accountSection(mode)
-            }
-            if !StatusLine.isRoutine(model.status) {
-                Text(model.status)
-                    .font(.system(size: 12))
-                    .foregroundStyle(Ink.muted)
-            }
-        }
-        .formStyle(.grouped)
-        .navigationTitle(presetURL.isEmpty ? "Server verbinden" : ServerAddress.host(presetURL))
-        .onAppear {
-            guard !loaded else { return }
-            loaded = true
-            url = presetURL
-            name = presetName
-            code = presetCode
-            model.sessions.connection = .unknown
-            if !url.isEmpty { model.sessions.addressChanged(url) }
-        }
-        .onChange(of: code) { _, _ in invite = false }
-        .onAppear { finder.start() }
-        .onDisappear { finder.stop() }
-        .sheet(isPresented: $scanning) {
-            QRScanSheet(accepts: JoinLinks.isJoinLink) { scanned in addressChanged(scanned) }
-        }
-    }
-
-    private var foundSection: some View {
-        Section {
-            ForEach(finder.found, id: \.self) { name in
-                Button {
-                    pick(name)
-                } label: {
-                    HStack {
-                        Label(name, systemImage: "server.rack")
-                        Spacer()
-                        if resolving == name { ProgressView().controlSize(.small) }
-                    }
-                }
-                .disabled(resolving != nil)
-            }
-        } header: {
-            Text("Im Netz gefunden")
-        } footer: {
-            Text("Ein Tipp trägt die Adresse ein. Angemeldet wird erst mit Code oder Name und Passwort.")
-        }
-    }
-
-    /// Resolves a found Kennel and puts its address into the field, which checks it.
-    private func pick(_ name: String) {
-        resolving = name
-        Task {
-            let address = await finder.address(of: name)
-            resolving = nil
-            if let address {
-                url = address.absoluteString
-            } else {
-                model.status = "„\(name)“ ließ sich nicht erreichen. Gib die Adresse von Hand ein."
-            }
-        }
-    }
-
-    /// A pasted, scanned or opened link splits into address and code; a plain address is checked.
-    private func addressChanged(_ value: String) {
-        if let target = JoinLinks.parse(value), let linked = target.code {
-            code = linked.description
-            let server = target.address.absoluteString
-            if url != server {
-                // Setting the field calls this again with the plain address, which checks it.
-                url = server
-                return
-            }
-        }
-        model.sessions.addressChanged(value)
-    }
-
-    @ViewBuilder
-    private var connectionIndicator: some View {
-        switch model.sessions.connection {
-        case .checking:
-            ProgressView().controlSize(.small)
-        case .reachable:
-            Image(systemName: "checkmark.circle.fill").foregroundStyle(Ink.sage)
-        case .failed:
-            Image(systemName: "xmark.circle.fill").foregroundStyle(.red)
-        case .unknown:
-            EmptyView()
-        }
-    }
-
-    private var connectionText: String {
-        switch model.sessions.connection {
-        case .unknown:
-            "Die Adresse deines Servers, im lokalen Netz mit http."
-        case .checking:
-            "Prüfe die Verbindung …"
-        case .reachable(.setup):
-            "Server erreichbar, aber noch nicht eingerichtet."
-        case .reachable(.closed):
-            "Server erreichbar."
-        case .failed(let reason):
-            reason
-        }
-    }
-
-    @ViewBuilder
-    private func accountSection(_ mode: RegistrationMode) -> some View {
-        switch mode {
-        case .setup:
-            Section {
-                Text("Öffne \(ServerAddress.admin(url)) im Browser. Mit dem Setup-Token aus dem Log des Servers legst du dort den Admin an. Mit dem meldest du dich danach hier an.")
-                    .textSelection(.enabled)
-            } header: {
-                Text("Einrichten")
-            }
-        case .closed:
-            Section {
-                TextField("Code", text: $code, prompt: Text(verbatim: "XXXX-XXXX-XXXX"))
-                    .labelsHidden()
-#if os(iOS)
-                    .textInputAutocapitalization(.characters)
-#endif
-                    .autocorrectionDisabled()
-                    .monospaced()
-                if !code.isEmpty && !invite {
-                    Button("Beitreten") { join() }
-                        .disabled(busy || JoinCode(code) == nil)
-                }
-            } header: {
-                Text("Code")
-            } footer: {
-                Text("Mit einem Code aus Kennels Verwaltung meldest du dieses Gerät ohne Passwort an oder nimmst eine Einladung an. Ohne Code meldest du dich mit Name und Passwort an.")
-            }
-            if code.isEmpty {
-                Section {
-                    nameField
-                    SecureField("Passwort", text: $password)
-                    Button("Anmelden") { submit() }
-                        .disabled(busy || name.isEmpty || password.count < 8)
-                } header: {
-                    Text("Anmelden")
-                } footer: {
-                    Text("Accounts legt der Admin unter \(ServerAddress.admin(url)) an. Welche Workspaces damit abgleichen, wählst du danach pro Workspace.")
-                }
-            } else if invite {
-                Section {
-                    nameField
-                    SecureField("Passwort", text: $password)
-                    Button("Account anlegen") { join() }
-                        .disabled(busy || name.isEmpty || password.count < 8)
-                } header: {
-                    Text("Neuer Account")
-                } footer: {
-                    Text("Du bist eingeladen. Name und Passwort wählst du selbst, das Passwort hat mindestens 8 Zeichen.")
+            Form {
+                KennelConnectSection(
+                    appScheme: JoinLinks.scheme, check: KennelAddressCheck(module: APIClient.module),
+                    discovery: discovery, canScan: true, prefill: prefill, name: presetName,
+                    footer: "Accounts legt der Admin in Kennels Verwaltung an. Welche Workspaces damit abgleichen, wählst du danach pro Workspace."
+                ) { request in
+                    await connect(request)
                 }
             }
+            .formStyle(.grouped)
+            .kennelBrand(.inkhash)
+            .navigationTitle(presetURL.isEmpty ? "Server verbinden" : ServerAddress.host(presetURL))
         }
     }
 
-    private var nameField: some View {
-        TextField("Name", text: $name)
-#if os(iOS)
-            .textInputAutocapitalization(.never)
-#endif
-            .autocorrectionDisabled()
+    private var prefill: JoinLink? {
+        JoinLinks.parse(presetURL).map { JoinLink(address: $0.address, code: JoinCode(presetCode) ?? $0.code) }
     }
 
-    private func submit() {
-        busy = true
-        Task {
-            let server = await model.signIn(url: url, name: name, password: password)
-            busy = false
-            if let server { done(server) }
-        }
-    }
-
-    /// Redeems the code: first alone, and for an invite again with name and password. See ADR 0071.
-    private func join() {
-        busy = true
-        Task {
-            let outcome = await model.join(url: url, code: code, name: invite ? name : nil, password: invite ? password : nil)
-            busy = false
-            switch outcome {
+    private func connect(_ request: KennelConnectRequest) async -> KennelConnectOutcome {
+        switch request {
+        case .signIn(let address, let name, let password):
+            guard let server = await model.signIn(url: address.absoluteString, name: name, password: password) else {
+                return .failed(model.status)
+            }
+            done(server)
+            return .connected
+        case .join(let address, let code, let account):
+            switch await model.join(
+                url: address.absoluteString, code: code.description, name: account?.name, password: account?.password)
+            {
             case .joined(let server):
-                code = ""
                 done(server)
+                return .connected
             case .needsAccount:
-                name = ""
-                invite = true
+                return .needsAccount
             case .failed:
-                break
+                return .failed(model.status)
             }
         }
     }
 
     private func done(_ server: UUID) {
-        password = ""
         // A known server shows its signed-in page in place; a new one shows it here.
         if presetURL.isEmpty || !presetCode.isEmpty { joined = server }
     }

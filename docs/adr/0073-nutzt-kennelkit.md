@@ -19,5 +19,5 @@ Xoot und inkhash hatten dieselben Teile zweimal (teamCato ADR 0006). Mit KennelK
 
 ## Nicht
 
-- Keine Fenster aus `KennelKitUI` in diesem Schritt; die eigenen Ansichten bleiben, bis es sie gibt.
+- Keine Fenster aus `KennelKitUI` in diesem Schritt; die kamen mit ADR 0074.
 - Kein gemeinsamer Login mit anderen Apps.

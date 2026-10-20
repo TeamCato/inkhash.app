@@ -3,14 +3,6 @@ import InkhashCore
 import Observation
 import KennelKit
 
-/// What the app knows about the address typed into the server form.
-enum ServerConnection: Equatable {
-    case unknown
-    case checking
-    case reachable(RegistrationMode)
-    case failed(String)
-}
-
 /// What redeeming a join code came to. See ADR 0071.
 enum JoinOutcome: Equatable {
     case joined(UUID)
@@ -20,23 +12,15 @@ enum JoinOutcome: Equatable {
     case failed
 }
 
-/// Why no device code came, in words for the sheet.
-struct DeviceCodeProblem: Error, Equatable {
-    var message: String
-    init(_ message: String) { self.message = message }
-}
-
 /// Sessions with the servers of this device: signing in and out, tokens in the keychain,
-/// expired sessions, and checking an address while it is typed. See ADR 0016 and 0020.
+/// and expired sessions. The connect form checks addresses itself (KennelKitUI, ADR 0074). See ADR 0016 and 0020.
 @MainActor
 @Observable
 final class ServerSessions {
-    var connection: ServerConnection = .unknown
     /// Servers whose session the server rejected. Shows a notice until signing in or dismissing it.
     private(set) var expired: Set<UUID>
     /// Sessions by server, as the keychain holds them. A server without one is signed out.
     private var sessions: [UUID: KennelSession] = [:]
-    @ObservationIgnored private var probeTask: Task<Void, Never>?
     private let registry: WorkspaceRegistry
     private let status: StatusLine
 
@@ -178,34 +162,25 @@ final class ServerSessions {
         }
     }
 
-    /// A code for another device of the account on `server`, or what went wrong. See ADR 0072.
-    func createDeviceCode(on server: UUID) async -> Result<IssuedJoinCode, DeviceCodeProblem> {
-        guard let client = client(for: server) else { return .failure(DeviceCodeProblem("Nicht angemeldet.")) }
+    /// A code for another device of the account on `server` (ADR 0072). An ended session also ends here.
+    func issueDeviceCode(on server: UUID) async throws -> IssuedJoinCode {
+        guard let client = client(for: server) else { throw KennelError.unauthorized }
         do {
-            return .success(try await client.kennel.issueJoinCode(.device))
+            return try await client.kennel.issueJoinCode(.device)
         } catch KennelError.unauthorized {
             expire(server, ifStill: client.token)
-            return .failure(DeviceCodeProblem(StatusLine.describe(KennelError.unauthorized)))
-        } catch let error as KennelError where error.status == 404 {
-            return .failure(DeviceCodeProblem("Dieser Kennel kann noch keine Codes für Geräte erzeugen. Ein Update von Kennel hilft."))
-        } catch {
-            return .failure(DeviceCodeProblem(StatusLine.describe(error)))
+            throw KennelError.unauthorized
         }
     }
 
-    /// Withdraws a device code. Nil on success, also when it was used or expired already, else what went wrong.
-    func revokeJoinCode(_ id: String, on server: UUID) async -> String? {
-        guard let client = client(for: server) else { return "Nicht angemeldet." }
+    /// Withdraws a device code. One that is used or expired already is gone too: KennelKitUI takes its `404` as done.
+    func revokeDeviceCode(_ id: String, on server: UUID) async throws {
+        guard let client = client(for: server) else { throw KennelError.unauthorized }
         do {
             try await client.kennel.revokeJoinCode(id)
-            return nil
-        } catch let error as KennelError where error.status == 404 {
-            return nil
         } catch KennelError.unauthorized {
             expire(server, ifStill: client.token)
-            return StatusLine.describe(KennelError.unauthorized)
-        } catch {
-            return StatusLine.describe(error)
+            throw KennelError.unauthorized
         }
     }
 
@@ -258,32 +233,6 @@ final class ServerSessions {
     func version(of server: UUID) async -> String? {
         guard let entry = registry.server(server), let url = URL(string: entry.url) else { return nil }
         return try? await KennelClient(address: url).health().version
-    }
-
-    static let noInkhash = "Unter dieser Adresse läuft kein Kennel mit inkhash. Ist das Modul in der Verwaltung eingeschaltet?"
-
-    /// Checks the address as it is typed, after a short pause.
-    func addressChanged(_ text: String) {
-        probeTask?.cancel()
-        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = JoinLinks.parse(trimmed)?.address else {
-            connection = trimmed.isEmpty ? .unknown : .failed(Self.invalidAddress)
-            return
-        }
-        connection = .checking
-        probeTask = Task {
-            try? await Task.sleep(nanoseconds: 600_000_000)
-            guard !Task.isCancelled else { return }
-            do {
-                let health = try await KennelClient(address: url).health()
-                guard !Task.isCancelled else { return }
-                // inkhash syncs only with Kennel's module, not with the old inkhashd. See ADR 0067.
-                connection = health.inkhash == nil ? .failed(Self.noInkhash) : .reachable(health.registrationMode)
-            } catch {
-                guard !Task.isCancelled else { return }
-                connection = .failed(StatusLine.describe(error))
-            }
-        }
     }
 
     private func endSession(of server: UUID) {

@@ -20,7 +20,7 @@ final class VaultUITests: XCTestCase {
         app.launch()
         app.buttons["Einstellungen"].firstMatch.tap()
         app.buttons["Server verbinden"].firstMatch.tap()
-        let address = app.textFields.matching(NSPredicate(format: "placeholderValue CONTAINS %@", "192.168")).firstMatch
+        let address = app.textFields.matching(NSPredicate(format: "placeholderValue CONTAINS %@", "kennel.local")).firstMatch
         XCTAssertTrue(address.waitForExistence(timeout: 5))
         address.tap()
         address.typeText(url.absoluteString + "\n")
