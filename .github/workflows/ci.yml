@@ -21,8 +21,16 @@ jobs:
     if: github.repository_owner == 'teamCato' && github.actor == 'nikdom'
     runs-on: [self-hosted, macOS]
     timeout-minutes: 90
+    # KennelKit comes from the private repository kennel (ADR 0073). The runner has the Mac user's SSH key but no
+    # HTTPS login, so GitHub URLs go over SSH for this job only, without touching the user's git config.
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: url.git@github.com:.insteadOf
+      GIT_CONFIG_VALUE_0: https://github.com/
     steps:
       - uses: actions/checkout@v5
+        env:
+          GIT_CONFIG_COUNT: "0"
         with:
           fetch-depth: 0
           clean: false
