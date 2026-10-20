@@ -1,6 +1,7 @@
 import InkhashCore
 import XCTest
 @testable import Inkhash
+import KennelKit
 
 /// P-027: a session the server no longer knows ends here too, but only the one that was used.
 @MainActor
@@ -25,6 +26,16 @@ final class SessionTests: LibraryTestCase {
         XCTAssertTrue(sessions.isSignedIn(server))
         XCTAssertEqual(sessions.client(for: server)?.token, "alt")
         XCTAssertEqual(sessions.client(for: server, workspace: "w1")?.workspace, "w1")
+    }
+
+    func testABareTokenFromBeforeKennelKitBecomesAWholeSession() throws {
+        _ = ServerSessions(registry: registry, status: status)
+        let stored = try XCTUnwrap(SecretStore.get(account: SecretStore.key(for: server)))
+        let session = try JSONDecoder().decode(KennelSession.self, from: Data(stored.utf8))
+        XCTAssertEqual(session.token, "alt")
+        XCTAssertEqual(session.address.absoluteString, "http://127.0.0.1:9")
+        XCTAssertEqual(session.account.name, "ada")
+        XCTAssertTrue(ServerSessions(registry: registry, status: status).isSignedIn(server), "and reads back as JSON")
     }
 
     func testAnOldRequestDoesNotEndANewSession() {

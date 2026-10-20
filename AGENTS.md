@@ -41,6 +41,7 @@ Direkt auf `main` arbeiten. Keine Pull Requests, Dominik merged nicht selbst (te
 ## Befehle
 
 - `make test` — Swift-Paket und der Vertragstest gegen Kennel (`make contract-test`, braucht einen Kennel-Checkout in `KENNEL_DIR` oder `../kennel`, sonst übersprungen)
+- KennelKit kommt aus `github.com/teamcato/kennel` (ADR 0073). Mit gesetztem `KENNELKIT_DIR` nehmen `swift test` und `xcodebuild` (alle `make`-Ziele) das Paket aus diesem Ordner, z. B. `KENNELKIT_DIR=../kennel make test`. Xcode warnt dann, dass zwei Abhängigkeiten `kennel` heißen; das ist der Override und gilt nur lokal
 - `make app-test` — App-Tests im iPad-Simulator (Editor, Bibliothek, Export)
 - `make ui-test` — Tresor-Sheets im iPhone-Simulator gegen Kennels Testserver (braucht Kennel wie `make contract-test`)
 - `make mac-test` — Mac-Editor und Notizblatt ohne App-Host, mit eigener Wegwerf-Bibliothek. Schreibt Bilder nach `/tmp/inkhash-*.png` zum Ansehen

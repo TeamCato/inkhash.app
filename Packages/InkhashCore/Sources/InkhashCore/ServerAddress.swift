@@ -1,16 +1,8 @@
 import Foundation
+import KennelKit
 
-/// Reading and showing server addresses and account ids. See ADR 0018 and 0021.
+/// Showing server addresses and reading account ids. Reading addresses is `KennelAddress` (ADR 0073).
 public enum ServerAddress {
-    /// The address if it is http or https with a host, else nil.
-    public static func valid(_ text: String) -> URL? {
-        guard let parsed = URL(string: text.trimmingCharacters(in: .whitespacesAndNewlines)),
-              let scheme = parsed.scheme?.lowercased(),
-              ["http", "https"].contains(scheme),
-              parsed.host != nil else { return nil }
-        return parsed
-    }
-
     /// The server's admin page, where accounts are created.
     public static func admin(_ url: String) -> String {
         let trimmed = url.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -18,10 +10,10 @@ public enum ServerAddress {
         return "\(base)/admin"
     }
 
-    /// Host and port for showing, `nas:8787`. The address itself if it has no host.
+    /// Host and port for showing, `nas:8790`. The text itself if it is no address.
     public static func host(_ url: String) -> String {
-        guard let parsed = URL(string: url), let host = parsed.host else { return url }
-        return parsed.port.map { "\(host):\($0)" } ?? host
+        guard let parsed = URL(string: url), parsed.host != nil else { return url }
+        return KennelAddress.display(parsed)
     }
 
     /// An account id as the device stores it: a lowercased UUID, or nil for anything else.

@@ -1,10 +1,11 @@
 import Foundation
 import Security
 
-/// Session tokens in the keychain, one per server (`ServerEntry.id`).
-/// Versions before several servers kept a single token under the account "token".
+/// Secrets of this app in the keychain. Sessions live under `key(for:)`, one per server (`ServerEntry.id`), written by
+/// KennelKit's `KennelSessionStore` (ADR 0073); vault keys under their own accounts (ADR 0052). Versions before several
+/// servers kept a single token under the account "token".
 enum SecretStore {
-    private static let service = "local.inkhash"
+    static let service = "local.inkhash"
     static let legacyAccount = "token"
 
     static func key(for server: UUID) -> String {

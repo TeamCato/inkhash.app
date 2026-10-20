@@ -48,7 +48,7 @@ struct RootView: View {
         .onOpenURL { url in
             if model.open(url) { showSettings = true }
         }
-        .handlesExternalEvents(preferring: [JoinLink.appScheme], allowing: ["*"])
+        .handlesExternalEvents(preferring: [JoinLinks.scheme], allowing: ["*"])
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.sync() } }
         }

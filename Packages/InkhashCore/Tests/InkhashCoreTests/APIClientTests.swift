@@ -1,38 +1,8 @@
+import KennelKit
 import XCTest
 @testable import InkhashCore
 
 final class APIClientTests: XCTestCase {
-    func testChangePasswordSendsBothPasswords() async throws {
-        let (client, requests) = HTTPStub.client { _ in (204, Data()) }
-        try await client.changePassword(current: "altesalt", to: "neuesneu")
-        let sent = try XCTUnwrap(requests().first)
-        XCTAssertEqual(sent.method, "PUT")
-        XCTAssertEqual(sent.path, "/v1/password")
-        XCTAssertEqual(sent.headers["Authorization"], "Bearer tok")
-        let body = try JSONSerialization.jsonObject(with: sent.body) as? [String: String]
-        XCTAssertEqual(body, ["current": "altesalt", "password": "neuesneu"])
-    }
-
-    func testWrongCurrentPasswordIsItsOwnError() async {
-        let (client, _) = HTTPStub.client { _ in HTTPStub.json(403, #"{"error":"wrong-password"}"#) }
-        do {
-            try await client.changePassword(current: "falsch", to: "neuesneu")
-            XCTFail("expected an error")
-        } catch {
-            XCTAssertEqual(error as? APIError, .wrongPassword)
-        }
-    }
-
-    func testOtherRefusalsStayStatusErrors() async {
-        let (client, _) = HTTPStub.client { _ in HTTPStub.json(400, #"{"error":"bad-request"}"#) }
-        do {
-            try await client.changePassword(current: "altesalt", to: "kurz")
-            XCTFail("expected an error")
-        } catch {
-            XCTAssertEqual(error as? APIError, .badStatus(400, #"{"error":"bad-request"}"#))
-        }
-    }
-
     func testWorkspaceRoutesCarryThePrefix() async throws {
         let page = #"{"cursor":0,"changes":[],"hasMore":false}"#
         let (main, mainRequests) = HTTPStub.client { _ in HTTPStub.json(200, page) }
@@ -47,9 +17,9 @@ final class APIClientTests: XCTestCase {
     func testHealthReadsTheModuleOfKennel() async throws {
         let kennel = #"{"ok":true,"server":"kennel","version":"0.1.0","registration":"closed","modules":{"inkhash":{"title":"inkhash","encryption":"required","vault":true,"workspaces":true,"pairing":true}}}"#
         let (client, requests) = HTTPStub.client { _ in HTTPStub.json(200, kennel) }
-        let health = try await client.health()
+        let health = try await client.kennel.health()
         XCTAssertEqual(requests().first?.path, "/v1/health")
-        XCTAssertEqual(health.server, "kennel")
+        XCTAssertTrue(health.isKennel)
         XCTAssertEqual(health.inkhash?.pairing, true)
         XCTAssertTrue(health.vault)
     }
@@ -58,7 +28,7 @@ final class APIClientTests: XCTestCase {
         // The old inkhashd, or a Kennel with inkhash switched off.
         let old = #"{"ok":true,"registration":"closed","version":"0.6.0","vault":true}"#
         let (client, _) = HTTPStub.client { _ in HTTPStub.json(200, old) }
-        let health = try await client.health()
+        let health = try await client.kennel.health()
         XCTAssertNil(health.inkhash)
         XCTAssertFalse(health.vault)
     }

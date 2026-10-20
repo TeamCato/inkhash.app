@@ -1,5 +1,6 @@
 import InkhashCore
 import SwiftUI
+import KennelKit
 
 /// Address first, checked on its own; then only the fields this server needs. The address field
 /// also takes a join link or app link, which fills in the code. See ADR 0018 and 0071.
@@ -84,7 +85,7 @@ struct ServerConnectView: View {
         .onAppear { finder.start() }
         .onDisappear { finder.stop() }
         .sheet(isPresented: $scanning) {
-            QRScanSheet(accepts: JoinLink.isJoinLink) { scanned in addressChanged(scanned) }
+            QRScanSheet(accepts: JoinLinks.isJoinLink) { scanned in addressChanged(scanned) }
         }
     }
 
@@ -125,9 +126,9 @@ struct ServerConnectView: View {
 
     /// A pasted, scanned or opened link splits into address and code; a plain address is checked.
     private func addressChanged(_ value: String) {
-        if let target = JoinLink.parse(value), let linked = target.code {
-            code = linked
-            let server = target.server.absoluteString
+        if let target = JoinLinks.parse(value), let linked = target.code {
+            code = linked.description
+            let server = target.address.absoluteString
             if url != server {
                 // Setting the field calls this again with the plain address, which checks it.
                 url = server
@@ -187,7 +188,7 @@ struct ServerConnectView: View {
                     .monospaced()
                 if !code.isEmpty && !invite {
                     Button("Beitreten") { join() }
-                        .disabled(busy || JoinCode.normalized(code) == nil)
+                        .disabled(busy || JoinCode(code) == nil)
                 }
             } header: {
                 Text("Code")

@@ -1,3 +1,4 @@
+import KennelKit
 import XCTest
 @testable import InkhashCore
 
@@ -30,9 +31,9 @@ final class ContractTests: XCTestCase {
         let (data, response) = try await URLSession.shared.data(for: request)
         let token: String
         if (response as? HTTPURLResponse)?.statusCode == 201 {
-            token = try InkhashJSON.decode(ServerSession.self, from: data).token
+            token = try XCTUnwrap((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["token"] as? String)
         } else {
-            token = try await APIClient(baseURL: url, token: "").openSession(name: "admin", password: "adminadmin").token
+            token = try await KennelClient(address: url).signIn(name: "admin", password: "adminadmin").token
         }
         cachedAdmin = token
         return token
@@ -48,8 +49,8 @@ final class ContractTests: XCTestCase {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["name": name, "password": "secretsecret"])
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
-        let session = try await APIClient(baseURL: url, token: "").openSession(name: name, password: "secretsecret")
-        return APIClient(baseURL: url, token: session.token)
+        let session = try await KennelClient(address: url).signIn(name: name, password: "secretsecret")
+        return APIClient(session: session)
     }
 
     private func freshStore() throws -> LocalStore {
@@ -73,15 +74,16 @@ final class ContractTests: XCTestCase {
     }
 
     func testHealthSaysVault() async throws {
-        let health = try await APIClient(baseURL: url, token: "").health()
+        let health = try await KennelClient(address: url).health()
         XCTAssertTrue(health.vault)
-        XCTAssertEqual(health.server, "kennel")
-        XCTAssertEqual(health.join, true)
-        XCTAssertEqual(health.inkhash?.appScheme, JoinLink.appScheme)
+        XCTAssertTrue(health.isKennel)
+        XCTAssertTrue(health.join)
+        XCTAssertEqual(health.inkhash?.appScheme, "inkhash")
+        XCTAssertEqual(health.registrationMode, .closed)
     }
 
     /// A join code made by `token`, as Kennel's admin page makes it. See ADR 0071.
-    private func joinCode(_ kind: String, by token: String) async throws -> String {
+    private func joinCode(_ kind: String, by token: String) async throws -> JoinCode {
         var request = URLRequest(url: url.appendingPathComponent("v1/join-codes"))
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -90,71 +92,71 @@ final class ContractTests: XCTestCase {
         let (data, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
         let raw = try XCTUnwrap((try JSONSerialization.jsonObject(with: data) as? [String: Any])?["code"] as? String)
-        return try XCTUnwrap(JoinCode.normalized(raw))
+        return try XCTUnwrap(JoinCode(raw))
     }
 
     func testDeviceCodeOpensASessionOfTheSameAccount() async throws {
         let first = try await account()
         let code = try await joinCode("device", by: first.token)
         // Read the way a person types it: lowercase, no dashes.
-        let typed = try XCTUnwrap(JoinCode.normalized(code.lowercased().replacingOccurrences(of: "-", with: "")))
-        let session = try await APIClient(baseURL: url, token: "").join(code: typed)
+        let typed = try XCTUnwrap(JoinCode(code.description.lowercased().replacingOccurrences(of: "-", with: "")))
+        let session = try await KennelClient(address: url).join(code: typed)
         XCTAssertNotEqual(session.token, first.token)
         XCTAssertNotNil(ServerAddress.accountID(session.account.id))
-        _ = try await APIClient(baseURL: url, token: session.token).workspaceList()
+        _ = try await APIClient(session: session).workspaceList()
         do {
-            _ = try await APIClient(baseURL: url, token: "").join(code: code)
+            _ = try await KennelClient(address: url).join(code: code)
             XCTFail("a code is good once")
         } catch {
-            XCTAssertEqual(error as? APIError, .unauthorized)
+            XCTAssertEqual(error as? KennelError, .unauthorized)
         }
     }
 
     func testAppMakesADeviceCodeAndRevokesAnother() async throws {
         let first = try await account()
-        let issued = try await first.createDeviceCode()
-        XCTAssertEqual(issued.kind, "device")
-        XCTAssertNotNil(issued.expiry)
-        let link = JoinLink.link(server: url, code: issued.code)
-        let target = try XCTUnwrap(JoinLink.parse(link))
-        let session = try await APIClient(baseURL: target.server, token: "").join(code: try XCTUnwrap(target.code))
-        _ = try await APIClient(baseURL: url, token: session.token).workspaceList()
+        let issued = try await first.kennel.issueJoinCode(.device)
+        XCTAssertEqual(issued.kind, .device)
+        XCTAssertGreaterThan(issued.expiresAt, Date())
+        let link = try XCTUnwrap(issued.joinLink(on: url))
+        let target = try XCTUnwrap(JoinLink.parse(link.absoluteString, appScheme: "inkhash"))
+        let session = try await KennelClient(address: target.address).join(code: try XCTUnwrap(target.code))
+        _ = try await APIClient(session: session).workspaceList()
 
-        let withdrawn = try await first.createDeviceCode()
-        try await first.revokeJoinCode(id: withdrawn.id)
+        let withdrawn = try await first.kennel.issueJoinCode(.device)
+        try await first.kennel.revokeJoinCode(withdrawn.id)
         do {
-            _ = try await APIClient(baseURL: url, token: "").join(code: withdrawn.code)
+            _ = try await KennelClient(address: url).join(code: withdrawn.code)
             XCTFail("a withdrawn code is no good")
         } catch {
-            XCTAssertEqual(error as? APIError, .unauthorized)
+            XCTAssertEqual(error as? KennelError, .unauthorized)
         }
         do {
-            try await first.revokeJoinCode(id: withdrawn.id)
+            try await first.kennel.revokeJoinCode(withdrawn.id)
             XCTFail("withdrawn twice")
         } catch {
-            XCTAssertEqual(error as? APIError, .notFound)
+            XCTAssertEqual((error as? KennelError)?.status, 404)
         }
     }
 
     func testInviteAsksForAnAccountThenCreatesIt() async throws {
         let code = try await joinCode("invite", by: adminToken)
-        let open = APIClient(baseURL: url, token: "")
+        let open = KennelClient(address: url)
         do {
             _ = try await open.join(code: code)
             XCTFail("an invite needs name and password")
         } catch {
-            XCTAssertEqual(error as? JoinError, .needsAccount)
+            XCTAssertEqual(error as? KennelJoinError, .needsAccount)
         }
         do {
-            _ = try await open.join(code: code, name: "admin", password: "secretsecret")
+            _ = try await open.join(code: code, account: KennelNewAccount(name: "admin", password: "secretsecret"))
             XCTFail("the name is taken")
         } catch {
-            XCTAssertEqual(error as? JoinError, .nameTaken)
+            XCTAssertEqual(error as? KennelJoinError, .nameTaken)
         }
         let name = "i" + UUID().uuidString.prefix(8).lowercased()
-        let session = try await open.join(code: code, name: name, password: "secretsecret")
+        let session = try await open.join(code: code, account: KennelNewAccount(name: name, password: "secretsecret"))
         XCTAssertEqual(session.account.name, name)
-        _ = try await APIClient(baseURL: url, token: "").openSession(name: name, password: "secretsecret")
+        _ = try await open.signIn(name: name, password: "secretsecret")
     }
 
     func testNotesNeedAVaultAndASecondDeviceReadsThem() async throws {
@@ -348,10 +350,10 @@ final class ContractTests: XCTestCase {
     func testOwnPasswordChange() async throws {
         let client = try await account()
         do {
-            try await client.changePassword(current: "falschfalsch", to: "neuesneues")
+            try await client.kennel.changePassword(current: "falschfalsch", to: "neuesneues")
             XCTFail("expected wrongPassword")
-        } catch APIError.wrongPassword {}
-        try await client.changePassword(current: "secretsecret", to: "neuesneues")
+        } catch KennelPasswordError.wrongPassword {}
+        try await client.kennel.changePassword(current: "secretsecret", to: "neuesneues")
         _ = try await client.workspaceList()
     }
 }

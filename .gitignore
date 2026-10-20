@@ -15,3 +15,4 @@ Packages/InkhashCore/.build
 .test-env/
 .claude/*.lock
 .claude/settings.local.json
+Packages/InkhashCore/Package.resolved

@@ -1,6 +1,7 @@
 import Foundation
 import InkhashCore
 import Observation
+import KennelKit
 
 /// The one line at the bottom of the sidebar. Every part of the model reports here.
 @MainActor
@@ -27,8 +28,16 @@ final class StatusLine {
             return "Der Server kennt diesen Pfad nicht."
         case let APIError.badStatus(code, _):
             return "Der Server antwortete mit \(code)."
-        case is URLError:
+        case is URLError, KennelError.unreachable:
             return "Server nicht erreichbar."
+        case KennelError.unauthorized:
+            return "Anmeldung abgelehnt."
+        case KennelError.slowDown:
+            return "Zu viele Versuche. Kurz warten."
+        case let KennelError.rejected(status, _, _, _):
+            return "Der Server antwortete mit \(status)."
+        case KennelError.invalidReply:
+            return "Der Server antwortete unerwartet."
         case is SealError:
             return "Eine Notiz vom Server ließ sich nicht entschlüsseln."
         case VaultError.wrongRecoveryKey:
@@ -37,6 +46,8 @@ final class StatusLine {
             return "Der Tresor ließ sich nicht öffnen."
         case let error as KeychainError:
             return "Die Anmeldung ließ sich nicht im Schlüsselbund sichern (\(error.status))."
+        case let KennelSessionStoreError.keychain(status):
+            return "Die Anmeldung ließ sich nicht im Schlüsselbund sichern (\(status))."
         default:
             return "Abgleich fehlgeschlagen."
         }

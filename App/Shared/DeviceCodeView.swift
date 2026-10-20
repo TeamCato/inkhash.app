@@ -1,5 +1,6 @@
 import InkhashCore
 import SwiftUI
+import KennelKit
 
 /// „Weiteres Gerät verbinden“: a device code of this account as text, join link and QR code,
 /// with its expiry and a way to withdraw it. See ADR 0072, teamCato ADR 0005.
@@ -14,13 +15,13 @@ struct DeviceCodeView: View {
 
     var body: some View {
         Form {
-            if let issued, !withdrawn, let server = model.registry.server(serverID), let url = URL(string: server.url) {
-                let link = JoinLink.link(server: url, code: issued.code)
+            if let issued, !withdrawn, let server = model.registry.server(serverID), let url = URL(string: server.url),
+               let link = issued.joinLink(on: url)?.absoluteString {
                 Section {
                     QRCodeView(text: link, label: "QR-Code zum Verbinden eines Geräts")
                         .frame(maxWidth: 260)
                         .frame(maxWidth: .infinity)
-                    Text(issued.code)
+                    Text(issued.code.description)
                         .font(.system(size: 28, weight: .semibold, design: .monospaced))
                         .textSelection(.enabled)
                         .frame(maxWidth: .infinity)
@@ -58,7 +59,7 @@ struct DeviceCodeView: View {
     }
 
     private func footer(for issued: IssuedJoinCode) -> String {
-        let until = issued.expiry.map { "Gilt bis \($0.formatted(date: .omitted, time: .shortened)), einmal. " } ?? "Gilt einmal. "
+        let until = "Gilt bis \(issued.expiresAt.formatted(date: .omitted, time: .shortened)), einmal. "
         return until + "Auf dem anderen Gerät den QR-Code scannen oder unter „Server verbinden“ Link oder Code eingeben. Ein Passwort braucht es dort nicht."
     }
 

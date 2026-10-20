@@ -410,4 +410,4 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Unter „Im Netz gefunden“ steht ein Kennel, aber ein Tipp trägt nichts ein; die Adresse gilt als ungültig.
 **Ursache.** Nach dem Auflösen über `NWConnection` trägt die IPv4-Adresse die Schnittstelle im Text (`192.168.1.5%en0`). Aus `"\(address)"` entsteht damit keine URL.
-**Wache.** `KennelDiscovery.address(host:port:)` baut IPv4 aus den Bytes (`rawValue`). Test `KennelDiscoveryTests.testResolvedIPv4LosesItsInterface`.
+**Wache.** `KennelDiscovery.address(host:port:)` in KennelKit baut IPv4 aus den Bytes (`rawValue`). Test `KennelDiscoveryTests.resolvedIPv4LosesItsInterface` in `kennel/clients/swift/Tests` (ADR 0073).

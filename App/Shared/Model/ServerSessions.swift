@@ -1,6 +1,7 @@
 import Foundation
 import InkhashCore
 import Observation
+import KennelKit
 
 /// What the app knows about the address typed into the server form.
 enum ServerConnection: Equatable {
@@ -33,14 +34,14 @@ final class ServerSessions {
     var connection: ServerConnection = .unknown
     /// Servers whose session the server rejected. Shows a notice until signing in or dismissing it.
     private(set) var expired: Set<UUID>
-    /// Session tokens by server. A server without one is signed out.
-    private var tokens: [UUID: String] = [:]
+    /// Sessions by server, as the keychain holds them. A server without one is signed out.
+    private var sessions: [UUID: KennelSession] = [:]
     @ObservationIgnored private var probeTask: Task<Void, Never>?
     private let registry: WorkspaceRegistry
     private let status: StatusLine
 
     private static let expiredKey = "inkhash.expiredServers"
-    private static let invalidAddress = "Die Adresse braucht http oder https und einen Host."
+    private static let invalidAddress = "Das ist keine Adresse eines Servers, z. B. kennel.local oder http://192.168.1.5:8790."
     private static let shortPassword = "Das Passwort braucht mindestens 8 Zeichen."
 
     init(registry: WorkspaceRegistry, status: StatusLine) {
@@ -48,36 +49,51 @@ final class ServerSessions {
         self.status = status
         expired = Set((UserDefaults.standard.stringArray(forKey: Self.expiredKey) ?? []).compactMap(UUID.init(uuidString:)))
         if let migrated = registry.migrated {
-            if !migrated.accountID.isEmpty, let token = SecretStore.get(account: SecretStore.legacyAccount) {
-                try? SecretStore.set(token, account: SecretStore.key(for: migrated.id))
+            if let token = SecretStore.get(account: SecretStore.legacyAccount),
+               let session = Self.session(of: migrated, token: token) {
+                try? Self.store(for: migrated.id).save(session)
             }
             SecretStore.clear(account: SecretStore.legacyAccount)
             registry.migrationDone()
         }
         for server in registry.servers where !server.accountID.isEmpty {
-            if let token = SecretStore.get(account: SecretStore.key(for: server.id)), !token.isEmpty {
-                tokens[server.id] = token
+            // Before ADR 0073 the entry held only the token; address and account come from `setup.json` then.
+            let stored = try? Self.store(for: server.id).load { data in
+                Self.session(of: server, token: String(decoding: data, as: UTF8.self))
+            }
+            if let stored, !stored.token.isEmpty {
+                sessions[server.id] = stored
             }
         }
     }
 
+    /// The keychain entry of a server's session.
+    static func store(for server: UUID) -> KennelSessionStore {
+        KennelSessionStore(service: SecretStore.service, key: SecretStore.key(for: server))
+    }
+
+    /// A session from a bare token and what `setup.json` knows about the server. Nil if something is missing.
+    private static func session(of server: ServerEntry, token: String) -> KennelSession? {
+        guard !token.isEmpty, !server.accountID.isEmpty, let url = URL(string: server.url) else { return nil }
+        return KennelSession(address: url, token: token, account: KennelAccount(id: server.accountID, name: server.accountName))
+    }
+
     func isSignedIn(_ server: UUID) -> Bool {
         guard let entry = registry.server(server), !entry.accountID.isEmpty else { return false }
-        return !(tokens[server] ?? "").isEmpty
+        return !(sessions[server]?.token ?? "").isEmpty
     }
 
     /// A client for one workspace on a signed-in server, or nil while signed out.
     func client(for server: UUID, workspace remote: String = APIClient.mainWorkspace) -> APIClient? {
-        guard isSignedIn(server), let entry = registry.server(server), let url = URL(string: entry.url),
-              let token = tokens[server] else { return nil }
-        return APIClient(baseURL: url, token: token, workspace: remote)
+        guard isSignedIn(server), let session = sessions[server] else { return nil }
+        return APIClient(session: session, workspace: remote)
     }
 
     /// Signs in to the server at `raw`, an address or a link to it. Accounts are created on the
     /// server's admin page or by an invite, not here (ADR 0021, 0071). Returns the server's id, or
     /// nil when it failed; the status says why.
     func signIn(url raw: String, name: String, password: String) async -> UUID? {
-        guard let url = JoinLink.parse(raw)?.server else {
+        guard let url = JoinLinks.parse(raw)?.address else {
             status.message = Self.invalidAddress
             return nil
         }
@@ -86,8 +102,8 @@ final class ServerSessions {
             return nil
         }
         do {
-            let session = try await APIClient(baseURL: url, token: "")
-                .openSession(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
+            let session = try await KennelClient(address: url)
+                .signIn(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
             return try keep(session, from: url, message: "Angemeldet.")
         } catch {
             status.message = StatusLine.describe(error)
@@ -98,33 +114,33 @@ final class ServerSessions {
     /// Redeems a join code at the server at `raw`. Without name and password a device code signs in;
     /// an invite answers `needsAccount`. With both, an invite creates the account. See ADR 0071.
     func join(url raw: String, code rawCode: String, name: String?, password: String?) async -> JoinOutcome {
-        guard let url = JoinLink.parse(raw)?.server else {
+        guard let url = JoinLinks.parse(raw)?.address else {
             status.message = Self.invalidAddress
             return .failed
         }
-        guard let code = JoinCode.normalized(rawCode) else {
+        guard let code = JoinCode(rawCode) else {
             status.message = "Der Code hat zwölf Zeichen aus Ziffern und Buchstaben, z. B. K7Q4-2MPA-XW9D."
             return .failed
         }
-        var account: (name: String, password: String)?
+        var account: KennelNewAccount?
         if let name, let password {
             guard password.count >= 8 else {
                 status.message = Self.shortPassword
                 return .failed
             }
-            account = (name.trimmingCharacters(in: .whitespacesAndNewlines), password)
+            account = KennelNewAccount(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
         }
         do {
-            let session = try await APIClient(baseURL: url, token: "").join(code: code, name: account?.name, password: account?.password)
+            let session = try await KennelClient(address: url).join(code: code, account: account)
             let message = account == nil ? "Angemeldet." : "Account angelegt und angemeldet."
             return .joined(try keep(session, from: url, message: message))
-        } catch JoinError.needsAccount {
+        } catch KennelJoinError.needsAccount {
             status.message = "Das ist eine Einladung. Wähle Name und Passwort für deinen neuen Account."
             return .needsAccount
-        } catch JoinError.nameTaken {
+        } catch KennelJoinError.nameTaken {
             status.message = "Diesen Namen gibt es schon. Wähle einen anderen."
             return .failed
-        } catch APIError.unauthorized {
+        } catch KennelError.unauthorized {
             status.message = "Der Code gilt nicht mehr oder stimmt nicht. Lass dir einen neuen geben."
             return .failed
         } catch {
@@ -134,11 +150,11 @@ final class ServerSessions {
     }
 
     /// Stores a new session of `url` and returns the server's id.
-    private func keep(_ session: ServerSession, from url: URL, message: String) throws -> UUID {
-        guard let accountID = ServerAddress.accountID(session.account.id) else { throw APIError.invalidResponse }
+    private func keep(_ session: KennelSession, from url: URL, message: String) throws -> UUID {
+        guard let accountID = ServerAddress.accountID(session.account.id) else { throw KennelError.invalidReply }
         let server = registry.signedIn(url: url.absoluteString, accountName: session.account.name, accountID: accountID)
-        try SecretStore.set(session.token, account: SecretStore.key(for: server))
-        tokens[server] = session.token
+        try Self.store(for: server).save(session)
+        sessions[server] = session
         dismissExpiredNotice(server)
         status.message = message
         return server
@@ -149,14 +165,14 @@ final class ServerSessions {
     func changePassword(on server: UUID, current: String, new: String) async -> String? {
         guard let client = client(for: server) else { return "Nicht angemeldet." }
         do {
-            try await client.changePassword(current: current, to: new)
+            try await client.kennel.changePassword(current: current, to: new)
             status.message = "Passwort geändert."
             return nil
-        } catch APIError.wrongPassword {
+        } catch KennelPasswordError.wrongPassword {
             return "Das bisherige Passwort stimmt nicht."
-        } catch APIError.unauthorized {
+        } catch KennelError.unauthorized {
             expire(server, ifStill: client.token)
-            return StatusLine.describe(APIError.unauthorized)
+            return StatusLine.describe(KennelError.unauthorized)
         } catch {
             return StatusLine.describe(error)
         }
@@ -166,11 +182,11 @@ final class ServerSessions {
     func createDeviceCode(on server: UUID) async -> Result<IssuedJoinCode, DeviceCodeProblem> {
         guard let client = client(for: server) else { return .failure(DeviceCodeProblem("Nicht angemeldet.")) }
         do {
-            return .success(try await client.createDeviceCode())
-        } catch APIError.unauthorized {
+            return .success(try await client.kennel.issueJoinCode(.device))
+        } catch KennelError.unauthorized {
             expire(server, ifStill: client.token)
-            return .failure(DeviceCodeProblem(StatusLine.describe(APIError.unauthorized)))
-        } catch APIError.notFound {
+            return .failure(DeviceCodeProblem(StatusLine.describe(KennelError.unauthorized)))
+        } catch let error as KennelError where error.status == 404 {
             return .failure(DeviceCodeProblem("Dieser Kennel kann noch keine Codes für Geräte erzeugen. Ein Update von Kennel hilft."))
         } catch {
             return .failure(DeviceCodeProblem(StatusLine.describe(error)))
@@ -181,13 +197,13 @@ final class ServerSessions {
     func revokeJoinCode(_ id: String, on server: UUID) async -> String? {
         guard let client = client(for: server) else { return "Nicht angemeldet." }
         do {
-            try await client.revokeJoinCode(id: id)
+            try await client.kennel.revokeJoinCode(id)
             return nil
-        } catch APIError.notFound {
+        } catch let error as KennelError where error.status == 404 {
             return nil
-        } catch APIError.unauthorized {
+        } catch KennelError.unauthorized {
             expire(server, ifStill: client.token)
-            return StatusLine.describe(APIError.unauthorized)
+            return StatusLine.describe(KennelError.unauthorized)
         } catch {
             return StatusLine.describe(error)
         }
@@ -196,7 +212,7 @@ final class ServerSessions {
     /// Ends the session. Linked workspaces keep their notes and their binding; syncing pauses.
     func logout(_ server: UUID) {
         if let client = client(for: server) {
-            Task { try? await client.logout() }
+            Task { try? await client.kennel.signOut() }
         }
         endSession(of: server)
         status.message = "Abgemeldet. Die Notizen bleiben auf diesem Gerät."
@@ -207,7 +223,7 @@ final class ServerSessions {
     /// same account again continues where syncing stopped.
     func expire(_ server: UUID, ifStill used: String) {
         // A request that started before a new login must not end the new session.
-        guard !used.isEmpty, tokens[server] == used else { return }
+        guard !used.isEmpty, sessions[server]?.token == used else { return }
         endSession(of: server)
         expired.insert(server)
         persistExpired()
@@ -241,7 +257,7 @@ final class ServerSessions {
     /// The server's release, as `/v1/health` tells it. Nil if it does not say or cannot be reached.
     func version(of server: UUID) async -> String? {
         guard let entry = registry.server(server), let url = URL(string: entry.url) else { return nil }
-        return try? await APIClient(baseURL: url, token: "").health().version
+        return try? await KennelClient(address: url).health().version
     }
 
     static let noInkhash = "Unter dieser Adresse läuft kein Kennel mit inkhash. Ist das Modul in der Verwaltung eingeschaltet?"
@@ -250,7 +266,7 @@ final class ServerSessions {
     func addressChanged(_ text: String) {
         probeTask?.cancel()
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard let url = JoinLink.parse(trimmed)?.server else {
+        guard let url = JoinLinks.parse(trimmed)?.address else {
             connection = trimmed.isEmpty ? .unknown : .failed(Self.invalidAddress)
             return
         }
@@ -259,10 +275,10 @@ final class ServerSessions {
             try? await Task.sleep(nanoseconds: 600_000_000)
             guard !Task.isCancelled else { return }
             do {
-                let health = try await APIClient(baseURL: url, token: "").health()
+                let health = try await KennelClient(address: url).health()
                 guard !Task.isCancelled else { return }
                 // inkhash syncs only with Kennel's module, not with the old inkhashd. See ADR 0067.
-                connection = health.inkhash == nil ? .failed(Self.noInkhash) : .reachable(health.registration)
+                connection = health.inkhash == nil ? .failed(Self.noInkhash) : .reachable(health.registrationMode)
             } catch {
                 guard !Task.isCancelled else { return }
                 connection = .failed(StatusLine.describe(error))
@@ -271,8 +287,8 @@ final class ServerSessions {
     }
 
     private func endSession(of server: UUID) {
-        SecretStore.clear(account: SecretStore.key(for: server))
-        tokens[server] = nil
+        try? Self.store(for: server).clear()
+        sessions[server] = nil
         registry.signedOut(server)
     }
 

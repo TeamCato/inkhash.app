@@ -55,7 +55,7 @@ final class VaultSessions {
     func check(_ server: UUID) async {
         guard let client = sessions.client(for: server) else { return }
         do {
-            let health = try await client.health()
+            let health = try await client.kennel.health()
             guard health.vault else {
                 set(.noInkhash, for: server)
                 return

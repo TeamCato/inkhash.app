@@ -58,7 +58,11 @@ import-spike:
 	@test -n "$(FILE)" || { echo "FILE=export.pdf oder notebook.goodnotes setzen."; exit 1; }
 	mkdir -p .build/import-spike
 	# PencilKit writes preferences and traps without a bundle identifier; the plist rides inside the binary.
-	swiftc -parse-as-library -O tools/PdfInkSpike.swift App/Shared/InkImport.swift Packages/InkhashCore/Sources/InkhashCore/*.swift \
+	# InkhashCore imports KennelKit (ADR 0073): built first as a module of its own from KENNELKIT_DIR, by default ../kennel.
+	swiftc -parse-as-library -O -module-name KennelKit -emit-module -emit-module-path .build/import-spike/KennelKit.swiftmodule \
+		-static -emit-library -o .build/import-spike/libKennelKit.a $(or $(KENNELKIT_DIR),../kennel)/clients/swift/Sources/KennelKit/*.swift
+	swiftc -parse-as-library -O -I .build/import-spike -L .build/import-spike -lKennelKit \
+		tools/PdfInkSpike.swift App/Shared/InkImport.swift Packages/InkhashCore/Sources/InkhashCore/*.swift \
 		-Xlinker -sectcreate -Xlinker __TEXT -Xlinker __info_plist -Xlinker tools/PdfInkSpike-Info.plist \
 		-o .build/import-spike/pdf-ink-spike
 	.build/import-spike/pdf-ink-spike "$(FILE)" ".build/import-spike/$(notdir $(basename $(FILE)))"

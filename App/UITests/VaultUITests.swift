@@ -1,5 +1,6 @@
 import InkhashCore
 import XCTest
+import KennelKit
 
 /// The vault sheets on the iPhone against a real Kennel, started by `make ui-test`. Skipped without it.
 final class VaultUITests: XCTestCase {
@@ -75,7 +76,7 @@ final class VaultUITests: XCTestCase {
         setup.setValue("application/json", forHTTPHeaderField: "Content-Type")
         setup.httpBody = try JSONSerialization.data(withJSONObject: ["setupToken": setupToken, "name": "admin", "password": "adminadmin"])
         _ = try await URLSession.shared.data(for: setup)
-        let admin = try await APIClient(baseURL: url, token: "").openSession(name: "admin", password: "adminadmin").token
+        let admin = try await KennelClient(address: url).signIn(name: "admin", password: "adminadmin").token
 
         let name = "u" + UUID().uuidString.prefix(8).lowercased()
         var create = URLRequest(url: url.appendingPathComponent("v1/accounts"))
@@ -86,7 +87,7 @@ final class VaultUITests: XCTestCase {
         let (_, response) = try await URLSession.shared.data(for: create)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
 
-        let token = try await APIClient(baseURL: url, token: "").openSession(name: name, password: "secretsecret").token
+        let token = try await KennelClient(address: url).signIn(name: name, password: "secretsecret").token
         let recoveryKey = RecoveryKey.generate()
         let (_, record) = try VaultCrypto.create(recoveryKey: recoveryKey, rounds: 100_000)
         _ = try await APIClient(baseURL: url, token: token).putVault(record)

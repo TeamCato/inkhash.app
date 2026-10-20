@@ -2,6 +2,7 @@ import AVFoundation
 import CoreImage
 import CoreImage.CIFilterBuiltins
 import InkhashCore
+import KennelKit
 import SwiftUI
 import Vision
 
@@ -31,11 +32,7 @@ struct QRCodeView: View {
     }
 
     static func render(_ text: String) -> CGImage? {
-        let filter = CIFilter.qrCodeGenerator()
-        filter.message = Data(text.utf8)
-        filter.correctionLevel = "M"
-        guard let output = filter.outputImage else { return nil }
-        return CIContext().createCGImage(output, from: output.extent)
+        JoinQR.image(for: text)
     }
 }
 

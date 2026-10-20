@@ -1,5 +1,6 @@
 import InkhashCore
 import SwiftUI
+import KennelKit
 
 /// Workspaces and servers. Servers are connected once; each workspace picks one of them, or none.
 struct SettingsView: View {
@@ -72,7 +73,7 @@ struct SettingsView: View {
             }
             .formStyle(.grouped)
             .navigationDestination(item: joinBinding) { target in
-                ServerConnectView(presetURL: target.server.absoluteString, presetCode: target.code ?? "")
+                ServerConnectView(presetURL: target.address.absoluteString, presetCode: target.code?.description ?? "")
             }
             .navigationTitle("Einstellungen")
             .preferredColorScheme(.light)
@@ -87,7 +88,7 @@ struct SettingsView: View {
     }
 
     /// A join link the app was opened with. See ADR 0071.
-    private var joinBinding: Binding<JoinTarget?> {
+    private var joinBinding: Binding<JoinLink?> {
         Binding(get: { model.pendingJoin }, set: { model.pendingJoin = $0 })
     }
 

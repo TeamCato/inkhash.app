@@ -13,6 +13,10 @@ settings:
 packages:
   InkhashCore:
     path: Packages/InkhashCore
+  # KennelKit, Kennel's Swift client (ADR 0073). The app uses its types directly, so it links the product itself.
+  kennel:
+    url: https://github.com/teamcato/kennel
+    minorVersion: 0.5.0
 targets:
   Inkhash:
     type: application
@@ -26,6 +30,8 @@ targets:
     dependencies:
       - package: InkhashCore
         product: InkhashCore
+      - package: kennel
+        product: KennelKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: local.inkhash.ipad
       PRODUCT_NAME: Inkhash
@@ -49,6 +55,8 @@ targets:
     dependencies:
       - package: InkhashCore
         product: InkhashCore
+      - package: kennel
+        product: KennelKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: local.inkhash.mac
       PRODUCT_NAME: Inkhash
@@ -70,6 +78,8 @@ targets:
       - target: Inkhash
       - package: InkhashCore
         product: InkhashCore
+      - package: kennel
+        product: KennelKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: local.inkhash.tests
       GENERATE_INFOPLIST_FILE: YES
@@ -86,6 +96,8 @@ targets:
       - target: Inkhash
       - package: InkhashCore
         product: InkhashCore
+      - package: kennel
+        product: KennelKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: local.inkhash.uitests
       GENERATE_INFOPLIST_FILE: YES
@@ -103,6 +115,8 @@ targets:
     dependencies:
       - package: InkhashCore
         product: InkhashCore
+      - package: kennel
+        product: KennelKit
     settings:
       PRODUCT_BUNDLE_IDENTIFIER: local.inkhash.mactests
       GENERATE_INFOPLIST_FILE: YES

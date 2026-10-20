@@ -47,7 +47,7 @@ Diese Wörter heißen im Code so.
 | Wiederherstellungsschlüssel | Öffnet den Tresor, wenn kein Gerät mit offenem Tresor da ist. Die App erzeugt ihn, 25 Zeichen in fünf Gruppen (`RecoveryKey`). Nur die Geräte kennen ihn, nicht der Server, nicht der Admin. Nicht das Login-Passwort (ADR 0054). |
 | Kopplung | Übergabe des Account-Schlüssels an ein neues Gerät per QR-Code; der Server hält ihn versiegelt fünf Minuten (`Pairing`, `/v1/vault/pairings`, ADR 0054). |
 | Beitrittscode | Einmal-Code aus Kennels Verwaltung, zwölf Zeichen, angezeigt `XXXX-XXXX-XXXX` (`JoinCode`). „Gerät hinzufügen“ meldet ohne Passwort am selben Account an, eine „Einladung“ legt einen neuen Account an (`POST /v1/join`, ADR 0071). |
-| Beitrittslink | `<server>/join#<code>`, auch als QR-Code in Kennels Verwaltung. Belegt Adresse und Code vor (`JoinLink`). |
+| Beitrittslink | `<server>/join#<code>`, auch als QR-Code in Kennels Verwaltung. Belegt Adresse und Code vor (`JoinLink` aus KennelKit, ADR 0073). |
 | App-Link | `inkhash://kennel/join?server=…&code=…`, öffnet das Verbinden-Fenster vorbelegt (ADR 0071). |
 | Im Netz gefunden | Kennel, die sich per Bonjour (`_kennel._tcp`) im Heimnetz ankündigen; ein Vorschlag fürs Adressfeld (`KennelFinder`, ADR 0072). |
 | sealed | Eine Notiz oder ein Blob, verschlüsselt mit dem Schlüssel des Accounts (`Sealer`). `schemaVersion: 2` auf dem Draht. |

@@ -1,5 +1,6 @@
 import Foundation
 import InkhashCore
+import KennelKit
 import Observation
 #if os(macOS)
 import AppKit
@@ -68,7 +69,7 @@ final class AppModel {
     /// Set by the menu; the sidebar shows the file picker and clears it. See ADR 0024 and 0041.
     var importRequested = false
     /// A join link or app link the app was opened with; the settings show the connect form for it. See ADR 0071.
-    var pendingJoin: JoinTarget?
+    var pendingJoin: JoinLink?
     private var impulseToken = 0
 
     /// Where the libraries live: Application Support, which the iCloud backup of iPad and iPhone
@@ -447,7 +448,7 @@ final class AppModel {
     /// Takes `inkhash://kennel/join?…`; other URLs are not for this. Returns whether it was one.
     @discardableResult
     func open(_ url: URL) -> Bool {
-        guard url.scheme?.lowercased() == JoinLink.appScheme, let target = JoinLink.parse(url.absoluteString) else { return false }
+        guard url.scheme?.lowercased() == JoinLinks.scheme, let target = JoinLinks.parse(url.absoluteString) else { return false }
         pendingJoin = target
         return true
     }
