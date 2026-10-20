@@ -1,4 +1,6 @@
 import InkhashCore
+import KennelKit
+import KennelKitUI
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -22,6 +24,12 @@ struct WorkspaceEditor: View {
     @State private var remoteChoice = WorkspaceEditor.newRemote
     @State private var remotes: [RemoteWorkspace] = []
     @State private var loadingRemotes = false
+    /// How a new server workspace lies there (ADR 0075). Only offered when the server can.
+    @State private var choosesStorage = false
+    @State private var sealed = true
+    @State private var storageChoice: String?
+    @State private var storages: [KennelStorage] = []
+    @State private var showsNewStorage = false
     @State private var busy = false
     @State private var confirmRemoval = false
     @State private var loaded = false
@@ -87,7 +95,7 @@ struct WorkspaceEditor: View {
                         Picker("Workspace auf dem Server", selection: $remoteChoice) {
                             Text("Neu anlegen").tag(Self.newRemote)
                             ForEach(remotes) { remote in
-                                Text(remote.name).tag(remote.id)
+                                Text(remote.isSealed ? remote.name : "\(remote.name) · unverschlüsselt").tag(remote.id)
                                     .disabled(isTaken(remote))
                             }
                         }
@@ -97,6 +105,9 @@ struct WorkspaceEditor: View {
                 Text("Abgleich")
             } footer: {
                 Text(syncFooter)
+            }
+            if serverChoice != nil, remoteChoice == Self.newRemote, choosesStorage, !loadingRemotes {
+                serverLayout
             }
             if let workspace {
                 Section {
@@ -219,6 +230,53 @@ struct WorkspaceEditor: View {
         }
     }
 
+    /// Encryption and storage of a new server workspace. Both hold for its life.
+    private var serverLayout: some View {
+        Section {
+            Toggle("Verschlüsselt", isOn: $sealed)
+            Picker("Speicher", selection: $storageChoice) {
+                Text("Standard des Accounts").tag(String?.none)
+                ForEach(storages) { storage in
+                    Text(storage.isPrivate ? "\(storage.name) · privat" : storage.name).tag(String?.some(storage.id))
+                }
+            }
+            Button("Neuer Speicher …") { showsNewStorage = true }
+                .sheet(isPresented: $showsNewStorage) { newStorageSheet }
+        } header: {
+            Text("Auf dem Server")
+        } footer: {
+            Text(layoutFooter)
+        }
+    }
+
+    @ViewBuilder
+    private var newStorageSheet: some View {
+        if let server = serverChoice, let client = model.sessions.client(for: server) {
+            NavigationStack {
+                KennelNewStorageView(client: client.kennel, module: APIClient.module) { storage in
+                    storages.append(storage)
+                    storageChoice = storage.id
+                }
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) {
+                        Button("Abbrechen") { showsNewStorage = false }
+                    }
+                }
+            }
+            .kennelBrand(.inkhash)
+            #if os(macOS)
+                .frame(minWidth: 420, minHeight: 460)
+            #endif
+        }
+    }
+
+    private var layoutFooter: String {
+        let how = sealed
+            ? "Nur deine Geräte können die Notizen lesen; dafür braucht der Account einen Tresor."
+            : "Die Notizen liegen lesbar als JSON im Speicher, z. B. auf einer SMB-Freigabe. Wer den Speicher öffnen kann, liest sie."
+        return how + " Verschlüsselung und Speicher lassen sich später nicht ändern. Weitere Speicher gibst du in Kennels Verwaltung für inkhash frei."
+    }
+
     private var signedInServers: [ServerEntry] {
         model.registry.servers.filter { model.sessions.isSignedIn($0.id) }
     }
@@ -257,10 +315,14 @@ struct WorkspaceEditor: View {
     private func loadRemotes() async {
         guard let server = serverChoice else {
             remotes = []
+            choosesStorage = false
             return
         }
         loadingRemotes = true
         remotes = await model.sessions.remoteWorkspaces(on: server)
+        choosesStorage = await model.sessions.capabilities(of: server)?.choosesWorkspaceStorage == true
+        storages = choosesStorage ? await model.sessions.noteStorages(on: server) : []
+        if let storageChoice, !storages.contains(where: { $0.id == storageChoice }) { self.storageChoice = nil }
         loadingRemotes = false
         if remoteChoice != Self.newRemote, !remotes.contains(where: { $0.id == remoteChoice }) {
             remoteChoice = Self.newRemote
@@ -269,7 +331,12 @@ struct WorkspaceEditor: View {
 
     private var target: WorkspaceTarget {
         guard let serverChoice else { return .local }
-        return .server(serverChoice, remote: remoteChoice == Self.newRemote ? nil : remoteChoice)
+        guard remoteChoice != Self.newRemote else {
+            let new = choosesStorage ? NewRemoteWorkspace(sealed: sealed, storageID: storageChoice) : .standard
+            return .server(serverChoice, remote: nil, new: new)
+        }
+        let existing = remotes.first { $0.id == remoteChoice }
+        return .server(serverChoice, remote: remoteChoice, new: NewRemoteWorkspace(sealed: existing?.isSealed ?? true))
     }
 
     private func save() {
@@ -278,7 +345,9 @@ struct WorkspaceEditor: View {
             if let workspace {
                 model.updateWorkspace(workspace.id, name: name, symbol: symbol)
                 if imageChanged { model.setWorkspaceImage(workspace.id, png: image) }
-                let current = workspace.link.map { WorkspaceTarget.server($0.server, remote: $0.remote) } ?? .local
+                let current = workspace.link.map {
+                    WorkspaceTarget.server($0.server, remote: $0.remote, new: NewRemoteWorkspace(sealed: $0.sealed))
+                } ?? .local
                 if target != current { await model.relink(workspace.id, to: target) }
             } else {
                 await model.createWorkspace(name: name, symbol: symbol, image: imageChanged ? image : nil, target: target)

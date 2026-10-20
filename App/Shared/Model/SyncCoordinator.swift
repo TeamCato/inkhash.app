@@ -37,7 +37,7 @@ final class SyncCoordinator {
     var statusAtRest: String {
         guard let link = registry.current.link, let server = registry.server(link.server) else { return StatusLine.localOnly }
         guard sessions.isSignedIn(server.id) else { return "Abgleich mit \(ServerAddress.host(server.url)) ruht." }
-        return vaults.key(for: server.id) == nil ? Self.waitingForVault(vaults.state(of: server.id)) : ""
+        return link.sealed && vaults.key(for: server.id) == nil ? Self.waitingForVault(vaults.state(of: server.id)) : ""
     }
 
     static func waitingForVault(_ state: VaultState) -> String {
@@ -82,17 +82,21 @@ final class SyncCoordinator {
             guard let link = workspace.link, let entry = registry.server(link.server),
                   let client = sessions.client(for: link.server, workspace: link.remote) else { continue }
             let isCurrent = workspace.id == registry.current.id
-            guard let key = vaults.key(for: link.server) else {
+            // A plain server workspace needs no vault: notes go up as they are (ADR 0075).
+            let key = vaults.key(for: link.server)
+            if link.sealed, key == nil {
                 if isCurrent { status.message = Self.waitingForVault(vaults.state(of: link.server)) }
                 continue
             }
             let store = registry.store(for: workspace.id)
             do {
                 // Binding is idempotent. A different account or workspace on the server, or a reset
-                // vault, starts over.
-                try Library.bind(store, to: Workspaces.bindingKey(accountID: entry.accountID, remote: link.remote, epoch: key.epoch))
-                let transport = SealedTransport(wire: client, sealer: Sealer(key))
-                let report = try await Syncer.sync(store: store, transport: transport, sealedWith: key.keyId) { [weak self] note, meta in
+                // vault, starts over. A vault reset leaves plain workspaces alone.
+                let epoch = link.sealed ? key?.epoch ?? 0 : 0
+                try Library.bind(store, to: Workspaces.bindingKey(accountID: entry.accountID, remote: link.remote, epoch: epoch))
+                let transport: any NoteTransport = if link.sealed, let key { SealedTransport(wire: client, sealer: Sealer(key)) } else { client }
+                let sealedWith = link.sealed ? key?.keyId : nil
+                let report = try await Syncer.sync(store: store, transport: transport, sealedWith: sealedWith) { [weak self] note, meta in
                     guard let self, workspace.id == self.registry.current.id else { return }
                     self.library.synced(note, meta: meta)
                 }
@@ -108,9 +112,9 @@ final class SyncCoordinator {
         if !isEnabled { status.message = statusAtRest }
     }
 
-    /// Each linked server's vault is checked until it is open. See ADR 0052.
+    /// Each server with an encrypted linked workspace has its vault checked until it is open. See ADR 0052, 0075.
     private func checkVaults() async {
-        let linked = Set(registry.workspaces.compactMap { $0.link?.server })
+        let linked = Set(registry.workspaces.compactMap { $0.link }.filter(\.sealed).map(\.server))
         for server in linked where sessions.isSignedIn(server) && vaults.key(for: server) == nil {
             await vaults.check(server)
         }

@@ -14,16 +14,16 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 
 | Methode | Pfad | Bedeutung |
 | --- | --- | --- |
-| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "join": true, "modules": { "inkhash": { "title", "encryption": "required", "vault": true, "workspaces": true, "pairing": true, "appScheme": "inkhash" } } }`, ohne Sitzung. Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
+| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "join": true, "modules": { "inkhash": { "title", "encryption": "optional", "vault": true, "workspaces": true, "pairing": true, "plainWorkspaces": true, "workspaceStorage": true, "appScheme": "inkhash" } } }`, ohne Sitzung. Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
 | POST | `/v1/setup` | `{ "setupToken", "name", "password" }` → 201 `{ "token", "account": { "id", "name", "admin": true } }`, ohne Sitzung |
-| POST | `/v1/session` | `{ "name", "password" }` → `{ "token", "account": { "id", "name", "admin" } }` |
+| POST | `/v1/session` | `{ "name", "password", "module": "inkhash" }` → `{ "token", "account": { "id", "name", "admin" } }`. Mit `module` ist es die Sitzung der App; sie gibt Speicher nur für inkhash frei (Kennel ADR 0025). `POST /v1/join` schickt `module` ebenso |
 | DELETE | `/v1/session` | Sitzung beenden |
 | POST | `/v1/join` | Beitrittscode einlösen, ohne Sitzung (ADR 0071, Kennel ADR 0018). Die App sendet zuerst `{ "code" }`: ein Code für „Gerät hinzufügen“ → 200 `{ "token", "account" }`. Eine Einladung antwortet darauf 400 mit `reason: "name"` oder `"password"` und bleibt gültig; dann `{ "code", "name", "password" }` → 201 `{ "token", "account" }` mit neuem Account. Falscher, abgelaufener oder eingelöster Code: 401. 409 `name-taken`, 429 `slow-down` |
 | POST | `/v1/join-codes` | `{ "kind": "device" }` → 201 `{ "id", "kind", "createdBy", "createdAt", "expiresAt", "code" }`. Ein Code für ein weiteres Gerät dieses Accounts, 15 Minuten, einmal (ADR 0072). Nur hier steht der Code im Klartext |
 | DELETE | `/v1/join-codes/{id}` | Zurückziehen → 204. Schon eingelöst, abgelaufen oder unbekannt: 404 |
 | GET | `/v1/apps/inkhash/vault` | Der Tresor des Accounts: `{ "keyId", "kdf": { "name", "rounds", "salt" }, "wrapped", "createdAt", "updatedAt", "epoch" }`. 404 `no-vault`, solange es keinen gibt |
 | PUT | `/v1/apps/inkhash/vault` | `{ "keyId", "kdf", "wrapped" }` → 201 beim Anlegen, 200 mit derselben `keyId` (neuer Wiederherstellungsschlüssel). Eine andere `keyId` ist 409 `vault-exists` mit `vault` |
-| DELETE | `/v1/apps/inkhash/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller Workspaces des Accounts werden archiviert und sind für alle Routen weg, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
+| DELETE | `/v1/apps/inkhash/vault` | `{ "password" }` mit dem Login-Passwort → 204. Notizen und Blobs aller verschlüsselten Workspaces des Accounts werden archiviert und sind für alle Routen weg, die Bilder der Workspaces fallen weg, `epoch` zählt hoch |
 | PUT | `/v1/apps/inkhash/vault/pairings/<id>` | `{ "sealed" }` → 201 `{ "expiresAt" }`. Legt den versiegelten Account-Schlüssel für ein neues Gerät ab, fünf Minuten, höchstens einer pro Account; ein neuer ersetzt den alten. 404 `no-vault` ohne Tresor (ADR 0054) |
 | GET | `/v1/apps/inkhash/vault/pairings/<id>` | `{ "sealed" }` einmal, danach ist er weg. 404, wenn abgelaufen, schon abgeholt, zurückgezogen oder unbekannt |
 | DELETE | `/v1/apps/inkhash/vault/pairings/<id>` | Zieht die Kopplung zurück → 204, auch wenn sie schon weg ist |
@@ -34,7 +34,7 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | DELETE | `/v1/accounts/{id}` | nur Admin: 204. Identität und Sitzungen weg, die Daten der Module bleiben für den Betreiber |
 | GET | `/admin` | Kennels Verwaltungsseite, HTML |
 | GET | `/v1/apps/inkhash/workspaces` | `{ "workspaces": [Workspace], "ordered" }` in der Reihenfolge des Accounts |
-| POST | `/v1/apps/inkhash/workspaces` | `{ "name" }` → 201 Workspace. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main` |
+| POST | `/v1/apps/inkhash/workspaces` | `{ "name", "sealed"?, "storageId"? }` → 201 Workspace. Name 1–40 Zeichen, höchstens 50 Workspaces einschließlich `main`. `sealed` fehlt: verschlüsselt; `storageId` fehlt: der Speicher des Accounts. Ein Speicher, den der Account nicht sieht, der inkhash nicht zulässt oder keine Blobs kann: 400 `reason: "storage"`. Beides gilt für immer (ADR 0075, Kennel ADR 0026) |
 | PATCH | `/v1/apps/inkhash/workspaces/{id}` | `{ "name"?, "symbol"?, "icon"? }` → Workspace |
 | DELETE | `/v1/apps/inkhash/workspaces/{id}` | 204. Der Workspace verschwindet für den Account; der letzte ist 400 mit `reason: "last workspace"` |
 | PUT | `/v1/apps/inkhash/workspace-order` | `{ "ids": [...] }` → wie `GET /v1/apps/inkhash/workspaces` |
@@ -45,7 +45,7 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 | PUT | `/v1/apps/inkhash/blobs/{sha256}` | Rohbytes. 400, wenn der Hash nicht passt. 204, wenn er liegt |
 | GET | `/v1/apps/inkhash/blobs/{sha256}` | Rohbytes |
 
-Ein Workspace ist `{ "id", "name", "symbol", "icon", "updatedAt" }`. `symbol` ist der Name eines SF Symbols (`[a-z0-9]` in Teilen mit `.`, höchstens 64 Zeichen), `icon` der sha256 eines Blobs im selben Workspace, `updatedAt` die letzte Änderung über `PATCH`. Alle drei sind `null`, solange kein Gerät das Aussehen gesetzt hat. `PATCH` ändert nur die genannten Felder, mindestens eines; `"icon": null` entfernt das Bild. Ein `icon`, das nicht als Blob im Workspace liegt, ist 400 mit `reason: "icon"`, ein ungültiges Symbol 400 mit `reason: "symbol"`. Siehe ADR 0043.
+Ein Workspace ist `{ "id", "name", "symbol", "icon", "updatedAt", "sealed", "storageId" }`. `sealed` sagt, ob seine Notizen verschlüsselt sind, `storageId` den Speicher in Kennel (`null`: der des Accounts); ältere Server lassen beides weg, dann ist er verschlüsselt. `symbol` ist der Name eines SF Symbols (`[a-z0-9]` in Teilen mit `.`, höchstens 64 Zeichen), `icon` der sha256 eines Blobs im selben Workspace, `updatedAt` die letzte Änderung über `PATCH`. Alle drei sind `null`, solange kein Gerät das Aussehen gesetzt hat. `PATCH` ändert nur die genannten Felder, mindestens eines; `"icon": null` entfernt das Bild. Ein `icon`, das nicht als Blob im Workspace liegt, ist 400 mit `reason: "icon"`, ein ungültiges Symbol 400 mit `reason: "symbol"`. Siehe ADR 0043.
 
 `DELETE /v1/apps/inkhash/workspaces/{id}` nimmt den Workspace aus Liste und Reihenfolge; seine Routen antworten danach mit 404, bei `main` auch die ohne Präfix. Der Server markiert ihn als gelöscht, statt Notizen und Blobs zu löschen. Ein Workspace muss bleiben. Geräte erkennen das Löschen daran, dass der Workspace in `GET /v1/apps/inkhash/workspaces` fehlt. Siehe ADR 0045.
 
@@ -77,7 +77,7 @@ Siehe ADR 0052 und 0054. Der Tresor hält den Schlüssel des Accounts, verpackt 
 
 Kopplungen (ADR 0054) liegen nur im Speicher des Servers und gehören zum Account der Sitzung; ein anderer Account bekommt 404. `<id>` ist eine UUID, sonst 400 `reason: "pairing"`. `sealed` ist Base64 bis 512 Zeichen, sonst 400 `reason: "sealed"`. Der Server kann `sealed` nicht öffnen: Das Geheimnis dafür steht nur im QR-Code. Ein Reset des Tresors, das Löschen des Accounts und ein Neustart des Servers verwerfen offene Kopplungen.
 
-Alle Workspaces nehmen nur verschlüsselte Notizen an:
+Verschlüsselte Workspaces (alle von vorher und `main`) nehmen nur verschlüsselte Notizen an:
 
 ```json
 { "schemaVersion": 2, "id": "6f1c3a2e-7b64-4d1a-9c3e-2a8b0d5e7f10", "sealed": "AXk3…", "deleted": false }
@@ -85,9 +85,11 @@ Alle Workspaces nehmen nur verschlüsselte Notizen an:
 
 So geht sie beim `PUT` hin. Zurück kommt `{ "schemaVersion": 2, "id", "revision", "updatedAt", "deletedAt", "sealed" }`, auch in Konflikten (409) und in `GET`. `sealed` ist Base64 mit Länge durch vier teilbar, höchstens 2 000 000 Zeichen, sonst 400 `reason: "sealed"`. `deleted: true` speichert die Notiz als Grabstein (`deletedAt` bleibt oder wird gesetzt); fehlt es oder ist es `false`, ist sie danach nicht gelöscht. Der Retry-Vergleich gilt für dasselbe `sealed` mit demselben Grabstein-Zustand. `DELETE` funktioniert wie bei Klartext-Notizen.
 
-Kennel nimmt keine Klartext-Notizen an: Eine Notiz mit `schemaVersion: 1` ist 400 `reason: "sealed"`, mit oder ohne Tresor. Ohne Tresor ist eine Notiz mit `schemaVersion: 2` 400 `reason: "no vault"`, ein Blob ebenso. Die App legt deshalb zuerst den Tresor an und gleicht erst dann ab. Klartext-Notizen aus dem Umzug eines alten inkhashd bleiben lesbar, bis ein Gerät sie verschlüsselt neu schreibt.
+Ein verschlüsselter Workspace nimmt keine Klartext-Notizen an: Eine Notiz mit `schemaVersion: 1` ist 400 `reason: "sealed"`, mit oder ohne Tresor. Ohne Tresor ist eine Notiz mit `schemaVersion: 2` 400 `reason: "no vault"`, ein Blob ebenso. Die App legt deshalb zuerst den Tresor an und gleicht erst dann ab. Klartext-Notizen aus dem Umzug eines alten inkhashd bleiben lesbar, bis ein Gerät sie verschlüsselt neu schreibt.
 
-Blobs eines Accounts mit Tresor heißen nach dem HMAC, den nur die Geräte bilden können, nicht nach ihrem SHA-256. Der Server prüft dann den Hash nicht, lehnt aber einen Blob ab, dessen Name sein eigener SHA-256 ist: Das wäre Klartext (400 `reason: "sealed"`). Hat ein Workspace keine Klartext-Notiz mehr, löscht der Server dort beim nächsten Zugriff einmal alle Klartext-Blobs außer dem aktuellen Bild des Workspace. Ein ersetztes oder entferntes Klartext-Bild löscht `PATCH` gleich mit.
+Ein unverschlüsselter Workspace (`sealed: false`, ADR 0075) nimmt nur Klartext-Notizen in der Form unter „Notiz“ und braucht keinen Tresor; der Server prüft dort nur `id`, `kind` und höchstens 2 MB. Eine versiegelte Notiz ist dort 400 `reason: "plain"`. Seine Blobs heißen nach ihrem SHA-256; nur mit Tresor nimmt er auch versiegelte, für sein Bild. Ein Reset des Tresors lässt ihn unberührt.
+
+Blobs eines Accounts mit Tresor heißen in verschlüsselten Workspaces nach dem HMAC, den nur die Geräte bilden können, nicht nach ihrem SHA-256. Der Server prüft dann den Hash nicht, lehnt aber einen Blob ab, dessen Name sein eigener SHA-256 ist: Das wäre Klartext (400 `reason: "sealed"`). Hat ein Workspace keine Klartext-Notiz mehr, löscht der Server dort beim nächsten Zugriff einmal alle Klartext-Blobs außer dem aktuellen Bild des Workspace. Ein ersetztes oder entferntes Klartext-Bild löscht `PATCH` gleich mit.
 
 Der Inhalt in `sealed` ist für den Server ohne Bedeutung. Für die Geräte: Byte `0x01`, dann 12 Byte Nonce, Chiffrat und 16 Byte Tag von AES-256-GCM über die zlib-gepackte Notiz als JSON (ohne `revision`, `updatedAt`, `deletedAt`), mit `inkhash-note-v1:<id>` als zusätzlichen Daten. Blobs ebenso, ohne zlib, mit `inkhash-blob-v1:<name>`.
 

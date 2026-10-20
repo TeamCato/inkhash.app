@@ -52,5 +52,7 @@ Diese Wörter heißen im Code so.
 | Im Netz gefunden | Kennel, die sich per Bonjour (`_kennel._tcp`) im Heimnetz ankündigen; ein Vorschlag fürs Adressfeld (`KennelConnectSection` aus KennelKitUI, ADR 0072, 0074). |
 | sealed | Eine Notiz oder ein Blob, verschlüsselt mit dem Schlüssel des Accounts (`Sealer`). `schemaVersion: 2` auf dem Draht. |
 | epoch | Zahl der Resets eines Tresors. Ändert die Bindung der Bibliotheken (`Workspaces.bindingKey`). |
+| Unverschlüsselter Workspace | Ein Workspace auf dem Server, dessen Notizen als Klartext gehen und lesbar im Speicher liegen. Beim Anlegen gewählt, danach fest (`WorkspaceLink.sealed`, ADR 0075). |
+| Speicher eines Workspace | Der Speicher in Kennel, in dem die Notizen eines Server-Workspace liegen: der des Accounts oder ein eigener, den inkhash nutzen darf (ADR 0075). |
 
 `# Titel` ist eine Überschrift. `#titel` ist ein Tag. In Handschrift-Abschriften ist `# titel` ebenfalls ein Tag.

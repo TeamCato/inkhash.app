@@ -87,7 +87,7 @@ final class ServerSessions {
         }
         do {
             let session = try await KennelClient(address: url)
-                .signIn(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
+                .signIn(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password, module: APIClient.module)
             return try keep(session, from: url, message: "Angemeldet.")
         } catch {
             status.message = StatusLine.describe(error)
@@ -115,7 +115,7 @@ final class ServerSessions {
             account = KennelNewAccount(name: name.trimmingCharacters(in: .whitespacesAndNewlines), password: password)
         }
         do {
-            let session = try await KennelClient(address: url).join(code: code, account: account)
+            let session = try await KennelClient(address: url).join(code: code, account: account, module: APIClient.module)
             let message = account == nil ? "Angemeldet." : "Account angelegt und angemeldet."
             return .joined(try keep(session, from: url, message: message))
         } catch KennelJoinError.needsAccount {
@@ -226,6 +226,23 @@ final class ServerSessions {
         } catch {
             status.message = StatusLine.describe(error)
             return nil
+        }
+    }
+
+    /// What the server's module can do, as `/v1/health` tells it. Nil if it cannot be reached.
+    func capabilities(of server: UUID) async -> ModuleInfo? {
+        guard let entry = registry.server(server), let url = URL(string: entry.url) else { return nil }
+        return try? await KennelClient(address: url).health().inkhash
+    }
+
+    /// Kennel's storages this app may put notes in (ADR 0075). Empty when signed out or it failed; the status says why.
+    func noteStorages(on server: UUID) async -> [KennelStorage] {
+        guard let client = client(for: server) else { return [] }
+        do {
+            return try await client.noteStorages()
+        } catch {
+            status.message = StatusLine.describe(error)
+            return []
         }
     }
 

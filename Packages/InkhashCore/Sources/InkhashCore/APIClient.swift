@@ -32,15 +32,27 @@ public struct ModuleInfo: Codable, Equatable, Sendable {
     public var pairing: Bool?
     /// The URL scheme of the module's app, `inkhash`, for Kennel's page `/join` (ADR 0071).
     public var appScheme: String?
+    /// Workspaces may be made without encryption (ADR 0075, Kennel ADR 0026).
+    public var plainWorkspaces: Bool?
+    /// Workspaces may be made in a storage of their own (ADR 0075, Kennel ADR 0026).
+    public var workspaceStorage: Bool?
 
-    public init(title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil, appScheme: String? = nil) {
+    public init(
+        title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil,
+        appScheme: String? = nil, plainWorkspaces: Bool? = nil, workspaceStorage: Bool? = nil
+    ) {
         self.title = title
         self.encryption = encryption
         self.vault = vault
         self.workspaces = workspaces
         self.pairing = pairing
         self.appScheme = appScheme
+        self.plainWorkspaces = plainWorkspaces
+        self.workspaceStorage = workspaceStorage
     }
+
+    /// Whether a new server workspace can choose its storage and encryption.
+    public var choosesWorkspaceStorage: Bool { plainWorkspaces == true && workspaceStorage == true }
 }
 
 public struct RemoteWorkspace: Codable, Equatable, Sendable, Identifiable {
@@ -52,14 +64,40 @@ public struct RemoteWorkspace: Codable, Equatable, Sendable, Identifiable {
     public var icon: String?
     /// Last change of the look. Nil while no device has set it.
     public var updatedAt: String?
+    /// Whether its notes are encrypted. Nil from a Kennel before ADR 0075, where every workspace is.
+    public var sealed: Bool?
+    /// The Kennel storage it lies in; nil: the account's storage for inkhash.
+    public var storageId: String?
 
-    public init(id: String, name: String, symbol: String? = nil, icon: String? = nil, updatedAt: String? = nil) {
+    public init(
+        id: String, name: String, symbol: String? = nil, icon: String? = nil, updatedAt: String? = nil, sealed: Bool? = nil,
+        storageId: String? = nil
+    ) {
         self.id = id
         self.name = name
         self.symbol = symbol
         self.icon = icon
         self.updatedAt = updatedAt
+        self.sealed = sealed
+        self.storageId = storageId
     }
+
+    /// Encrypted unless the server says otherwise (ADR 0075).
+    public var isSealed: Bool { sealed ?? true }
+}
+
+/// How a new workspace lies on the server, chosen once (ADR 0075). The default is what every workspace was before.
+public struct NewRemoteWorkspace: Hashable, Sendable {
+    public var sealed: Bool
+    /// A Kennel storage that allows inkhash; nil: the account's storage.
+    public var storageID: String?
+
+    public init(sealed: Bool = true, storageID: String? = nil) {
+        self.sealed = sealed
+        self.storageID = storageID
+    }
+
+    public static let standard = NewRemoteWorkspace()
 }
 
 /// The account's workspaces in its order. See ADR 0043.
@@ -137,14 +175,26 @@ public struct APIClient: NoteTransport, Sendable {
         }
     }
 
-    public func createWorkspace(name: String) async throws -> RemoteWorkspace {
+    /// The standard choice sends only the name, so older servers take it as before.
+    public func createWorkspace(name: String, as choice: NewRemoteWorkspace = .standard) async throws -> RemoteWorkspace {
+        struct Body: Encodable {
+            var name: String
+            var sealed: Bool?
+            var storageId: String?
+        }
+        let body = Body(name: name, sealed: choice.sealed ? nil : false, storageId: choice.storageID)
         let data = try await send(
             "/workspaces",
             method: "POST",
-            body: try InkhashJSON.encode(["name": name]),
+            body: try InkhashJSON.encode(body),
             contentType: "application/json"
         )
         return try InkhashJSON.decode(RemoteWorkspace.self, from: data)
+    }
+
+    /// Kennel's storages that inkhash may use for notes (Kennel ADR 0025): they allow the module and hold blobs.
+    public func noteStorages() async throws -> [KennelStorage] {
+        try await kennel.storages(for: Self.module).filter { $0.kinds.contains("blobs") }
     }
 
     public func updateWorkspace(id: String, look: WorkspaceLook) async throws -> RemoteWorkspace {

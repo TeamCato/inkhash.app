@@ -22,10 +22,22 @@ public struct WorkspaceLink: Codable, Equatable, Sendable {
     public var server: UUID
     /// The workspace id on the server, `main` or a UUID.
     public var remote: String
+    /// Whether the server workspace is encrypted; it stays so for its life (ADR 0075). Links from before are.
+    public var sealed: Bool
 
-    public init(server: UUID, remote: String) {
+    public init(server: UUID, remote: String, sealed: Bool = true) {
         self.server = server
         self.remote = remote
+        self.sealed = sealed
+    }
+
+    private enum CodingKeys: String, CodingKey { case server, remote, sealed }
+
+    public init(from decoder: any Decoder) throws {
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        server = try values.decode(UUID.self, forKey: .server)
+        remote = try values.decode(String.self, forKey: .remote)
+        sealed = try values.decodeIfPresent(Bool.self, forKey: .sealed) ?? true
     }
 }
 
@@ -138,7 +150,7 @@ public struct DeviceSetup: Codable, Equatable, Sendable {
     ) -> [UUID] {
         var added: [UUID] = []
         for remote in unlinked(remotes, on: server) {
-            let link = WorkspaceLink(server: server, remote: remote.id)
+            let link = WorkspaceLink(server: server, remote: remote.id, sealed: remote.isSealed)
             if added.isEmpty, workspaces.count == 1, workspaces[0].link == nil, isEmpty(workspaces[0].id) {
                 workspaces[0].name = remote.name
                 workspaces[0].symbol = remote.symbol ?? workspaces[0].symbol

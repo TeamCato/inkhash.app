@@ -34,8 +34,9 @@ extension LibrarySection {
 /// Where a new or existing workspace syncs to.
 enum WorkspaceTarget: Hashable {
     case local
-    /// `remote` nil creates a new workspace on that server.
-    case server(UUID, remote: String?)
+    /// `remote` nil creates a new workspace on that server, laid out as `new` says. An existing remote brings
+    /// whether it is encrypted in `new.sealed` (ADR 0075).
+    case server(UUID, remote: String?, new: NewRemoteWorkspace = .standard)
 }
 
 /// What the views share: where the user is (section, search, selection) and the steps that need
@@ -412,11 +413,11 @@ final class AppModel {
         switch target {
         case .local:
             return nil
-        case .server(let serverID, let remote):
+        case .server(let serverID, let remote, let new):
             guard let client = sessions.client(for: serverID) else { throw APIError.unauthorized }
-            if let remote { return WorkspaceLink(server: serverID, remote: remote) }
-            let created = try await client.createWorkspace(name: name)
-            return WorkspaceLink(server: serverID, remote: created.id)
+            if let remote { return WorkspaceLink(server: serverID, remote: remote, sealed: new.sealed) }
+            let created = try await client.createWorkspace(name: name, as: new)
+            return WorkspaceLink(server: serverID, remote: created.id, sealed: created.isSealed)
         }
     }
 

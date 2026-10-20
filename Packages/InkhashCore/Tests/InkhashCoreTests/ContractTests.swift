@@ -356,4 +356,63 @@ final class ContractTests: XCTestCase {
         try await client.kennel.changePassword(current: "secretsecret", to: "neuesneues")
         _ = try await client.workspaceList()
     }
+
+    /// A plain workspace in a storage of its own: no vault, notes as they are, a second device reads them (ADR 0075).
+    func testPlainWorkspaceInItsOwnStorageNeedsNoVault() async throws {
+        let client = try await account()
+        let health = try await client.kennel.health()
+        XCTAssertEqual(health.inkhash?.choosesWorkspaceStorage, true)
+
+        // The admin's NAS for inkhash; another one only for Xoot stays out of the app's list.
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inkhash-share-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let admin = KennelClient(address: url, token: adminToken)
+        let share = try await admin.createStorage(
+            KennelNewStorage(name: "NAS", driver: "folder", settings: ["path": .string(folder.path)], household: true, modules: ["inkhash"]))
+        _ = try await admin.createStorage(
+            KennelNewStorage(name: "Fotos", driver: "folder", settings: ["path": .string(folder.path)], household: true, modules: ["xoot"]))
+        let offered = try await client.noteStorages()
+        XCTAssertTrue(offered.contains { $0.id == share.id })
+        XCTAssertFalse(offered.contains { $0.name == "Fotos" })
+
+        let remote = try await client.createWorkspace(name: "Haushalt", as: NewRemoteWorkspace(sealed: false, storageID: share.id))
+        XCTAssertFalse(remote.isSealed)
+        XCTAssertEqual(remote.storageId, share.id)
+        var scoped = client
+        scoped.workspace = remote.id
+        let none = try await client.vault()
+        XCTAssertNil(none)
+
+        let store = try freshStore()
+        let notes = try fill(store)
+        let report = try await Syncer.sync(store: store, transport: scoped)
+        XCTAssertEqual(report.rejected, [])
+        for note in notes {
+            guard case .plain = try await scoped.fetchWire(id: note.id) else { return XCTFail("sealed on the server: \(note.id)") }
+        }
+        let other = try freshStore()
+        _ = try await Syncer.sync(store: other, transport: scoped)
+        for note in notes {
+            let mine = try XCTUnwrap(store.note(id: note.id))
+            let theirs = try XCTUnwrap(other.note(id: note.id))
+            XCTAssertTrue(theirs.sameContent(as: mine))
+        }
+        for name in try XCTUnwrap(other.note(id: notes[1].id)?.pages?.first).blobNames {
+            XCTAssertEqual(try other.blob(name), try store.blob(name))
+        }
+        // Readable on the share itself.
+        let listed = try FileManager.default.subpathsOfDirectory(atPath: folder.appendingPathComponent("inkhash").path)
+        XCTAssertTrue(listed.contains { $0.contains("/\(remote.id)/notes/") })
+
+        // A sealed note is refused there.
+        let key = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds).0
+        do {
+            _ = try await SealedTransport(wire: scoped, sealer: Sealer(key)).putNote(Note.newText(now: "2026-10-03T08:00:00Z"), baseRevision: 0)
+            XCTFail("sealed note accepted")
+        } catch let APIError.badStatus(code, body) {
+            XCTAssertEqual(code, 400)
+            XCTAssertTrue(body.contains("plain"))
+        }
+    }
+
 }

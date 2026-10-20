@@ -80,4 +80,26 @@ final class APIClientTests: XCTestCase {
             XCTAssertEqual(error as? APIError, .wrongPassword)
         }
     }
+
+    func testNewWorkspaceSendsItsLayoutOnlyWhenChosen() async throws {
+        let reply = #"{"id":"w1","name":"Haushalt","sealed":false,"storageId":"s1"}"#
+        let (client, requests) = HTTPStub.client { _ in HTTPStub.json(201, reply) }
+        let created = try await client.createWorkspace(name: "Haushalt", as: NewRemoteWorkspace(sealed: false, storageID: "s1"))
+        _ = try await client.createWorkspace(name: "Privat")
+        let bodies = try requests().map { try JSONSerialization.jsonObject(with: $0.body) as? [String: AnyHashable] }
+        XCTAssertEqual(bodies[0], ["name": "Haushalt", "sealed": false, "storageId": "s1"])
+        XCTAssertEqual(bodies[1], ["name": "Privat"])
+        XCTAssertFalse(created.isSealed)
+        XCTAssertEqual(created.storageId, "s1")
+        XCTAssertTrue(RemoteWorkspace(id: "main", name: "Privat").isSealed, "older servers seal everything")
+    }
+
+    func testLinksFromBeforeAreSealed() throws {
+        let old = #"{"server":"6F1C3A2E-7B64-4D1A-9C3E-2A8B0D5E7F10","remote":"main"}"#
+        let link = try JSONDecoder().decode(WorkspaceLink.self, from: Data(old.utf8))
+        XCTAssertTrue(link.sealed)
+        let plain = WorkspaceLink(server: link.server, remote: "w1", sealed: false)
+        XCTAssertEqual(try JSONDecoder().decode(WorkspaceLink.self, from: JSONEncoder().encode(plain)), plain)
+    }
+
 }
