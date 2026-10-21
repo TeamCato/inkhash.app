@@ -306,4 +306,37 @@ final class SealedLooksTests: XCTestCase {
         let blobs = await remote.blobs
         XCTAssertEqual(try sealer.openBlob(XCTUnwrap(blobs["main/\(sealer.blobName(plain))"]), plain: plain), picture)
     }
+
+    /// Without the vault a plain workspace's picture goes up plain; an encrypted one's stays as it is (ADR 0077).
+    func testPlainWorkspacesNeedNoKeyAndSealedPicturesStayHere() async throws {
+        let key = try VaultCrypto.create(recoveryKey: .generate(), rounds: testRounds).0
+        let sealer = Sealer(key)
+        let server = UUID()
+        let device = base()
+        let icon = try Workspaces.saveIcon(Data("haus".utf8), base: device)
+        var plain = Workspace(name: "Haushalt", symbol: "house", icon: icon, link: WorkspaceLink(server: server, remote: "p", sealed: false))
+        plain.lookPending = true
+        let secret = Data("geheim".utf8)
+        let sealedName = sealer.blobName(sha256Hex(secret))
+        var locked = Workspace(name: "Arbeit", symbol: "briefcase", link: WorkspaceLink(server: server, remote: "s"))
+        locked.lookPending = true
+        let remote = FakeWorkspaceServer(
+            [
+                RemoteWorkspace(id: "p", name: "Haushalt", sealed: false),
+                RemoteWorkspace(id: "s", name: "Arbeit", icon: sealedName, updatedAt: "2026-10-01T10:00:00Z", sealed: true),
+            ],
+            ordered: true, blobs: ["s/\(sealedName)": try sealer.sealBlob(secret, plain: sha256Hex(secret))]
+        )
+        let synced = try await LookSyncer.sync(
+            DeviceSetup(servers: [], workspaces: [plain, locked], current: plain.id), server: server, base: device,
+            transport: SealedLooks(inner: remote, sealer: nil, sealed: { $0 == "s" }, icons: [icon])
+        )
+        let looks = await remote.looks
+        XCTAssertEqual(looks["p"]?.icon, icon, "plain, under its own hash")
+        let blobs = await remote.blobs
+        XCTAssertEqual(blobs["p/\(icon)"], Data("haus".utf8))
+        XCTAssertNil(looks["s"], "an encrypted look is written only with the key")
+        XCTAssertTrue(synced.workspaces[1].lookPending, "and waits for a device that has it")
+        XCTAssertNil(synced.workspaces[1].icon)
+    }
 }

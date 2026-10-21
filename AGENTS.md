@@ -28,6 +28,7 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 
 - Der Server speichert, liefert aus und synchronisiert. Er erkennt keine Handschrift, rendert nicht und leitet keine Tags ab.
 - Suche läuft auf dem Gerät über die lokale Bibliothek, inklusive der mitgelieferten Abschriften.
+- **Ein Kennel, kein Tresor in der Oberfläche** (ADR 0077, teamCato ADR 0009): Kennel heißt in der Oberfläche nie „Server“, hat eine Seite „Kennel“ in den Einstellungen, und wo ein Workspace liegt, ändert nur sein Abschnitt „Ort“. Neue Kennel-Workspaces sind unverschlüsselt; verschlüsselte wandelt die App um und löscht den alten erst, wenn alles im Nachfolger liegt.
 - **Eigenständigkeit geht immer vor.** Nichts in der App darf einen Server voraussetzen. Ohne gehosteten Kennel und ohne Anmeldung geht alles außer dem Abgleich; Kennel wertet auf, er ist nie Voraussetzung (ADR 0017, teamCato ADR 0002).
 - Kein iCloud als Ablage oder Abgleich (iCloud Drive, CloudKit), kein zweites Sync-Ziel, kein Assistent und kein Embedding-Modell in der App. Das iCloud-Backup des Geräts ist erlaubt und erwünscht (ADR 0051).
 - Keine Notion-Datenbanken, keine Whiteboards.
@@ -43,7 +44,7 @@ Direkt auf `main` arbeiten. Keine Pull Requests, Dominik merged nicht selbst (te
 - `make test` — Swift-Paket und der Vertragstest gegen Kennel (`make contract-test`, braucht einen Kennel-Checkout in `KENNEL_DIR` oder `../kennel`, sonst übersprungen)
 - KennelKit kommt aus `github.com/teamcato/kennel` (ADR 0073). Mit gesetztem `KENNELKIT_DIR` nehmen `swift test` und `xcodebuild` (alle `make`-Ziele) das Paket aus diesem Ordner, z. B. `KENNELKIT_DIR=../kennel make test`. Xcode warnt dann, dass zwei Abhängigkeiten `kennel` heißen; das ist der Override und gilt nur lokal
 - `make app-test` — App-Tests im iPad-Simulator (Editor, Bibliothek, Export)
-- `make ui-test` — Tresor-Sheets im iPhone-Simulator gegen Kennels Testserver (braucht Kennel wie `make contract-test`)
+- `make ui-test` — UI-Tests im iPhone-Simulator gegen Kennels Testserver (braucht Kennel wie `make contract-test`)
 - `make mac-test` — Mac-Editor und Notizblatt ohne App-Host, mit eigener Wegwerf-Bibliothek. Schreibt Bilder nach `/tmp/inkhash-*.png` zum Ansehen
 - `make ipad-device TEAM=… DEVICE=…` — signiert aufs echte iPad oder iPhone. Braucht ein Apple-Konto in Xcode
 - `make generate` — Xcode-Projekt erzeugen

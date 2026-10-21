@@ -31,18 +31,18 @@ extension LibrarySection {
     }
 }
 
-/// Where a new or existing workspace syncs to.
+/// Where a new workspace lies (teamCato ADR 0009 point 5, ADR 0077).
 enum WorkspaceTarget: Hashable {
+    /// „Nur hier“.
     case local
-    /// `remote` nil creates a new workspace on that server, laid out as `new` says. An existing remote brings
-    /// whether it is encrypted in `new.sealed` (ADR 0075).
-    case server(UUID, remote: String?, new: NewRemoteWorkspace = .standard)
+    /// A new plain Kennel workspace in this storage; nil: the account's.
+    case kennel(storageID: String?)
 }
 
 /// What the views share: where the user is (section, search, selection) and the steps that need
 /// several parts of the model at once. Each part does one job:
-/// `WorkspaceRegistry` the workspaces and servers of this device, `ServerSessions` signing in,
-/// `NoteLibrary` the notes of the current workspace, `SyncCoordinator` syncing.
+/// `WorkspaceRegistry` the workspaces and the Kennel of this device, `ServerSessions` signing in,
+/// `NoteLibrary` the notes of the current workspace, `SyncCoordinator` syncing, `KennelOverview` what Kennel holds.
 @MainActor
 @Observable
 final class AppModel {
@@ -50,6 +50,7 @@ final class AppModel {
     let sessions: ServerSessions
     let vaults: VaultSessions
     let library: NoteLibrary
+    let overview: KennelOverview
     @ObservationIgnored private let syncer: SyncCoordinator
     private let statusLine: StatusLine
 
@@ -69,7 +70,7 @@ final class AppModel {
     var linkPromptToken = 0
     /// Set by the menu; the sidebar shows the file picker and clears it. See ADR 0024 and 0041.
     var importRequested = false
-    /// A join link or app link the app was opened with; the settings show the connect form for it. See ADR 0071.
+    /// A join link or app link the app was opened with; „Mit Kennel verbinden“ opens for it. See ADR 0071.
     var pendingJoin: JoinLink?
     private var impulseToken = 0
 
@@ -108,12 +109,15 @@ final class AppModel {
         let sessions = ServerSessions(registry: registry, status: status)
         let vaults = VaultSessions(sessions: sessions, status: status)
         let library = NoteLibrary(registry: registry, status: status)
-        let syncer = SyncCoordinator(registry: registry, sessions: sessions, vaults: vaults, library: library, status: status)
+        let overview = KennelOverview()
+        let syncer = SyncCoordinator(
+            registry: registry, sessions: sessions, vaults: vaults, library: library, status: status, overview: overview)
         self.statusLine = status
         self.registry = registry
         self.sessions = sessions
         self.vaults = vaults
         self.library = library
+        self.overview = overview
         self.syncer = syncer
         library.changed = { [weak syncer] in syncer?.schedule() }
         syncer.finished = { [weak self] in self?.dropMissingSelection() }
@@ -309,23 +313,21 @@ final class AppModel {
         syncer.schedule()
     }
 
-    func createWorkspace(name: String, symbol: String, image: Data?, target: WorkspaceTarget) async {
+    func createWorkspace(name: String, symbol: String, image: Data?, target: WorkspaceTarget) async -> String? {
         let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            status = "Der Workspace braucht einen Namen."
-            return
-        }
+        guard !trimmed.isEmpty else { return "Der Workspace braucht einen Namen." }
         var workspace = Workspace(name: trimmed.clippedUTF16(Limits.workspaceName), symbol: symbol)
         do {
             workspace.link = try await link(for: target, name: workspace.name)
         } catch {
-            status = StatusLine.describe(error)
-            return
+            return describe(error)
         }
         registry.append(workspace)
         if let image { registry.setImage(workspace.id, png: image) }
+        if workspace.link != nil { registry.placeLook(workspace.id) }
         switchWorkspace(workspace.id)
         await sync()
+        return nil
     }
 
     func updateWorkspace(_ id: UUID, name: String, symbol: String) {
@@ -346,106 +348,162 @@ final class AppModel {
         syncer.schedule()
     }
 
-    /// Points a workspace at another server workspace, or at none. Changing the target uploads
-    /// all its notes there, like signing in to another account (ADR 0017).
-    func relink(_ id: UUID, to target: WorkspaceTarget) async {
-        guard let workspace = registry.workspace(id) else { return }
+    /// „In Kennel ablegen …“: a new plain Kennel workspace in this storage (nil: the account's) takes all notes of a
+    /// workspace that lies only here (teamCato ADR 0009 point 6, ADR 0077). Nil on success, else why not.
+    func placeInKennel(_ id: UUID, storageID: String?, syncing: Bool = true) async -> String? {
+        guard let workspace = registry.workspace(id), workspace.link == nil else { return nil }
         do {
-            let link = try await link(for: target, name: workspace.name)
-            guard registry.setLink(id, to: link) else { return }
-            status = link == nil ? "Der Workspace bleibt jetzt auf diesem Gerät." : ""
-            if id == registry.current.id { status = syncer.statusAtRest }
-            await sync()
+            let link = try await link(for: .kennel(storageID: storageID), name: workspace.name)
+            registry.setLink(id, to: link)
+            registry.placeLook(id)
         } catch {
-            status = StatusLine.describe(error)
+            return describe(error)
         }
-    }
-
-    /// Moves the server workspace behind a linked workspace to another storage (`nil`: the account's). Kennel moves in
-    /// the background; the answer is the workspace with its move. Nil and the status say why when it failed (ADR 0076).
-    func moveOnServer(_ id: UUID, to storageID: String?) async -> RemoteWorkspace? {
-        guard let link = registry.workspace(id)?.link, let client = sessions.client(for: link.server) else {
-            status = "Nicht angemeldet."
-            return nil
-        }
-        do {
-            let moved = try await client.moveWorkspace(id: link.remote, to: storageID)
-            status = moved.move?.isRunning == true ? "Der Workspace zieht um. Der Abgleich ruht so lange." : ""
-            return moved
-        } catch APIError.unauthorized {
-            sessions.expire(link.server, ifStill: client.token)
-            status = "Die Anmeldung ist abgelaufen."
-        } catch let APIError.badStatus(400, body) where body.contains("storage") {
-            status = "Diesen Speicher darf inkhash nicht nutzen."
-        } catch {
-            status = StatusLine.describe(error)
-        }
+        status = "„\(workspace.name)“ liegt jetzt auch in Kennel."
+        if syncing { await sync() }
         return nil
     }
 
-    /// Removes the workspace and its notes from this device. A server copy stays where it is.
+    /// „Nur noch auf diesem Gerät …“: the workspace stops syncing. Its notes stay here, the Kennel copy stays there.
+    func keepOnlyHere(_ id: UUID) {
+        guard let workspace = registry.workspace(id), registry.setLink(id, to: nil) else { return }
+        status = "„\(workspace.name)“ liegt jetzt nur noch auf diesem Gerät."
+    }
+
+    /// Syncs a local workspace with an existing Kennel workspace; the notes of both meet there (ADR 0017). An
+    /// encrypted one is converted on the way (ADR 0077).
+    func link(_ id: UUID, to remote: RemoteWorkspace) {
+        guard let kennel = registry.kennel else { return }
+        registry.setLink(id, to: WorkspaceLink(server: kennel.id, remote: remote.id, sealed: remote.isSealed))
+    }
+
+    /// Moves the Kennel workspace behind a linked workspace to another storage (`nil`: the account's). Kennel moves in
+    /// the background; the answer is the workspace with its move. Nil when it failed; the text says why (ADR 0076).
+    func moveInKennel(_ id: UUID, to storageID: String?) async -> Result<RemoteWorkspace, KennelProblem> {
+        guard let link = registry.workspace(id)?.link, let client = sessions.client(for: link.server) else {
+            return .failure(KennelProblem("Nicht mit Kennel verbunden."))
+        }
+        do {
+            let moved = try await client.moveWorkspace(id: link.remote, to: storageID)
+            replaceRemote(moved)
+            return .success(moved)
+        } catch APIError.unauthorized {
+            sessions.expire(link.server, ifStill: client.token)
+            return .failure(KennelProblem("Die Anmeldung ist abgelaufen."))
+        } catch let APIError.badStatus(400, body) where body.contains("storage") {
+            return .failure(KennelProblem("Diesen Speicher darf inkhash nicht nutzen."))
+        } catch {
+            return .failure(KennelProblem(StatusLine.describe(error)))
+        }
+    }
+
+    /// Asks Kennel now and then until the move of the workspace is over, then syncs (ADR 0076).
+    func watchMove(of id: UUID) async {
+        guard let link = registry.workspace(id)?.link, let kennel = registry.kennel else { return }
+        while overview.remotes.first(where: { $0.id == link.remote })?.move?.isRunning == true {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            guard let fresh = await sessions.remoteWorkspaceList(on: kennel.id) else { return }
+            overview.remotes = fresh.workspaces
+        }
+        await sync()
+    }
+
+    /// Removes the workspace and its notes from this device. A Kennel copy stays where it is.
     func removeWorkspace(_ id: UUID) {
         guard registry.remove(id) else { return }
         library.reload()
         dropMissingSelection()
     }
 
-    /// Takes server workspaces onto this device, linked and synced right away. See ADR 0044.
-    func addFromServer(_ remotes: [RemoteWorkspace], on server: UUID) async {
-        let added = registry.addLinked(remotes, on: server)
+    /// Takes Kennel workspaces onto this device, linked and synced right away. See ADR 0044.
+    func addFromKennel(_ remotes: [RemoteWorkspace]) async {
+        guard let kennel = registry.kennel else { return }
+        let added = registry.addLinked(remotes, on: kennel.id)
         guard !added.isEmpty else { return }
         status = added.count == 1 ? "Workspace hinzugefügt." : "\(added.count) Workspaces hinzugefügt."
         await sync()
     }
 
-    /// How many notes a server workspace holds, for the warning before deleting it. Nil if unknown.
-    func noteCount(of remote: RemoteWorkspace, on server: UUID) async -> Int? {
-        guard let client = sessions.client(for: server) else { return nil }
+    /// How many notes a Kennel workspace holds, for the warning before deleting it. Nil if unknown.
+    func noteCount(of remote: RemoteWorkspace) async -> Int? {
+        guard let kennel = registry.kennel, let client = sessions.client(for: kennel.id) else { return nil }
         return try? await client.noteCount(workspace: remote.id)
     }
 
-    /// Deletes a workspace on the server, for every device; one always stays. Workspaces here that
-    /// synced with it keep their notes and stay on this device only. Nil if it is gone, else why
-    /// not. See ADR 0045.
-    func deleteOnServer(_ remote: RemoteWorkspace, on server: UUID) async -> String? {
-        guard let client = sessions.client(for: server) else { return "Nicht angemeldet." }
+    /// Deletes a workspace in Kennel, for every device; one always stays. Workspaces here that synced with it keep
+    /// their notes and stay on this device only. Nil if it is gone, else why not. See ADR 0045.
+    func deleteInKennel(_ remote: RemoteWorkspace) async -> String? {
+        guard let kennel = registry.kennel, let client = sessions.client(for: kennel.id) else {
+            return "Nicht mit Kennel verbunden."
+        }
         do {
             try await client.deleteWorkspace(id: remote.id)
         } catch APIError.notFound {
             // Already gone, e.g. deleted on another device.
-        } catch APIError.badStatus(405, _) {
-            return "Dieser Server kann noch keine Workspaces löschen. Er braucht Version 0.3.0 oder neuer."
         } catch let APIError.badStatus(400, body) where body.contains("last workspace") {
-            return "Ein Workspace muss auf dem Server bleiben."
+            return "Ein Workspace muss in Kennel bleiben."
         } catch APIError.unauthorized {
-            sessions.expire(server, ifStill: client.token)
+            sessions.expire(kennel.id, ifStill: client.token)
             return "Die Anmeldung ist abgelaufen."
         } catch {
             return StatusLine.describe(error)
         }
-        for workspace in registry.workspaces(on: server) where workspace.link?.remote == remote.id {
+        for workspace in registry.workspaces(on: kennel.id) where workspace.link?.remote == remote.id {
             registry.setLink(workspace.id, to: nil)
         }
-        status = "„\(remote.name)“ ist auf dem Server gelöscht."
-        if registry.current.link == nil { status = syncer.statusAtRest }
+        overview.remotes.removeAll { $0.id == remote.id }
+        status = "„\(remote.name)“ ist in Kennel gelöscht."
         return nil
     }
 
+    /// A new Kennel workspace is always plain: inkhash offers no vault anymore (teamCato ADR 0009 point 10).
     private func link(for target: WorkspaceTarget, name: String) async throws -> WorkspaceLink? {
         switch target {
         case .local:
             return nil
-        case .server(let serverID, let remote, let new):
-            guard let client = sessions.client(for: serverID) else { throw APIError.unauthorized }
-            if let remote { return WorkspaceLink(server: serverID, remote: remote, sealed: new.sealed) }
-            let created = try await client.createWorkspace(name: name, as: new)
-            return WorkspaceLink(server: serverID, remote: created.id, sealed: created.isSealed)
+        case .kennel(let storageID):
+            guard let kennel = registry.kennel, let client = sessions.client(for: kennel.id) else {
+                throw KennelProblem("Nicht mit Kennel verbunden.")
+            }
+            let module = try await client.kennel.health().inkhash
+            guard module?.plainWorkspaces == true else {
+                throw KennelProblem("Dieser Kennel legt keine unverschlüsselten Workspaces an. Bitte Kennel aktualisieren.")
+            }
+            do {
+                let created = try await client.createWorkspace(
+                    name: name, as: NewRemoteWorkspace(sealed: false, storageID: module?.workspaceStorage == true ? storageID : nil))
+                overview.remotes.append(created)
+                return WorkspaceLink(server: kennel.id, remote: created.id, sealed: created.isSealed)
+            } catch let APIError.badStatus(400, body) where body.contains("storage") {
+                throw KennelProblem("Diesen Speicher darf inkhash nicht nutzen.")
+            }
         }
     }
 
-    // MARK: Servers and sync
+    private func replaceRemote(_ remote: RemoteWorkspace) {
+        if let index = overview.remotes.firstIndex(where: { $0.id == remote.id }) {
+            overview.remotes[index] = remote
+        } else {
+            overview.remotes.append(remote)
+        }
+    }
 
-    /// True if the workspace syncs right now: linked to a server with a session.
+    private func describe(_ error: Error) -> String {
+        (error as? KennelProblem)?.message ?? StatusLine.describe(error)
+    }
+
+    // MARK: Kennel
+
+    /// The one Kennel of this app, while one is connected (teamCato ADR 0009 point 8).
+    var kennel: ServerEntry? { registry.kennel }
+
+    /// The status line at the foot of the sidebar, nil while no Kennel is connected (teamCato ADR 0009 point 7).
+    var kennelStatus: KennelStatus? {
+        registry.kennel == nil ? nil : overview.state.status
+    }
+
+    /// True if the workspace syncs right now: linked to the Kennel with a session.
     func syncs(_ workspace: Workspace) -> Bool { syncer.syncs(workspace) }
 
     var isSyncEnabled: Bool { syncer.isEnabled }
@@ -454,18 +512,84 @@ final class AppModel {
         await syncer.sync()
     }
 
-    /// Signs in, then syncs. Returns the server's id, or nil when it failed; the status says why.
-    func signIn(url: String, name: String, password: String) async -> UUID? {
-        guard let server = await sessions.signIn(url: url, name: name, password: password) else { return nil }
-        await sync()
-        return server
+    /// Signs in or redeems a join code for „Mit Kennel verbinden“ (ADR 0071). Syncing waits for „Übernehmen“.
+    func connect(_ request: KennelConnectRequest) async -> KennelConnectOutcome {
+        let before = registry.kennel?.id
+        switch request {
+        case .signIn(let address, let name, let password):
+            guard await sessions.signIn(url: address.absoluteString, name: name, password: password) != nil else {
+                return .failed(status)
+            }
+        case .join(let address, let code, let account):
+            switch await sessions.join(
+                url: address.absoluteString, code: code.description, name: account?.name, password: account?.password)
+            {
+            case .joined: break
+            case .needsAccount: return .needsAccount
+            case .failed: return .failed(status)
+            }
+        }
+        if registry.kennel?.id != before { overview.reset() }
+        return .connected
     }
 
-    /// Redeems a join code, then syncs. See ADR 0071.
-    func join(url: String, code: String, name: String?, password: String?) async -> JoinOutcome {
-        let outcome = await sessions.join(url: url, code: code, name: name, password: password)
-        if case .joined = outcome { await sync() }
-        return outcome
+    /// Asks Kennel for its workspaces and storages, e.g. when a sheet that lists them opens. False if it failed;
+    /// the status says why.
+    @discardableResult
+    func refreshKennel() async -> Bool {
+        guard let kennel = registry.kennel, let client = sessions.client(for: kennel.id) else { return false }
+        do {
+            let module = try await client.kennel.health().inkhash
+            overview.module = module
+            overview.remotes = try await client.workspaceList().workspaces
+            if module?.workspaceStorage == true { overview.storages = (try? await client.noteStorages()) ?? overview.storages }
+            return true
+        } catch APIError.unauthorized {
+            sessions.expire(kennel.id, ifStill: client.token)
+            return false
+        } catch {
+            status = StatusLine.describe(error)
+            return false
+        }
+    }
+
+    /// „Übernehmen“: what lies only here and what Kennel has that is not here, each with a proposal (ADR 0077).
+    func takeOverPlan() async -> KennelTakeOverPlan? {
+        guard let kennel = registry.kennel, await refreshKennel() else { return nil }
+        return TakeOverPlanner.plan(
+            local: localOnly(), remotes: overview.unlinked(in: registry.setup), storages: overview.summaries,
+            accountID: kennel.accountID, account: kennel.accountName)
+    }
+
+    /// Applies the answers of „Übernehmen“, then syncs. Nil on success, else what went wrong.
+    func applyTakeOver(_ chosen: [String: String]) async -> String? {
+        let actions = TakeOverPlanner.actions(chosen: chosen, local: localOnly(), remotes: overview.unlinked(in: registry.setup))
+        for action in actions {
+            switch action {
+            case .place(let id, let storageID):
+                if let problem = await placeInKennel(id, storageID: storageID, syncing: false) { return problem }
+            case .link(let id, let remote):
+                link(id, to: remote)
+            case .add(let remotes):
+                if let kennel = registry.kennel { _ = registry.addLinked(remotes, on: kennel.id) }
+            }
+        }
+        status = actions.isEmpty ? "" : "Übernommen. Kennel gleicht jetzt ab."
+        await sync()
+        return nil
+    }
+
+    /// „Mit Kennel verbinden“ ended with „Später“ or nothing to take over: nothing is linked, but Kennel is asked once.
+    func connectedWithoutTakingOver() {
+        Task { await sync() }
+    }
+
+    private func localOnly() -> [TakeOverLocal] {
+        registry.workspaces.filter { $0.link == nil }.map { workspace in
+            TakeOverLocal(
+                id: workspace.id, name: workspace.name, isEmpty: registry.isEmpty(workspace.id),
+                boundKey: registry.store(for: workspace.id).boundAccount())
+        }
     }
 
     /// Takes `inkhash://kennel/join?…`; other URLs are not for this. Returns whether it was one.
@@ -476,48 +600,42 @@ final class AppModel {
         return true
     }
 
-    /// Signs out. The vault key leaves this device with the session. See ADR 0052.
-    func logout(_ server: UUID) {
-        sessions.logout(server)
-        vaults.forget(server)
-        status = syncer.statusAtRest
+    /// „Von Kennel trennen“: lossless (teamCato ADR 0002). Every workspace stays here as „Nur hier“, the Kennel copies
+    /// stay in Kennel, and the session and vault key leave this device.
+    func disconnect() {
+        guard let kennel = registry.kennel else { return }
+        sessions.logout(kennel.id)
+        sessions.dismissExpiredNotice(kennel.id)
+        vaults.forget(kennel.id)
+        registry.removeServer(kennel.id)
+        overview.reset()
+        status = "Von Kennel getrennt. Alle Workspaces bleiben auf diesem Gerät."
     }
 
-    /// Forgets a server. Workspaces linked to it stay on this device and stop syncing.
-    func removeServer(_ server: UUID) {
-        sessions.logout(server)
-        vaults.forget(server)
-        registry.removeServer(server)
-        status = syncer.statusAtRest
+    /// What „Von Kennel trennen …“ says will happen.
+    static let disconnectConsequence = "Alle Workspaces bleiben mit ihren Notizen auf diesem Gerät und gelten danach als „Nur hier“. In Kennel bleibt alles liegen. Verbindest du wieder, schlägt „Übernehmen“ die alten Zuordnungen vor."
+
+    /// A storage made in „Neuer Speicher …“ is offered right away.
+    func addStorage(_ storage: KennelStorage) {
+        if !overview.storages.contains(where: { $0.id == storage.id }) { overview.storages.append(storage) }
     }
 
-    // MARK: Vault, ADR 0052, 0054
+    // MARK: Vault, only to convert (ADR 0077)
 
-    /// Creates, opens or resets a vault, then syncs. Nil on success, else why not.
-    func createVault(on server: UUID, recoveryKey: RecoveryKey) async -> String? {
-        await afterVault(await vaults.create(server, recoveryKey: recoveryKey))
-    }
-
-    func unlockVault(on server: UUID, recoveryKey: RecoveryKey) async -> String? {
-        await afterVault(await vaults.unlock(server, recoveryKey: recoveryKey))
-    }
-
-    func unlockVault(on server: UUID, pairingCode: String) async -> String? {
-        await afterVault(await vaults.unlock(server, pairingCode: pairingCode))
-    }
-
-    func resetVault(on server: UUID, password: String, recoveryKey: RecoveryKey) async -> String? {
-        await afterVault(await vaults.reset(server, password: password, recoveryKey: recoveryKey))
-    }
-
-    private func afterVault(_ problem: String?) async -> String? {
+    /// Opens the old vault with the recovery key, then syncs, which converts what was encrypted. Nil on success.
+    func unlockVault(recoveryKey: RecoveryKey) async -> String? {
+        guard let kennel = registry.kennel else { return "Nicht mit Kennel verbunden." }
+        let problem = await vaults.unlock(kennel.id, recoveryKey: recoveryKey)
         if problem == nil { await sync() }
         return problem
     }
+}
 
-    /// The server of the current workspace, while its session has expired.
-    var expiredNotice: ServerEntry? {
-        guard let link = registry.current.link, sessions.expired.contains(link.server) else { return nil }
-        return registry.server(link.server)
+/// Something about Kennel that went wrong, in words for the person.
+struct KennelProblem: Error, Equatable {
+    var message: String
+
+    init(_ message: String) {
+        self.message = message
     }
 }

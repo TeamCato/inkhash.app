@@ -1,6 +1,6 @@
 # 0049 Konflikte vergleichen
 
-Status: angenommen
+Status: angenommen. Die behaltene Fassung heißt seit ADR 0077 „Titel (Kennel)“.
 
 ## Entscheidung
 

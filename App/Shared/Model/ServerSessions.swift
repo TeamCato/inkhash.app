@@ -12,8 +12,9 @@ enum JoinOutcome: Equatable {
     case failed
 }
 
-/// Sessions with the servers of this device: signing in and out, tokens in the keychain,
-/// and expired sessions. The connect form checks addresses itself (KennelKitUI, ADR 0074). See ADR 0016 and 0020.
+/// The session with this app's Kennel: signing in and out, the token in the keychain, and an expired session. The
+/// connect flow checks addresses itself (KennelKitUI, ADR 0074). One Kennel per app (ADR 0077); a device with several
+/// servers from before keeps one. See ADR 0016 and 0020.
 @MainActor
 @Observable
 final class ServerSessions {
@@ -25,7 +26,7 @@ final class ServerSessions {
     private let status: StatusLine
 
     private static let expiredKey = "inkhash.expiredServers"
-    private static let invalidAddress = "Das ist keine Adresse eines Servers, z. B. kennel.local oder http://192.168.1.5:8790."
+    private static let invalidAddress = "Das ist keine Adresse eines Kennel, z. B. kennel.local oder http://192.168.1.5:8790."
     private static let shortPassword = "Das Passwort braucht mindestens 8 Zeichen."
 
     init(registry: WorkspaceRegistry, status: StatusLine) {
@@ -49,6 +50,21 @@ final class ServerSessions {
                 sessions[server.id] = stored
             }
         }
+        // Read before the registry changes: `isSignedIn` looks into it.
+        let signedIn = Set(registry.servers.map(\.id).filter { isSignedIn($0) })
+        for gone in registry.keepOneKennel(isSignedIn: { signedIn.contains($0) }) {
+            try? Self.store(for: gone.id).clear()
+            SecretStore.clear(account: VaultSessions.keychainAccount(gone.id))
+            sessions[gone.id] = nil
+            expired.remove(gone.id)
+        }
+        persistExpired()
+    }
+
+    /// The Kennel's id while one is connected and signed in.
+    var signedInKennel: UUID? {
+        guard let kennel = registry.kennel, isSignedIn(kennel.id) else { return nil }
+        return kennel.id
     }
 
     /// The keychain entry of a server's session.

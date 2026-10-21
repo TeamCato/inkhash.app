@@ -1,6 +1,6 @@
 # 0071 Mit Kennel verbinden per Link und Code
 
-Status: angenommen
+Status: angenommen. Das Fenster „Server verbinden“ ersetzt ADR 0077 durch „Mit Kennel verbinden“ (`KennelConnectFlow`).
 
 Setzt teamCato ADR 0004 und Kennel ADR 0018 in inkhash um. Ergänzt 0021 (Accounts legt der Admin an) und 0067 (Abgleich über Kennel). Die Kopplung des Tresors (0054) bleibt ein eigener QR-Code.
 

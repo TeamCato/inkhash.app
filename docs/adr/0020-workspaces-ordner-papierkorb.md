@@ -1,6 +1,6 @@
 # 0020 Workspaces, Ordner, Favoriten und Papierkorb
 
-Status: angenommen
+Status: angenommen. Die Wahl von Server und Server-Workspace im Workspace-Editor ersetzt ADR 0077 (Ort, Übernehmen, ein Kennel).
 
 Erweitert 0017. Die Seitenleiste ändert 0022; Heute entfällt dort. Eine Bibliothek pro Gerät wird eine Bibliothek pro Workspace.
 

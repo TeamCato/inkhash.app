@@ -52,10 +52,14 @@ public struct Workspace: Codable, Equatable, Sendable, Identifiable {
     public var link: WorkspaceLink?
     /// Name, symbol or picture changed here and the server has not taken it yet.
     public var lookPending: Bool
+    /// The encrypted Kennel workspace this one synced with before it moved to its plain successor (ADR 0077). While
+    /// set, the next sync merges with the new one instead of starting over, and the converting device removes the old
+    /// one once everything is up.
+    public var retiring: RetiringRemote?
 
     public init(
         id: UUID = UUID(), name: String, symbol: String = "tray", icon: String? = nil,
-        link: WorkspaceLink? = nil, lookPending: Bool = false
+        link: WorkspaceLink? = nil, lookPending: Bool = false, retiring: RetiringRemote? = nil
     ) {
         self.id = id
         self.name = name
@@ -63,10 +67,11 @@ public struct Workspace: Codable, Equatable, Sendable, Identifiable {
         self.icon = icon
         self.link = link
         self.lookPending = lookPending
+        self.retiring = retiring
     }
 
     private enum CodingKeys: String, CodingKey {
-        case id, name, symbol, icon, link, lookPending
+        case id, name, symbol, icon, link, lookPending, retiring
     }
 
     public init(from decoder: Decoder) throws {
@@ -77,6 +82,23 @@ public struct Workspace: Codable, Equatable, Sendable, Identifiable {
         icon = try container.decodeIfPresent(String.self, forKey: .icon)
         link = try container.decodeIfPresent(WorkspaceLink.self, forKey: .link)
         lookPending = try container.decodeIfPresent(Bool.self, forKey: .lookPending) ?? false
+        retiring = try container.decodeIfPresent(RetiringRemote.self, forKey: .retiring)
+    }
+}
+
+/// An encrypted Kennel workspace a local workspace has left for its plain successor (ADR 0077).
+public struct RetiringRemote: Codable, Equatable, Sendable {
+    /// Its id on Kennel.
+    public var remote: String
+    /// How far this device had read it when it moved on. Anything after that came from another device.
+    public var cursor: Int
+    /// True on the device that converted it: that one removes it on Kennel once its notes are up in the new one.
+    public var deletes: Bool
+
+    public init(remote: String, cursor: Int, deletes: Bool) {
+        self.remote = remote
+        self.cursor = cursor
+        self.deletes = deletes
     }
 }
 
@@ -165,6 +187,29 @@ public struct DeviceSetup: Codable, Equatable, Sendable {
             added.append(workspace.id)
         }
         return added
+    }
+
+    /// One Kennel per app (teamCato ADR 0009 point 8). A device from before may know several servers: the one to keep
+    /// is the signed-in server most workspaces sync with, else the one most workspaces sync with; the first in the
+    /// list wins a tie. Workspaces of the others stay here with all their notes, as „Nur hier“. Returns the servers
+    /// that went, so their sessions and keys can go too. See ADR 0077.
+    @discardableResult
+    public mutating func keepOneKennel(isSignedIn: (UUID) -> Bool) -> [ServerEntry] {
+        guard servers.count > 1 else { return [] }
+        func links(_ server: ServerEntry) -> Int { workspaces.filter { $0.link?.server == server.id }.count }
+        let signedIn = servers.filter { isSignedIn($0.id) }
+        let pool = signedIn.isEmpty ? servers : signedIn
+        // `max(by:)` keeps the first of equals.
+        guard let kept = pool.max(by: { links($0) < links($1) }) else { return [] }
+        let gone = servers.filter { $0.id != kept.id }
+        servers = [kept]
+        for index in workspaces.indices where workspaces[index].link.map({ $0.server != kept.id }) == true {
+            workspaces[index].link = nil
+            workspaces[index].lookPending = false
+            workspaces[index].retiring = nil
+        }
+        orderPending.removeAll { $0 != kept.id }
+        return gone
     }
 
     /// Marks the order as changed for every server that has workspaces here.
@@ -296,7 +341,7 @@ public enum Workspaces {
     /// libraries before workspaces wrote, so they continue without uploading everything again.
     /// `epoch` counts resets of the account's vault: after one, the server holds none of the old
     /// notes, so every library binds anew and sends all its notes again. See ADR 0052.
-    public static func bindingKey(accountID: String, remote: String, epoch: Int = 0) -> String {
+    nonisolated public static func bindingKey(accountID: String, remote: String, epoch: Int = 0) -> String {
         let base = remote == APIClient.mainWorkspace ? accountID : accountID + "/" + remote
         return epoch > 0 ? base + "#\(epoch)" : base
     }

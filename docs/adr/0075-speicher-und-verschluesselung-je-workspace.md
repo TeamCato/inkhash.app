@@ -3,7 +3,7 @@
 Status: angenommen. Punkt 1 geändert durch ADR 0076: der Speicher lässt sich später wechseln. Dominik am 2026-10-20 („Inkhash sollte ebenfalls Storage auswählen können. So kann man z. B.
 Notizen auf ein SMB-Share legen. Inkhash sollte außerdem keine Pflicht auf Verschlüsselung haben.“). Setzt teamCato
 ADR 0007 und Kennel ADR 0025, 0026 in inkhash um. Ändert ADR 0052 für neue Workspaces: Verschlüsselung ist dort
-wählbar, nicht mehr Pflicht.
+wählbar, nicht mehr Pflicht. Den Schalter „Verschlüsselt“ (Punkt 1) und Punkt 4 ersetzt ADR 0077: neue Workspaces sind unverschlüsselt.
 
 ## Entscheidung
 

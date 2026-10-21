@@ -17,7 +17,7 @@ generate:
 app-test: generate
 	xcodebuild -scheme Inkhash -destination 'platform=iOS Simulator,name=iPad Pro 13-inch (M5),OS=latest' -derivedDataPath .build/xcode CODE_SIGN_IDENTITY=- CODE_SIGNING_REQUIRED=YES test
 
-# Vault sheets in the iPhone simulator against Kennel's test server; skipped without a Kennel checkout.
+# UI tests in the iPhone simulator against Kennel's test server; skipped without a Kennel checkout.
 ui-test: generate
 	tools/ui-test.sh
 

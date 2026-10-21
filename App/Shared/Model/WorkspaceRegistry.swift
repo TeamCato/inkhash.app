@@ -2,8 +2,8 @@ import Foundation
 import InkhashCore
 import Observation
 
-/// The workspaces and servers of this device (`setup.json`), their libraries and pictures.
-/// Knows nothing about sessions or the network. See ADR 0020 and 0043.
+/// The workspaces and the Kennel of this device (`setup.json`), their libraries and pictures.
+/// Knows nothing about sessions or the network. See ADR 0020, 0043 and 0077 (one Kennel).
 @MainActor
 @Observable
 final class WorkspaceRegistry {
@@ -35,6 +35,13 @@ final class WorkspaceRegistry {
 
     var workspaces: [Workspace] { setup.workspaces }
     var servers: [ServerEntry] { setup.servers }
+    /// The one Kennel of this app (teamCato ADR 0009 point 8), nil while none is connected.
+    var kennel: ServerEntry? { setup.servers.first }
+
+    /// Kennel workspaces other local workspaces than `id` sync with.
+    func remotesTaken(besides id: UUID?) -> Set<String> {
+        Set(setup.workspaces.filter { $0.id != id }.compactMap { $0.link?.remote })
+    }
 
     func workspace(_ id: UUID) -> Workspace? {
         setup.workspaces.first { $0.id == id }
@@ -133,8 +140,36 @@ final class WorkspaceRegistry {
               setup.workspaces[index].link != link else { return false }
         setup.workspaces[index].link = link
         setup.workspaces[index].lookPending = false
+        setup.workspaces[index].retiring = nil
         persist()
         return true
+    }
+
+    /// A new, empty Kennel workspace takes this one's look; the order puts it where this one is.
+    func placeLook(_ id: UUID) {
+        guard let index = setup.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        setup.workspaces[index].lookPending = true
+        setup.markOrderChanged()
+        persist()
+    }
+
+    /// Moves a workspace from an encrypted Kennel workspace to its plain successor (ADR 0077). Written before any
+    /// note goes up, so an interrupted conversion goes on with the same successor. The converting device brings the
+    /// look and the place in the order along; a following one takes them from Kennel.
+    func moveOn(_ id: UUID, to link: WorkspaceLink, retiring: RetiringRemote) {
+        guard let index = setup.workspaces.firstIndex(where: { $0.id == id }) else { return }
+        setup.workspaces[index].link = link
+        setup.workspaces[index].retiring = retiring
+        setup.workspaces[index].lookPending = retiring.deletes
+        if retiring.deletes { setup.markOrderChanged() }
+        persist()
+    }
+
+    /// The conversion's next state, or nil when it is done.
+    func setRetiring(_ id: UUID, _ retiring: RetiringRemote?) {
+        guard let index = setup.workspaces.firstIndex(where: { $0.id == id }), setup.workspaces[index].retiring != retiring else { return }
+        setup.workspaces[index].retiring = retiring
+        persist()
     }
 
     func moveWorkspaces(fromOffsets offsets: IndexSet, toOffset destination: Int) {
@@ -181,9 +216,10 @@ final class WorkspaceRegistry {
         pruneIcons()
     }
 
-    // MARK: Servers
+    // MARK: Kennel
 
-    /// A known address keeps its entry, so workspaces linked to it continue. Returns its id.
+    /// A known address keeps its entry, so workspaces linked to it continue. Another address replaces the Kennel:
+    /// there is one per app, and workspaces of the old one stay here as „Nur hier“ (ADR 0077). Returns its id.
     func signedIn(url: String, accountName: String, accountID: String) -> UUID {
         let id: UUID
         // A join link names the server without a trailing slash; the same server may be stored with one.
@@ -196,8 +232,17 @@ final class WorkspaceRegistry {
             id = entry.id
             setup.servers.append(entry)
         }
+        let others = setup.servers.filter { $0.id != id }.map(\.id)
+        for other in others { detach(other) }
         persist()
         return id
+    }
+
+    /// Keeps one Kennel of several from before (ADR 0077). Returns the ones that went.
+    func keepOneKennel(isSignedIn: (UUID) -> Bool) -> [ServerEntry] {
+        let gone = setup.keepOneKennel(isSignedIn: isSignedIn)
+        if !gone.isEmpty { persist() }
+        return gone
     }
 
     private static func sameAddress(_ a: String, _ b: String) -> Bool {
@@ -211,13 +256,20 @@ final class WorkspaceRegistry {
         persist()
     }
 
-    /// Forgets a server. Workspaces linked to it stay and stop syncing.
+    /// Forgets a server. Workspaces linked to it stay with all their notes, „Nur hier“.
     func removeServer(_ server: UUID) {
+        detach(server)
+        persist()
+    }
+
+    private func detach(_ server: UUID) {
         setup.servers.removeAll { $0.id == server }
         for index in setup.workspaces.indices where setup.workspaces[index].link?.server == server {
             setup.workspaces[index].link = nil
+            setup.workspaces[index].lookPending = false
+            setup.workspaces[index].retiring = nil
         }
-        persist()
+        setup.orderPending.removeAll { $0 == server }
     }
 
     func migrationDone() {

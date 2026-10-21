@@ -454,4 +454,86 @@ final class ContractTests: XCTestCase {
         XCTAssertTrue(listed.contains { $0.contains("/\(remote.id)/notes/") })
     }
 
+
+    /// An encrypted workspace on a storage of its own becomes a plain one there: the converting device uploads, takes
+    /// what another device wrote late, removes the old one; the other device follows and keeps its edit (ADR 0077).
+    func testEncryptedWorkspaceIsConvertedAndAnotherDeviceFollows() async throws {
+        let client = try await account()
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inkhash-convert-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let admin = KennelClient(address: url, token: adminToken)
+        let nas = try await admin.createStorage(
+            KennelNewStorage(name: "NAS", driver: "folder", settings: ["path": .string(folder.path)], household: true, modules: ["inkhash"]))
+        let (key, record) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
+        _ = try await client.putVault(record)
+        let old = try await client.createWorkspace(name: "Arbeit", as: NewRemoteWorkspace(sealed: true, storageID: nas.id))
+        XCTAssertTrue(old.isSealed)
+        let health = try await client.kennel.health()
+        XCTAssertEqual(health.inkhash?.plainWorkspaces, true)
+        var oldClient = client
+        oldClient.workspace = old.id
+        let sealed = SealedTransport(wire: oldClient, sealer: Sealer(key))
+
+        // Two devices with the encrypted workspace.
+        let mac = try freshStore()
+        let notes = try fill(mac)
+        _ = try await Syncer.sync(store: mac, transport: sealed, sealedWith: key.keyId)
+        let ipad = try freshStore()
+        _ = try await Syncer.sync(store: ipad, transport: SealedTransport(wire: oldClient, sealer: Sealer(key)), sealedWith: key.keyId)
+
+        // The Mac converts: a plain successor on the same storage takes everything.
+        let remotes = try await client.workspaces()
+        let successor = try await Conversion.successor(of: old, named: "Arbeit", remotes: remotes, taken: [], wire: client)
+        XCTAssertFalse(successor.isSealed)
+        XCTAssertEqual(successor.storageId, nas.id)
+        let cursor = try mac.cursor()
+        let accountID = "acc"
+        try await Relinker.adopt(mac, from: client.notes(of: successor.id), bindingKey: accountID + "/" + successor.id)
+        let up = try await Syncer.sync(store: mac, transport: client.notes(of: successor.id))
+        XCTAssertEqual(up.rejected, [])
+        XCTAssertTrue(try mac.list().allSatisfy { !$0.meta.dirty })
+
+        // Meanwhile the iPad writes to the old one, encrypted.
+        var late = try XCTUnwrap(ipad.note(id: notes[0].id))
+        late.applyMarkdown("# Vertrag\nSpät vom iPad\n")
+        try ipad.save(note: late, meta: LocalMeta(dirty: true, conflict: false))
+        _ = try await Syncer.sync(store: ipad, transport: SealedTransport(wire: oldClient, sealer: Sealer(key)), sealedWith: key.keyId)
+
+        // Before removing the old one, the Mac sees the late note and brings it along.
+        let lateArrived = try await Conversion.hasChanges(after: cursor, in: client.notes(of: old.id))
+        XCTAssertTrue(lateArrived)
+        let newCursor = try await Relinker.takeLate(from: sealed, after: cursor, into: mac)
+        _ = try await Syncer.sync(store: mac, transport: client.notes(of: successor.id))
+        let quiet = try await Conversion.hasChanges(after: newCursor, in: client.notes(of: old.id))
+        XCTAssertFalse(quiet)
+        try await client.deleteWorkspace(id: old.id)
+        var plainClient = client
+        plainClient.workspace = successor.id
+        for note in notes {
+            guard case .plain(let plain) = try await plainClient.fetchWire(id: note.id) else { return XCTFail("sealed: \(note.id)") }
+            if note.id == notes[0].id { XCTAssertEqual(plain.markdown, "# Vertrag\nSpät vom iPad\n") }
+        }
+
+        // The iPad edits once more offline, then follows the successor and keeps its edit.
+        var offline = try XCTUnwrap(ipad.note(id: notes[1].id))
+        offline.transcript = "Offline geändert"
+        try ipad.save(note: offline, meta: LocalMeta(dirty: true, conflict: false))
+        let after = try await client.workspaces()
+        XCTAssertFalse(after.contains { $0.id == old.id })
+        let candidates = ConversionPlanner.candidates(named: "Arbeit", among: after, taken: [])
+        let overlap = try await Conversion.overlap(of: candidates, with: Set(try ipad.list().map(\.note.id)), wire: client)
+        let step = ConversionPlanner.step(
+            name: "Arbeit", link: WorkspaceLink(server: UUID(), remote: old.id), remotes: after, taken: [], readable: false,
+            canPlain: true, overlap: overlap, hasSyncedNotes: true)
+        XCTAssertEqual(step, .follow(try XCTUnwrap(after.first { $0.id == successor.id })))
+        try await Relinker.adopt(ipad, from: client.notes(of: successor.id), bindingKey: accountID + "/" + successor.id)
+        let followed = try await Syncer.sync(store: ipad, transport: client.notes(of: successor.id))
+        XCTAssertEqual(followed.conflicts, 0)
+        let kept = try await plainClient.fetchNote(id: notes[1].id)
+        XCTAssertEqual(kept.transcript, "Offline geändert")
+        XCTAssertEqual(try ipad.note(id: notes[0].id)?.markdown, "# Vertrag\nSpät vom iPad\n")
+        // Readable on the share.
+        let listed = try FileManager.default.subpathsOfDirectory(atPath: folder.appendingPathComponent("inkhash").path)
+        XCTAssertTrue(listed.contains { $0.contains("/\(successor.id)/notes/") })
+    }
 }

@@ -286,7 +286,7 @@ public enum Syncer {
         }
     }
 
-    private static func ensureBlobs(of note: Note, store: LocalStore, transport: any NoteTransport) async throws {
+    static func ensureBlobs(of note: Note, store: LocalStore, transport: any NoteTransport) async throws {
         guard note.kind == .ink else { return }
         for page in note.pages ?? [] {
             for name in page.blobNames {

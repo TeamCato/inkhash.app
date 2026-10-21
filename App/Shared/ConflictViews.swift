@@ -9,7 +9,7 @@ struct ConflictBanner: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Text("Auf dem Server liegt eine andere Fassung.")
+            Text("In Kennel liegt eine andere Fassung.")
                 .font(.system(size: 14))
             Spacer(minLength: 8)
             Button("Vergleichen") { comparing = true }
@@ -68,7 +68,7 @@ struct ConflictCompareView: View {
             if compact {
                 Picker("Fassung", selection: $shown) {
                     Text("Dieses Gerät").tag(LineDiff.Side.left)
-                    Text("Server").tag(LineDiff.Side.right)
+                    Text("Kennel").tag(LineDiff.Side.right)
                 }
                 .pickerStyle(.segmented)
                 .padding([.horizontal, .top], 16)
@@ -102,7 +102,7 @@ struct ConflictCompareView: View {
     static func label(_ choice: ConflictChoice, conflict: NoteConflict) -> String {
         switch choice {
         case .mine: conflict.local.deletedAt == nil ? "Meine behalten" : "Gelöscht lassen"
-        case .server: conflict.server.deletedAt == nil ? "Server-Fassung nehmen" : "Auch hier löschen"
+        case .server: conflict.server.deletedAt == nil ? "Fassung aus Kennel nehmen" : "Auch hier löschen"
         case .both: "Beide behalten"
         }
     }
@@ -160,7 +160,7 @@ private struct VersionColumn: View {
 
     private var header: some View {
         VStack(alignment: .leading, spacing: 4) {
-            Text(side == .left ? "Auf diesem Gerät" : "Auf dem Server")
+            Text(side == .left ? "Auf diesem Gerät" : "In Kennel")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(Ink.muted)
             Text(note.displayTitle)

@@ -10,7 +10,7 @@ final class StatusLineTests: XCTestCase {
     }
 
     func testProblemsAndNewsAreShown() {
-        XCTAssertFalse(StatusLine.isRoutine("Konflikt mit dem Server."))
+        XCTAssertFalse(StatusLine.isRoutine("Konflikt mit Kennel."))
         XCTAssertFalse(StatusLine.isRoutine("Der Import ist fehlgeschlagen."))
         XCTAssertFalse(StatusLine.isRoutine(StatusLine.describe(URLError(.notConnectedToInternet))))
     }

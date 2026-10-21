@@ -1,6 +1,6 @@
 # 0073 inkhash nutzt KennelKit
 
-Status: angenommen
+Status: angenommen. Punkt 4 „Mehrere Server bleiben möglich“ ersetzt ADR 0077: ein Kennel je App.
 
 Setzt teamCato ADR 0006 und Kennel ADR 0023 in inkhash um. Ersetzt die Umsetzung aus 0071 und 0072, nicht ihre Entscheidungen.
 

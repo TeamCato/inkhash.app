@@ -1,8 +1,10 @@
 import InkhashCore
 import SwiftUI
 import KennelKit
+import KennelKitUI
 
-/// Workspaces and servers. Servers are connected once; each workspace picks one of them, or none.
+/// The settings: „Kennel“ first, then text, then the workspaces of this device with where each lies. Kennel has
+/// its own page (teamCato ADR 0009 point 3); workspaces stay here and in the sidebar. See ADR 0077.
 struct SettingsView: View {
     @Environment(AppModel.self) private var model
     @Environment(\.dismiss) private var dismiss
@@ -10,6 +12,17 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section {
+                    NavigationLink {
+                        KennelSettingsView()
+                    } label: {
+                        LabeledContent {
+                            Text(kennelSummary)
+                        } label: {
+                            Label("Kennel", systemImage: "house")
+                        }
+                    }
+                }
                 TextSettingsSection()
                 Section {
                     ForEach(model.registry.workspaces) { workspace in
@@ -23,9 +36,9 @@ struct SettingsView: View {
                                     WorkspaceIcon(workspace: workspace)
                                 }
                                 Spacer()
-                                Text(target(of: workspace))
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Ink.muted)
+                                if model.kennel != nil {
+                                    KennelPlaceBadge(model.overview.place(of: workspace))
+                                }
                             }
                         }
                         .contextMenu {
@@ -44,32 +57,8 @@ struct SettingsView: View {
                 } header: {
                     Text("Workspaces")
                 } footer: {
-                    Text("Jeder Workspace hat eigene Notizen, Ordner und Schlagwörter. Er bleibt auf diesem Gerät oder gleicht mit einem Workspace auf einem deiner Server ab. Die Reihenfolge änderst du durch Ziehen oder im Kontextmenü.")
-                }
-                Section {
-                    ForEach(model.registry.servers) { server in
-                        NavigationLink {
-                            ServerDetailView(serverID: server.id)
-                        } label: {
-                            HStack {
-                                Label(ServerAddress.host(server.url), systemImage: "server.rack")
-                                Spacer()
-                                Text(model.sessions.isSignedIn(server.id) ? server.accountName : "abgemeldet")
-                                    .font(.system(size: 12))
-                                    .foregroundStyle(Ink.muted)
-                            }
-                        }
-                    }
-                    NavigationLink {
-                        ServerConnectView(presetURL: "")
-                    } label: {
-                        Label("Server verbinden", systemImage: "plus")
-                    }
-                } header: {
-                    Text("Server")
-                } footer: {
                     VStack(alignment: .leading, spacing: 0) {
-                        Text("Optional. Ohne Server bleibt alles auf diesem Gerät. Ein Account kann mehrere Workspaces abgleichen.")
+                        Text("Jeder Workspace hat eigene Notizen, Ordner und Schlagwörter. Wo er liegt, änderst du in seinem Abschnitt „Ort“. Die Reihenfolge änderst du durch Ziehen oder im Kontextmenü.")
                         MadeByTeamCato()
                             .frame(maxWidth: .infinity)
                             .padding(.top, 32)
@@ -77,9 +66,6 @@ struct SettingsView: View {
                 }
             }
             .formStyle(.grouped)
-            .navigationDestination(item: joinBinding) { target in
-                ServerConnectView(presetURL: target.address.absoluteString, presetCode: target.code?.description ?? "")
-            }
             .navigationTitle("Einstellungen")
             .preferredColorScheme(.light)
             .toolbar {
@@ -92,14 +78,10 @@ struct SettingsView: View {
         .macSheetSize(minWidth: 480, minHeight: 480)
     }
 
-    /// A join link the app was opened with. See ADR 0071.
-    private var joinBinding: Binding<JoinLink?> {
-        Binding(get: { model.pendingJoin }, set: { model.pendingJoin = $0 })
-    }
-
-    private func target(of workspace: Workspace) -> String {
-        guard let server = model.registry.server(of: workspace) else { return "Nur dieses Gerät" }
-        return model.sessions.isSignedIn(server.id) ? ServerAddress.host(server.url) : "\(ServerAddress.host(server.url)), ruht"
+    /// „kennel.local“ while connected, else „Nicht verbunden“.
+    private var kennelSummary: String {
+        guard let kennel = model.kennel else { return "Nicht verbunden" }
+        return ServerAddress.host(kennel.url)
     }
 }
 

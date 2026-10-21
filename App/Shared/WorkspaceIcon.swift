@@ -35,16 +35,24 @@ struct WorkspacePicture: View {
 struct WorkspaceMenuLabel: View {
     @Environment(AppModel.self) private var model
     var workspace: Workspace
+    /// The current workspace shows a checkmark instead of its icon.
+    var isCurrent = false
 
     var body: some View {
-        if let image = model.registry.image(of: workspace) {
-            Label {
-                Text(workspace.name)
-            } icon: {
-                Image(platformImage: image.menuIcon(side: 18))
+        Label {
+            Text(workspace.name)
+            // Where it lies, while Kennel is connected (teamCato ADR 0009 point 1).
+            if model.kennel != nil {
+                Text(model.overview.place(of: workspace).label)
             }
-        } else {
-            Label(workspace.name, systemImage: workspace.symbol)
+        } icon: {
+            if isCurrent {
+                Image(systemName: "checkmark")
+            } else if let image = model.registry.image(of: workspace) {
+                Image(platformImage: image.menuIcon(side: 18))
+            } else {
+                Image(systemName: workspace.symbol)
+            }
         }
     }
 }

@@ -16,13 +16,20 @@ struct InkhashMacApp: App {
             // "Show/Hide Sidebar" on Ctrl+Cmd+S, see ADR 0030.
             SidebarCommands()
         }
-        // Inkhash > Einstellungen (Cmd+,): what belongs to this Mac, not to a workspace. See ADR 0061.
+        // Inkhash > Einstellungen (Cmd+,): what belongs to this Mac, not to a workspace: text, and Kennel as its own
+        // tab (ADR 0061, teamCato ADR 0009 point 3).
         Settings {
-            Form {
-                TextSettingsSection()
+            TabView {
+                Form {
+                    TextSettingsSection()
+                }
+                .formStyle(.grouped)
+                .tabItem { Label("Text", systemImage: "textformat") }
+                KennelSettingsView()
+                    .tabItem { Label("Kennel", systemImage: "house") }
             }
-            .formStyle(.grouped)
-            .frame(width: 460)
+            .environment(model)
+            .frame(width: 520, height: 480)
             .preferredColorScheme(.light)
         }
     }

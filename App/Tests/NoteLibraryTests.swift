@@ -60,7 +60,7 @@ final class NoteLibraryTests: LibraryTestCase {
         XCTAssertEqual(library.records.count, 2)
         let copy = try XCTUnwrap(library.records.first { $0.id != local.id })
         XCTAssertEqual(copy.note.markdown, server.markdown)
-        XCTAssertEqual(copy.note.title, "Plan (Server)")
+        XCTAssertEqual(copy.note.title, "Plan (Kennel)")
         XCTAssertEqual(copy.note.revision, 0)
         XCTAssertTrue(copy.dirty)
         XCTAssertEqual(try store.note(id: copy.id)?.markdown, server.markdown)

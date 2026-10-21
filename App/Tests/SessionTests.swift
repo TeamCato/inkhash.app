@@ -69,10 +69,27 @@ final class SessionTests: LibraryTestCase {
         XCTAssertNil(VaultSessions.storedKey(for: server))
     }
 
-    func testPostponingAVaultPromptKeepsItAwayUntilAsked() {
-        let vaults = VaultSessions(sessions: ServerSessions(registry: registry, status: status), status: status)
-        vaults.prompt = server
-        vaults.postpone(server)
-        XCTAssertNil(vaults.prompt)
+    /// One Kennel per app (ADR 0077): a second server from before goes with its session and key; its workspaces stay.
+    func testASecondServerFromBeforeGoesAndItsWorkspacesStay() throws {
+        let other = registry.signedIn(url: "http://127.0.0.1:10", accountName: "bea", accountID: UUID().uuidString.lowercased())
+        XCTAssertEqual(registry.servers.map(\.id), [other], "signing in to another address replaces the Kennel")
+        // A setup from before ADR 0077 with both, the first signed in.
+        var setup = registry.setup
+        setup.servers.insert(ServerEntry(id: server, url: "http://127.0.0.1:9", accountName: "ada", accountID: "a"), at: 0)
+        let linked = Workspace(name: "Arbeit", link: WorkspaceLink(server: other, remote: "w1", sealed: false))
+        setup.workspaces.append(linked)
+        try Workspaces.save(setup, base: base)
+        try VaultSessions.store(VaultKey(keyId: "k", material: Data(repeating: 1, count: 32), epoch: 0), for: other)
+        defer {
+            SecretStore.clear(account: SecretStore.key(for: other))
+            SecretStore.clear(account: VaultSessions.keychainAccount(other))
+        }
+        let reopened = try WorkspaceRegistry(base: base, legacy: nil, status: status)
+
+        let sessions = ServerSessions(registry: reopened, status: status)
+        XCTAssertEqual(reopened.servers.map(\.id), [server], "the signed-in one stays")
+        XCTAssertTrue(sessions.isSignedIn(server))
+        XCTAssertNil(reopened.workspace(linked.id)?.link, "„Nur hier“, with its notes")
+        XCTAssertNil(VaultSessions.storedKey(for: other))
     }
 }

@@ -1,6 +1,7 @@
 import InkhashCore
 import SwiftUI
 import UniformTypeIdentifiers
+import KennelKitUI
 
 /// Workspace, search, then the tree of that workspace: folders with their notes as leaves. "#tag" in
 /// the search field thins the tree to that tag. Favorites and trash are flat lists behind the footer.
@@ -32,9 +33,6 @@ struct SidebarView: View {
             if model.tagFilter != nil {
                 tagSuggestions
             }
-            if let server = model.expiredNotice {
-                ExpiredSessionBanner(server: server, showSettings: $showSettings)
-            }
             if isSearching {
                 flatList(title: nil)
             } else if model.section == .notes {
@@ -42,6 +40,7 @@ struct SidebarView: View {
             } else {
                 flatList(title: model.section.title)
             }
+            KennelFooter()
             footer
         }
         .onChange(of: model.searchFocusToken) { _, _ in
@@ -497,18 +496,18 @@ struct SidebarView: View {
             }
             .buttonStyle(.plain)
             .accessibilityLabel("Einstellungen")
-            .help("Workspaces und Server")
+            .help("Einstellungen, Workspaces und Kennel")
         }
         .padding(.leading, 16)
         .padding(.trailing, 10)
         .padding(.vertical, 6)
     }
 
-    /// What the sync symbol says on hover and to VoiceOver.
+    /// What the place symbol says on hover and to VoiceOver.
     private var statusText: String {
         if !model.status.isEmpty, model.status != StatusLine.localOnly { return model.status }
-        guard let server = model.registry.server(of: model.registry.current) else { return StatusLine.localOnly }
-        return ServerAddress.host(server.url)
+        guard let kennel = model.registry.server(of: model.registry.current) else { return StatusLine.localOnly }
+        return "Abgeglichen mit \(ServerAddress.host(kennel.url))"
     }
 
     // MARK: Folder prompt
@@ -565,16 +564,12 @@ struct WorkspaceSwitcher: View {
                 Button {
                     model.switchWorkspace(workspace.id)
                 } label: {
-                    if workspace.id == model.registry.current.id {
-                        Label(workspace.name, systemImage: "checkmark")
-                    } else {
-                        WorkspaceMenuLabel(workspace: workspace)
-                    }
+                    WorkspaceMenuLabel(workspace: workspace, isCurrent: workspace.id == model.registry.current.id)
                 }
             }
             Divider()
             Button("Workspace anlegen …", systemImage: "plus") { newWorkspace = true }
-            Button("Workspaces verwalten …", systemImage: "gearshape") { showSettings = true }
+            Button("Workspaces und Kennel …", systemImage: "gearshape") { showSettings = true }
         } label: {
             HStack(spacing: 10) {
                 WorkspaceIcon(workspace: model.registry.current, size: 20)
@@ -583,6 +578,9 @@ struct WorkspaceSwitcher: View {
                 Text(model.registry.current.name)
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
+                if model.kennel != nil {
+                    KennelPlaceBadge(model.overview.place(of: model.registry.current), style: .icon)
+                }
                 Spacer(minLength: 4)
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 10, weight: .semibold))

@@ -2,7 +2,7 @@
 
 Status: angenommen. Dominik am 2026-10-21 („Wäre es möglich, auch einen Move von z. B. inkhash-Notizen in einen anderen
 Storage auf Kennel zu supporten?“). Setzt Kennel ADR 0027 um. Ändert ADR 0075 Punkt 1: der Speicher gilt nicht mehr
-für immer, die Verschlüsselung schon.
+für immer, die Verschlüsselung schon. Punkt 1 ersetzt ADR 0077: „Anderer Speicher …“ im Abschnitt „Ort“.
 
 ## Entscheidung
 

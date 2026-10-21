@@ -1,6 +1,6 @@
 # 0074 Ansichten aus KennelKitUI
 
-Status: angenommen
+Status: angenommen. „Server verbinden“ und die Seite des Servers ersetzt ADR 0077 durch `KennelConnectFlow` und `KennelSettingsPage`.
 
 Ergänzt 0073. Setzt teamCato ADR 0006 Punkt 2 und Kennel ADR 0023 Punkt 3 um.
 

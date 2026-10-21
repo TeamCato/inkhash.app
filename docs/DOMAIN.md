@@ -27,9 +27,13 @@ Diese Wörter heißen im Code so.
 | dirty | Lokal geändert, noch nicht sauber bestätigt. |
 | conflict | Server und Gerät haben beide geschrieben. Beide Fassungen bleiben liegen, bis man sie vergleicht und eine, die andere oder beide behält (`NoteConflict`, ADR 0049). |
 | Bibliothek | Alle Notizen eines Workspace auf einem Gerät. Gehört keinem Account, gleicht höchstens mit einem Server-Workspace ab. |
-| Workspace | Eigene Bibliothek mit eigenen Ordnern, Schlagwörtern und Suche, z. B. Privat und Arbeit. Lokal oder mit einem Server-Workspace verbunden (ADR 0020). Name, Symbol und eigenes Bild (`icon`) sind sein Aussehen; Aussehen und Reihenfolge gleicht der Server ab, wenn der Workspace verbunden ist (ADR 0043). |
+| Workspace | Eigene Bibliothek mit eigenen Ordnern, Schlagwörtern und Suche, z. B. Privat und Arbeit. „Nur hier“ oder „Abgeglichen“ mit einem Workspace in Kennel (ADR 0020, 0077). Name, Symbol und eigenes Bild (`icon`) sind sein Aussehen; Aussehen und Reihenfolge gleicht der Server ab, wenn der Workspace verbunden ist (ADR 0043). |
 | Aussehen | Name, Symbol und Bild eines Workspace (`WorkspaceLook`). Die letzte Änderung gewinnt (ADR 0043). |
-| Server | Adresse plus angemeldeter Account (`ServerEntry`). Ein Gerät kennt mehrere. |
+| Kennel | Adresse plus angemeldeter Account (`ServerEntry`, `WorkspaceRegistry.kennel`). Ein Gerät kennt höchstens einen (ADR 0077). In der Oberfläche nie „Server“. |
+| Ort | Wo ein Workspace liegt: „Nur hier“, „Abgeglichen“ oder „Zieht um“ (`KennelPlace`, teamCato ADR 0009). Geändert nur im Abschnitt „Ort“. |
+| Übernehmen | Dritter Schritt von „Mit Kennel verbinden“: was von diesem Gerät nach Kennel soll und was aus Kennel hierher kommt, mit Vorschlag je Zeile (`TakeOverPlanner`, ADR 0077). |
+| Umwandeln | Ein verschlüsselter Workspace in Kennel wird zu einem unverschlüsselten auf demselben Speicher; der alte geht erst danach (`ConversionPlanner`, `Workspace.retiring`, ADR 0077). |
+| Nachfolger | Der unverschlüsselte Workspace, in den ein verschlüsselter umgewandelt wurde. Andere Geräte erkennen ihn an Name und geteilten Notiz-IDs. |
 | main | Der Workspace, den jeder Account auf dem Server hat. Auch ohne Präfix erreichbar. |
 | folder | Pfad an der Notiz, Segmente mit `/`. Leer heißt Wurzel des Workspace. In der Oberfläche „Pfad“, geschrieben mit ` / ` (ADR 0022). |
 | Baum | Die Seitenleiste: Ordner aus den Pfaden, Notizen als Blätter. Zugeklappte Knoten nur auf dem Gerät (`sidebar.json`, ADR 0022). |
@@ -43,16 +47,16 @@ Diese Wörter heißen im Code so.
 | Admin | Darf auf `/admin` Accounts anlegen, umbenennen, Passwörter setzen, zu Admins machen und löschen, sonst ein Account wie jeder andere. Der erste Account ist Admin, der letzte bleibt es (ADR 0021, 0046). |
 | Export | Eine Notiz als Datei (Markdown oder PDF) oder ein Workspace als ZIP mit lesbaren Dateien und einer Kopie für die App (ADR 0051). |
 | Sicherung | Ein Workspace-Export, den der Import wieder als neue Notizen holt. Daneben das Geräte-Backup (iCloud-Backup, Time Machine), kein Sync-Ziel. |
-| Tresor | Der Schlüssel eines Accounts auf dem Server, verpackt mit dem Wiederherstellungsschlüssel (`VaultRecord`, `/v1/vault`). Ohne ihn gleicht die App nicht ab (ADR 0052). |
+| Tresor | Der Schlüssel eines Accounts auf dem Server, verpackt mit dem Wiederherstellungsschlüssel (`VaultRecord`, `/v1/vault`). Die App legt keinen mehr an; ein vorhandener wird nur noch zum Umwandeln geöffnet (ADR 0052, 0077). |
 | Wiederherstellungsschlüssel | Öffnet den Tresor, wenn kein Gerät mit offenem Tresor da ist. Die App erzeugt ihn, 25 Zeichen in fünf Gruppen (`RecoveryKey`). Nur die Geräte kennen ihn, nicht der Server, nicht der Admin. Nicht das Login-Passwort (ADR 0054). |
-| Kopplung | Übergabe des Account-Schlüssels an ein neues Gerät per QR-Code; der Server hält ihn versiegelt fünf Minuten (`Pairing`, `/v1/vault/pairings`, ADR 0054). |
+| Kopplung | Übergabe des Account-Schlüssels an ein neues Gerät per QR-Code (`Pairing`, `/v1/vault/pairings`, ADR 0054). Nicht mehr in der Oberfläche (ADR 0077). |
 | Beitrittscode | Einmal-Code aus Kennels Verwaltung, zwölf Zeichen, angezeigt `XXXX-XXXX-XXXX` (`JoinCode`). „Gerät hinzufügen“ meldet ohne Passwort am selben Account an, eine „Einladung“ legt einen neuen Account an (`POST /v1/join`, ADR 0071). |
 | Beitrittslink | `<server>/join#<code>`, auch als QR-Code in Kennels Verwaltung. Belegt Adresse und Code vor (`JoinLink` aus KennelKit, ADR 0073). |
-| App-Link | `inkhash://kennel/join?server=…&code=…`, öffnet das Verbinden-Fenster vorbelegt (ADR 0071). |
+| App-Link | `inkhash://kennel/join?server=…&code=…`, öffnet „Mit Kennel verbinden“ vorbelegt (ADR 0071, 0077). |
 | Im Netz gefunden | Kennel, die sich per Bonjour (`_kennel._tcp`) im Heimnetz ankündigen; ein Vorschlag fürs Adressfeld (`KennelConnectSection` aus KennelKitUI, ADR 0072, 0074). |
 | sealed | Eine Notiz oder ein Blob, verschlüsselt mit dem Schlüssel des Accounts (`Sealer`). `schemaVersion: 2` auf dem Draht. |
 | epoch | Zahl der Resets eines Tresors. Ändert die Bindung der Bibliotheken (`Workspaces.bindingKey`). |
-| Unverschlüsselter Workspace | Ein Workspace auf dem Server, dessen Notizen als Klartext gehen und lesbar im Speicher liegen. Beim Anlegen gewählt, danach fest (`WorkspaceLink.sealed`, ADR 0075). |
+| Unverschlüsselter Workspace | Ein Workspace in Kennel, dessen Notizen als Klartext gehen und lesbar im Speicher liegen (`WorkspaceLink.sealed == false`). Jeder neue ist es (ADR 0075, 0077). |
 | Speicher eines Workspace | Der Speicher in Kennel, in dem die Notizen eines Server-Workspace liegen: der des Accounts oder ein eigener, den inkhash nutzen darf (ADR 0075). |
 
 `# Titel` ist eine Überschrift. `#titel` ist ein Tag. In Handschrift-Abschriften ist `# titel` ebenfalls ein Tag.

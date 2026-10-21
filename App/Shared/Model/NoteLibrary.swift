@@ -527,7 +527,7 @@ final class NoteLibrary {
             guard let server = try store.conflictNote(id: id) else { return nil }
             return NoteConflict(local: record.note, server: server)
         } catch {
-            status.message = "Die Fassung vom Server ließ sich nicht lesen."
+            status.message = "Die Fassung aus Kennel ließ sich nicht lesen."
             return nil
         }
     }

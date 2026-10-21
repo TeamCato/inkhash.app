@@ -1,6 +1,6 @@
 # 0054 Wiederherstellungsschlüssel und Koppeln per QR-Code
 
-Status: angenommen. Ersetzt in ADR 0052 die Passphrase.
+Status: angenommen. Ersetzt in ADR 0052 die Passphrase. Die Oberfläche des Tresors (Anlegen, Koppeln, neuer Schlüssel, Zurücksetzen) ersetzt ADR 0077: inkhash bietet keinen Tresor mehr an und wandelt verschlüsselte Workspaces um.
 
 ## Entscheidung
 

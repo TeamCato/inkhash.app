@@ -10,10 +10,17 @@ public protocol WorkspaceTransport: Sendable {
     /// True if the server holds this look in a form that has to go up again, e.g. a plain
     /// picture from before the vault. See ADR 0052.
     func needsReupload(_ remote: RemoteWorkspace) -> Bool
+    /// True if this device cannot read the picture on the server, e.g. an encrypted one without the vault key. The
+    /// picture here then stays as it is (ADR 0077).
+    func hidesIcon(_ remote: RemoteWorkspace) -> Bool
+    /// False if this device must not write the look, e.g. of an encrypted workspace without the vault key.
+    func writesLook(of remote: String) -> Bool
 }
 
 extension WorkspaceTransport {
     public func needsReupload(_ remote: RemoteWorkspace) -> Bool { false }
+    public func hidesIcon(_ remote: RemoteWorkspace) -> Bool { false }
+    public func writesLook(of remote: String) -> Bool { true }
 }
 
 extension APIClient: WorkspaceTransport {
@@ -60,6 +67,8 @@ public enum LookSyncer {
             let current = setup.workspaces[index]
             // A look nobody has set on the server yet comes from the first device that syncs.
             if current.lookPending || remote.updatedAt == nil {
+                // Stays pending until a device that may write it comes along.
+                guard transport.writesLook(of: remote.id) else { continue }
                 let workspace = current
                 if let icon = workspace.icon {
                     let data = try Data(contentsOf: Workspaces.iconURL(icon, base: base))
@@ -103,6 +112,7 @@ public enum LookSyncer {
     private static func adopt(_ remote: RemoteWorkspace, at index: Int, into setup: inout DeviceSetup, base: URL, transport: WorkspaceTransport) async throws {
         setup.workspaces[index].name = remote.name
         if let symbol = remote.symbol { setup.workspaces[index].symbol = symbol }
+        guard !transport.hidesIcon(remote) else { return }
         if let icon = remote.icon, icon != setup.workspaces[index].icon,
            !FileManager.default.fileExists(atPath: Workspaces.iconURL(icon, base: base).path) {
             let data = try await transport.fetchIcon(workspace: remote.id, sha256: icon)

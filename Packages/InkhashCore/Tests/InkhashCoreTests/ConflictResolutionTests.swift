@@ -41,7 +41,7 @@ final class ConflictResolutionTests: XCTestCase {
         XCTAssertNotEqual(copy.note.id, conflict.local.id)
         XCTAssertEqual(copy.note.revision, 0)
         XCTAssertEqual(copy.note.markdown, conflict.server.markdown)
-        XCTAssertEqual(copy.note.title, "Plan (Server)")
+        XCTAssertEqual(copy.note.title, "Plan (Kennel)")
         XCTAssertFalse(copy.note.hasAutomaticTitle)
         XCTAssertEqual(copy.note.folder, conflict.server.folder)
         XCTAssertEqual(copy.note.updatedAt, now)
@@ -65,7 +65,7 @@ final class ConflictResolutionTests: XCTestCase {
         server.setTitle(String(repeating: "x", count: Limits.title))
         let copy = NoteConflict.copy(of: server, now: now)
         XCTAssertLessThanOrEqual(copy.title.utf16.count, Limits.title)
-        XCTAssertTrue(copy.title.hasSuffix(" (Server)"))
+        XCTAssertTrue(copy.title.hasSuffix(" (Kennel)"))
     }
 
     func testCopyOfInkKeepsPagesAndBlobs() {
@@ -74,7 +74,7 @@ final class ConflictResolutionTests: XCTestCase {
         server.transcript = "Reise"
         let copy = NoteConflict.copy(of: server, now: now)
         XCTAssertEqual(copy.pages, server.pages)
-        XCTAssertEqual(copy.title, "Reise (Server)")
+        XCTAssertEqual(copy.title, "Reise (Kennel)")
     }
 }
 

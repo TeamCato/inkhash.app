@@ -25,23 +25,23 @@ final class StatusLine {
         case APIError.slowDown:
             return "Zu viele Versuche. Kurz warten."
         case APIError.notFound:
-            return "Der Server kennt diesen Pfad nicht."
+            return "Kennel kennt diesen Pfad nicht."
         case APIError.badStatus(423, _):
-            return "Der Workspace zieht auf dem Server gerade um. Der Abgleich geht danach weiter."
+            return "Der Workspace zieht in Kennel gerade um. Der Abgleich geht danach weiter."
         case let APIError.badStatus(code, _):
-            return "Der Server antwortete mit \(code)."
+            return "Kennel antwortete mit \(code)."
         case is URLError, KennelError.unreachable:
-            return "Server nicht erreichbar."
+            return "Kennel nicht erreichbar."
         case KennelError.unauthorized:
             return "Anmeldung abgelehnt."
         case KennelError.slowDown:
             return "Zu viele Versuche. Kurz warten."
         case let KennelError.rejected(status, _, _, _):
-            return "Der Server antwortete mit \(status)."
+            return "Kennel antwortete mit \(status)."
         case KennelError.invalidReply:
-            return "Der Server antwortete unerwartet."
+            return "Kennel antwortete unerwartet."
         case is SealError:
-            return "Eine Notiz vom Server ließ sich nicht entschlüsseln."
+            return "Eine Notiz aus Kennel ließ sich nicht entschlüsseln."
         case VaultError.wrongRecoveryKey:
             return "Der Wiederherstellungsschlüssel passt nicht."
         case is VaultError:

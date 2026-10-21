@@ -1,6 +1,6 @@
 # 0072 Kennel finden und weitere Geräte verbinden
 
-Status: angenommen
+Status: angenommen. „Weiteres Gerät verbinden …“ steht seit ADR 0077 auf der Seite „Kennel“.
 
 Setzt teamCato ADR 0005 und Kennel ADR 0019 in inkhash um. Ergänzt 0071 (Verbinden per Link und Code).
 

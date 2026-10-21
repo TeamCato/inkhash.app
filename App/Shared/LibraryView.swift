@@ -1,5 +1,6 @@
 import InkhashCore
 import SwiftUI
+import KennelKit
 
 struct RootView: View {
     @Environment(AppModel.self) private var model
@@ -34,24 +35,23 @@ struct RootView: View {
         .sheet(isPresented: $showSettings) {
             SettingsView()
         }
-        // Over everything, also over the settings: syncing waits for it. See ADR 0052.
-        .sheet(isPresented: Binding(
-            get: { model.vaults.prompt != nil && !showSettings },
-            set: { if !$0, let server = model.vaults.prompt, model.vaults.key(for: server) == nil { model.vaults.postpone(server) } }
-        )) {
-            if let server = model.vaults.prompt {
-                VaultSheet(serverID: server)
-            }
+        // inkhash://kennel/join?… opens „Mit Kennel verbinden“, filled in. See ADR 0071, 0077.
+        .sheet(item: joinBinding) { link in
+            InkhashConnectFlow(prefill: link)
         }
         .onAppear { Task { await model.sync() } }
-        // inkhash://kennel/join?… opens the connect form in the settings, filled in. See ADR 0071.
         .onOpenURL { url in
-            if model.open(url) { showSettings = true }
+            if model.open(url) { showSettings = false }
         }
         .handlesExternalEvents(preferring: [JoinLinks.scheme], allowing: ["*"])
         .onChange(of: scenePhase) { _, phase in
             if phase == .active { Task { await model.sync() } }
         }
+    }
+
+    /// A join link the app was opened with. See ADR 0071.
+    private var joinBinding: Binding<JoinLink?> {
+        Binding(get: { model.pendingJoin }, set: { model.pendingJoin = $0 })
     }
 
     /// On the iPad, and in a narrow Mac window, the sidebar lies over the sheet instead of narrowing it,
@@ -96,7 +96,7 @@ struct RootView: View {
             VStack(spacing: 18) {
                 InkhashLogo(axis: .stacked, markSide: 88, wordSize: 34)
                 Text(model.isSyncEnabled
-                    ? "Text auf dem Mac, Stift auf dem iPad.\nAbgeglichen über deinen Server."
+                    ? "Text auf dem Mac, Stift auf dem iPad.\nAbgeglichen über deinen Kennel."
                     : "Text auf dem Mac, Stift auf dem iPad.\nAlles bleibt auf diesem Gerät.")
                     .font(.system(size: 15))
                     .foregroundStyle(Ink.muted)
@@ -209,31 +209,6 @@ struct NoteRow: View {
         formatter.locale = Locale(identifier: "de_DE")
         formatter.unitsStyle = .short
         return formatter.localizedString(for: date, relativeTo: Date())
-    }
-}
-
-struct ExpiredSessionBanner: View {
-    @Environment(AppModel.self) private var model
-    var server: ServerEntry
-    @Binding var showSettings: Bool
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            Text("Die Anmeldung bei \(ServerAddress.host(server.url)) ist abgelaufen. Die Notizen bleiben auf diesem Gerät, abgeglichen wird erst nach dem Anmelden.")
-                .font(.system(size: 13))
-                .fixedSize(horizontal: false, vertical: true)
-            HStack {
-                Button("Anmelden") { showSettings = true }
-                    .inkButton()
-                Button("Später") { model.sessions.dismissExpiredNotice(server.id) }
-                    .inkButton()
-            }
-        }
-        .padding(12)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .inkSurface(in: RoundedRectangle(cornerRadius: 16, style: .continuous))
-        .padding(.horizontal, 10)
-        .padding(.bottom, 8)
     }
 }
 

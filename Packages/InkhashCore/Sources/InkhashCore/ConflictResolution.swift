@@ -55,7 +55,7 @@ public struct NoteConflict: Equatable, Sendable {
         copy.id = UUID()
         copy.revision = 0
         copy.deletedAt = nil
-        let suffix = " (Server)"
+        let suffix = " (Kennel)"
         copy.title = server.displayTitle.clippedUTF16(Limits.title - suffix.utf16.count) + suffix
         copy.touch(now)
         return copy

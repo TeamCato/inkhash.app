@@ -1,6 +1,6 @@
 # 0052 Ende-zu-Ende-Verschlüsselung
 
-Status: angenommen. Die Passphrase ist durch 0054 ersetzt: Ein erzeugter Wiederherstellungsschlüssel verpackt den Account-Schlüssel, weitere Geräte koppeln per QR-Code. Format und Server-Vertrag des Tresors bleiben.
+Status: angenommen. Die Passphrase ist durch 0054 ersetzt: Ein erzeugter Wiederherstellungsschlüssel verpackt den Account-Schlüssel, weitere Geräte koppeln per QR-Code. Format und Server-Vertrag des Tresors bleiben. Die Oberfläche des Tresors (Anlegen, Koppeln, neuer Schlüssel, Zurücksetzen) ersetzt ADR 0077: inkhash bietet keinen Tresor mehr an und wandelt verschlüsselte Workspaces um.
 
 ## Entscheidung
 

@@ -2,7 +2,7 @@ import InkhashCore
 import KennelKitUI
 import SwiftUI
 
-/// „Weiteres Gerät verbinden“ from KennelKitUI, with this server's session. See ADR 0072, 0074.
+/// „Weiteres Gerät verbinden“ from KennelKitUI, with the Kennel's session. See ADR 0072, 0074.
 struct DeviceCodeView: View {
     @Environment(AppModel.self) private var model
     var serverID: UUID
@@ -16,7 +16,7 @@ struct DeviceCodeView: View {
             )
             .kennelBrand(.inkhash)
         } else {
-            Text("Dieser Server ist nicht mehr verbunden.").foregroundStyle(Ink.muted)
+            Text("Kein Kennel verbunden.").foregroundStyle(Ink.muted)
         }
     }
 }
