@@ -5,7 +5,7 @@ import PackageDescription
 // for working on both at once; relative to the repository root or absolute.
 let kennelKit: Package.Dependency = {
     guard let local = Context.environment["KENNELKIT_DIR"], !local.isEmpty else {
-        return .package(url: "https://github.com/teamcato/kennel", .upToNextMinor(from: "0.8.0"))
+        return .package(url: "https://github.com/teamcato/kennel", branch: "main")
     }
     return .package(path: local.hasPrefix("/") ? local : Context.packageDirectory + "/../../" + local)
 }()
