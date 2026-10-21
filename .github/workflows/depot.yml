@@ -37,21 +37,22 @@ jobs:
           : "${TEAM:?TEAM in $config setzen}"
           echo "TEAM=$TEAM" >>"$GITHUB_ENV"
           echo "BUILD=$(git rev-list --count HEAD)" >>"$GITHUB_ENV"
-      # The upload script lives in the depot repo; the Mac's gh login may read it.
+      # The upload script lives in the private depot repo; the Mac user's SSH key may read it.
       - name: Fetch depot script
         run: |
-          gh api repos/teamCato/depot/contents/scripts/publish.sh -H "Accept: application/vnd.github.raw" >"$RUNNER_TEMP/publish.sh"
-          chmod +x "$RUNNER_TEMP/publish.sh"
+          rm -rf "$RUNNER_TEMP/depot"
+          git clone -q --depth 1 git@github.com:TeamCato/depot.git "$RUNNER_TEMP/depot"
+          echo "PUBLISH=$RUNNER_TEMP/depot/scripts/publish.sh" >>"$GITHUB_ENV"
       - run: xcodegen generate
       - name: Mac app
         run: |
           xcodebuild -scheme InkhashMac -destination 'platform=macOS' -derivedDataPath .build/depot-mac \
             -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" \
             CURRENT_PROJECT_VERSION="$BUILD" build -quiet
-          "$RUNNER_TEMP/publish.sh" .build/depot-mac/Build/Products/Debug/Inkhash.app
+          "$PUBLISH" .build/depot-mac/Build/Products/Debug/Inkhash.app
       - name: iPad and iPhone app
         run: |
           xcodebuild -scheme Inkhash -destination 'generic/platform=iOS' -derivedDataPath .build/depot-ios \
             -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" \
             CODE_SIGNING_REQUIRED=YES CURRENT_PROJECT_VERSION="$BUILD" build -quiet
-          "$RUNNER_TEMP/publish.sh" .build/depot-ios/Build/Products/Debug-iphoneos/Inkhash.app
+          "$PUBLISH" .build/depot-ios/Build/Products/Debug-iphoneos/Inkhash.app
