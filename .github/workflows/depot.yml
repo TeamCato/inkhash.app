@@ -22,8 +22,15 @@ jobs:
     if: github.repository_owner == 'teamCato'
     runs-on: [self-hosted, macOS]
     timeout-minutes: 60
+    # KennelKit comes from the private repository kennel, over SSH as in ci.yml.
+    env:
+      GIT_CONFIG_COUNT: "1"
+      GIT_CONFIG_KEY_0: url.git@github.com:.insteadOf
+      GIT_CONFIG_VALUE_0: https://github.com/
     steps:
       - uses: actions/checkout@v5
+        env:
+          GIT_CONFIG_COUNT: "0"
         with:
           fetch-depth: 0
           clean: false
