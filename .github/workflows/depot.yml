@@ -1,0 +1,57 @@
+# Every commit on main lands in the depot (teamCato/depot, internal download page): the Mac app
+# as a zip, the iPad/iPhone app as an over-the-air install. ci.yml has already tested the commit
+# before it fast-forwarded main; this workflow only builds and files.
+# The repository is public: never add a pull_request or pull_request_target trigger here,
+# it would run fork code on the Mac.
+name: Depot
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: depot
+  cancel-in-progress: true
+
+jobs:
+  depot:
+    if: github.repository_owner == 'teamCato'
+    runs-on: [self-hosted, macOS]
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          clean: false
+      # Signing team from the Mac's install config, the same one tools/install-local.sh reads.
+      # The build number counts commits, as in install-local.sh, so the depot sorts newest first.
+      - name: Signing and build number
+        run: |
+          config="$HOME/.config/inkhash/install.env"
+          [[ -f "$config" ]] || { echo "::error::$config fehlt, siehe docs/RELEASE.md."; exit 1; }
+          source "$config"
+          : "${TEAM:?TEAM in $config setzen}"
+          echo "TEAM=$TEAM" >>"$GITHUB_ENV"
+          echo "BUILD=$(git rev-list --count HEAD)" >>"$GITHUB_ENV"
+      # The upload script lives in the depot repo; the Mac's gh login may read it.
+      - name: Fetch depot script
+        run: |
+          gh api repos/teamCato/depot/contents/scripts/publish.sh -H "Accept: application/vnd.github.raw" >"$RUNNER_TEMP/publish.sh"
+          chmod +x "$RUNNER_TEMP/publish.sh"
+      - run: xcodegen generate
+      - name: Mac app
+        run: |
+          xcodebuild -scheme InkhashMac -destination 'platform=macOS' -derivedDataPath .build/depot-mac \
+            -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" \
+            CURRENT_PROJECT_VERSION="$BUILD" build -quiet
+          "$RUNNER_TEMP/publish.sh" .build/depot-mac/Build/Products/Debug/Inkhash.app
+      - name: iPad and iPhone app
+        run: |
+          xcodebuild -scheme Inkhash -destination 'generic/platform=iOS' -derivedDataPath .build/depot-ios \
+            -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" \
+            CODE_SIGNING_REQUIRED=YES CURRENT_PROJECT_VERSION="$BUILD" build -quiet
+          "$RUNNER_TEMP/publish.sh" .build/depot-ios/Build/Products/Debug-iphoneos/Inkhash.app
