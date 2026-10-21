@@ -16,7 +16,7 @@ packages:
   # KennelKit, Kennel's Swift client (ADR 0073). The app uses its types directly, so it links the product itself.
   kennel:
     url: https://github.com/teamcato/kennel
-    minorVersion: 0.6.1
+    minorVersion: 0.8.0
 targets:
   Inkhash:
     type: application
