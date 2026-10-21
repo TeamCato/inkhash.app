@@ -10,11 +10,20 @@ source "$config"
 : "${TEAM:?TEAM in $config setzen}"
 DEVICES="${DEVICES:-}"
 MAC_TARGETS="${MAC_TARGETS:-/Applications}"
+# Depot: internal download page, files builds in /Volumes/Media/Apps (teamCato/apps/depot).
+DEPOT_PUBLISH="${DEPOT_PUBLISH:-$(git rev-parse --show-toplevel)/../depot/scripts/publish.sh}"
 
 build=$(git rev-list --count HEAD)
 signing=(-allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" CURRENT_PROJECT_VERSION="$build")
 warnings=0
 warn() { echo "::warning::$*"; warnings=$((warnings + 1)); }
+publish() {
+  if [[ ! -x "$DEPOT_PUBLISH" ]]; then
+    warn "$DEPOT_PUBLISH fehlt, $1 nicht im Depot."
+  elif ! "$DEPOT_PUBLISH" "$1"; then
+    warn "$1 nicht im Depot abgelegt."
+  fi
+}
 
 xcodegen generate
 
@@ -36,10 +45,12 @@ for target in $MAC_TARGETS; do
   fi
 done
 open /Applications/Inkhash.app 2>/dev/null || true
+publish "$app"
 
 if [[ -n "$DEVICES" ]]; then
   xcodebuild -scheme Inkhash -destination 'generic/platform=iOS' -derivedDataPath .build/device "${signing[@]}" CODE_SIGNING_REQUIRED=YES build
   ios_app=.build/device/Build/Products/Debug-iphoneos/Inkhash.app
+  publish "$ios_app"
   for device in $DEVICES; do
     if xcrun devicectl device install app --device "$device" "$ios_app"; then
       xcrun devicectl device process launch --device "$device" local.inkhash.ipad || true

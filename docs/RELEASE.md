@@ -38,6 +38,8 @@ DEVICES="<udid> <udid>"   # xcrun devicectl list devices
 MAC_TARGETS="/Applications /Volumes/Dominik"
 ```
 
+Danach legt das Skript Mac-App und iOS-Build im Depot ab (`../depot/scripts/publish.sh`, interne Download-Seite unter `/Volumes/Media/Apps`). Fehlt das Depot oder der Ordner, gibt es eine Warnung, die Installation läuft trotzdem durch. Ein anderes Skript setzt `DEPOT_PUBLISH`.
+
 ## Release der App
 
 Nur wenn Dominik „Release“ sagt: `MARKETING_VERSION` in `project.yml` heben, Commit auf einem Branch wie oben.
