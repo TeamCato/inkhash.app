@@ -415,4 +415,43 @@ final class ContractTests: XCTestCase {
         }
     }
 
+
+    /// A workspace moves to another storage on Kennel and its notes come along (ADR 0076).
+    func testWorkspaceMovesToAnotherStorage() async throws {
+        let client = try await account()
+        let health = try await client.kennel.health()
+        XCTAssertEqual(health.inkhash?.workspaceMove, true)
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inkhash-move-\(UUID().uuidString)")
+        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+        let admin = KennelClient(address: url, token: adminToken)
+        let nas = try await admin.createStorage(
+            KennelNewStorage(name: "NAS", driver: "folder", settings: ["path": .string(folder.path)], household: true, modules: ["inkhash"]))
+
+        let remote = try await client.createWorkspace(name: "Umzug", as: NewRemoteWorkspace(sealed: false))
+        var scoped = client
+        scoped.workspace = remote.id
+        let store = try freshStore()
+        let notes = try fill(store)
+        _ = try await Syncer.sync(store: store, transport: scoped)
+
+        let started = try await client.moveWorkspace(id: remote.id, to: nas.id)
+        XCTAssertNotNil(started.move)
+        var current = started
+        for _ in 0..<100 where current.move?.isRunning == true {
+            try await Task.sleep(for: .milliseconds(50))
+            let listed = try await client.workspaces()
+            current = try XCTUnwrap(listed.first { $0.id == remote.id })
+        }
+        XCTAssertNil(current.move)
+        XCTAssertEqual(current.storageId, nas.id)
+
+        let other = try freshStore()
+        _ = try await Syncer.sync(store: other, transport: scoped)
+        for note in notes {
+            XCTAssertTrue(try XCTUnwrap(other.note(id: note.id)).sameContent(as: try XCTUnwrap(store.note(id: note.id))))
+        }
+        let listed = try FileManager.default.subpathsOfDirectory(atPath: folder.appendingPathComponent("inkhash").path)
+        XCTAssertTrue(listed.contains { $0.contains("/\(remote.id)/notes/") })
+    }
+
 }

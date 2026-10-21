@@ -26,6 +26,8 @@ final class StatusLine {
             return "Zu viele Versuche. Kurz warten."
         case APIError.notFound:
             return "Der Server kennt diesen Pfad nicht."
+        case APIError.badStatus(423, _):
+            return "Der Workspace zieht auf dem Server gerade um. Der Abgleich geht danach weiter."
         case let APIError.badStatus(code, _):
             return "Der Server antwortete mit \(code)."
         case is URLError, KennelError.unreachable:

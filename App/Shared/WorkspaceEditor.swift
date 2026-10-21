@@ -30,6 +30,10 @@ struct WorkspaceEditor: View {
     @State private var storageChoice: String?
     @State private var storages: [KennelStorage] = []
     @State private var showsNewStorage = false
+    /// Moving the linked server workspace to another storage (ADR 0076).
+    @State private var movesStorage = false
+    @State private var moveChoice: String?
+    @State private var moving = false
     @State private var busy = false
     @State private var confirmRemoval = false
     @State private var loaded = false
@@ -108,6 +112,9 @@ struct WorkspaceEditor: View {
             }
             if serverChoice != nil, remoteChoice == Self.newRemote, choosesStorage, !loadingRemotes {
                 serverLayout
+            }
+            if let remote = linkedRemote, movesStorage, !loadingRemotes {
+                moveSection(remote)
             }
             if let workspace {
                 Section {
@@ -249,13 +256,81 @@ struct WorkspaceEditor: View {
         }
     }
 
+    /// The server workspace this workspace already syncs with, while the editor still points there.
+    private var linkedRemote: RemoteWorkspace? {
+        guard let link = workspace?.link, link.server == serverChoice, link.remote == remoteChoice else { return nil }
+        return remotes.first { $0.id == link.remote }
+    }
+
+    private func storageName(_ id: String?) -> String {
+        guard let id else { return "Standard des Accounts" }
+        return storages.first { $0.id == id }?.name ?? "anderer Speicher"
+    }
+
+    private func moveSection(_ remote: RemoteWorkspace) -> some View {
+        Section {
+            LabeledContent("Liegt in", value: storageName(remote.storageId))
+            if let move = remote.move, move.isRunning {
+                HStack(spacing: 8) {
+                    ProgressView().controlSize(.small)
+                    Text("Zieht um nach „\(storageName(move.to))“ …")
+                }
+            } else {
+                Picker("Umziehen nach", selection: $moveChoice) {
+                    Text("Standard des Accounts").tag(String?.none)
+                    ForEach(storages) { storage in
+                        Text(storage.isPrivate ? "\(storage.name) · privat" : storage.name).tag(String?.some(storage.id))
+                    }
+                }
+                Button("Umziehen") { startMove(remote) }
+                    .disabled(moving || moveChoice == remote.storageId)
+                Button("Neuer Speicher …") { showsNewStorage = true }
+                    .sheet(isPresented: $showsNewStorage) { newStorageSheet }
+            }
+        } header: {
+            Text("Speicher auf dem Server")
+        } footer: {
+            if let move = remote.move, !move.isRunning {
+                Text("Der letzte Umzug ist gescheitert\(move.detail.map { " (\($0))" } ?? ""). Die Notizen liegen noch am alten Ort.")
+            } else {
+                Text("Kennel kopiert alle Notizen und Bilder in den neuen Speicher und löscht sie erst danach am alten Ort. Solange gleicht der Workspace nicht ab. Die Verschlüsselung bleibt, wie sie ist.")
+            }
+        }
+    }
+
+    private func startMove(_ remote: RemoteWorkspace) {
+        guard let workspace else { return }
+        moving = true
+        Task {
+            if let moved = await model.moveOnServer(workspace.id, to: moveChoice) {
+                if let index = remotes.firstIndex(where: { $0.id == moved.id }) { remotes[index] = moved }
+                await watchMove(of: moved.id)
+            }
+            moving = false
+        }
+    }
+
+    /// Asks Kennel now and then until the move is over, so the section shows where the workspace lies.
+    private func watchMove(of id: String) async {
+        guard let server = serverChoice else { return }
+        while remotes.first(where: { $0.id == id })?.move?.isRunning == true {
+            try? await Task.sleep(for: .seconds(2))
+            guard !Task.isCancelled else { return }
+            let fresh = await model.sessions.remoteWorkspaces(on: server)
+            guard let updated = fresh.first(where: { $0.id == id }) else { return }
+            if let index = remotes.firstIndex(where: { $0.id == id }) { remotes[index] = updated }
+        }
+        moveChoice = remotes.first { $0.id == id }?.storageId
+        await model.sync()
+    }
+
     @ViewBuilder
     private var newStorageSheet: some View {
         if let server = serverChoice, let client = model.sessions.client(for: server) {
             NavigationStack {
                 KennelNewStorageView(client: client.kennel, module: APIClient.module) { storage in
                     storages.append(storage)
-                    storageChoice = storage.id
+                    if linkedRemote != nil { moveChoice = storage.id } else { storageChoice = storage.id }
                 }
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
@@ -320,8 +395,11 @@ struct WorkspaceEditor: View {
         }
         loadingRemotes = true
         remotes = await model.sessions.remoteWorkspaces(on: server)
-        choosesStorage = await model.sessions.capabilities(of: server)?.choosesWorkspaceStorage == true
-        storages = choosesStorage ? await model.sessions.noteStorages(on: server) : []
+        let capabilities = await model.sessions.capabilities(of: server)
+        choosesStorage = capabilities?.choosesWorkspaceStorage == true
+        movesStorage = capabilities?.workspaceMove == true
+        storages = choosesStorage || movesStorage ? await model.sessions.noteStorages(on: server) : []
+        moveChoice = linkedRemote?.storageId
         if let storageChoice, !storages.contains(where: { $0.id == storageChoice }) { self.storageChoice = nil }
         loadingRemotes = false
         if remoteChoice != Self.newRemote, !remotes.contains(where: { $0.id == remoteChoice }) {

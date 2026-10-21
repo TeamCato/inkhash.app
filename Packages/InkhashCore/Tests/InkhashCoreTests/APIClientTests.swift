@@ -102,4 +102,19 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(try JSONDecoder().decode(WorkspaceLink.self, from: JSONEncoder().encode(plain)), plain)
     }
 
+
+    func testMovingAWorkspaceSendsTheStorageOrNull() async throws {
+        let reply = #"{"id":"w1","name":"Haushalt","storageId":"s1","move":{"to":"s2","state":"running","detail":null}}"#
+        let (client, requests) = HTTPStub.client { _ in HTTPStub.json(202, reply) }
+        let moved = try await client.moveWorkspace(id: "w1", to: "s2")
+        _ = try await client.moveWorkspace(id: "w1", to: nil)
+        XCTAssertEqual(requests().first?.path, "/v1/apps/inkhash/workspaces/w1/storage")
+        XCTAssertEqual(requests().first?.method, "PUT")
+        let bodies = try requests().map { try JSONSerialization.jsonObject(with: $0.body) as? [String: Any] }
+        XCTAssertEqual(bodies[0]?["storageId"] as? String, "s2")
+        XCTAssertTrue(bodies[1]?["storageId"] is NSNull)
+        XCTAssertEqual(moved.move, RemoteMove(to: "s2", state: "running"))
+        XCTAssertTrue(moved.move?.isRunning == true)
+    }
+
 }

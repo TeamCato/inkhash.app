@@ -361,6 +361,28 @@ final class AppModel {
         }
     }
 
+    /// Moves the server workspace behind a linked workspace to another storage (`nil`: the account's). Kennel moves in
+    /// the background; the answer is the workspace with its move. Nil and the status say why when it failed (ADR 0076).
+    func moveOnServer(_ id: UUID, to storageID: String?) async -> RemoteWorkspace? {
+        guard let link = registry.workspace(id)?.link, let client = sessions.client(for: link.server) else {
+            status = "Nicht angemeldet."
+            return nil
+        }
+        do {
+            let moved = try await client.moveWorkspace(id: link.remote, to: storageID)
+            status = moved.move?.isRunning == true ? "Der Workspace zieht um. Der Abgleich ruht so lange." : ""
+            return moved
+        } catch APIError.unauthorized {
+            sessions.expire(link.server, ifStill: client.token)
+            status = "Die Anmeldung ist abgelaufen."
+        } catch let APIError.badStatus(400, body) where body.contains("storage") {
+            status = "Diesen Speicher darf inkhash nicht nutzen."
+        } catch {
+            status = StatusLine.describe(error)
+        }
+        return nil
+    }
+
     /// Removes the workspace and its notes from this device. A server copy stays where it is.
     func removeWorkspace(_ id: UUID) {
         guard registry.remove(id) else { return }

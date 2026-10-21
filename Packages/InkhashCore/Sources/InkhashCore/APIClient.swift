@@ -36,10 +36,12 @@ public struct ModuleInfo: Codable, Equatable, Sendable {
     public var plainWorkspaces: Bool?
     /// Workspaces may be made in a storage of their own (ADR 0075, Kennel ADR 0026).
     public var workspaceStorage: Bool?
+    /// A workspace may move to another storage (ADR 0076, Kennel ADR 0027).
+    public var workspaceMove: Bool?
 
     public init(
         title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil,
-        appScheme: String? = nil, plainWorkspaces: Bool? = nil, workspaceStorage: Bool? = nil
+        appScheme: String? = nil, plainWorkspaces: Bool? = nil, workspaceStorage: Bool? = nil, workspaceMove: Bool? = nil
     ) {
         self.title = title
         self.encryption = encryption
@@ -49,6 +51,7 @@ public struct ModuleInfo: Codable, Equatable, Sendable {
         self.appScheme = appScheme
         self.plainWorkspaces = plainWorkspaces
         self.workspaceStorage = workspaceStorage
+        self.workspaceMove = workspaceMove
     }
 
     /// Whether a new server workspace can choose its storage and encryption.
@@ -68,10 +71,12 @@ public struct RemoteWorkspace: Codable, Equatable, Sendable, Identifiable {
     public var sealed: Bool?
     /// The Kennel storage it lies in; nil: the account's storage for inkhash.
     public var storageId: String?
+    /// A move to another storage that runs or failed (ADR 0076). Nil when there is none.
+    public var move: RemoteMove?
 
     public init(
         id: String, name: String, symbol: String? = nil, icon: String? = nil, updatedAt: String? = nil, sealed: Bool? = nil,
-        storageId: String? = nil
+        storageId: String? = nil, move: RemoteMove? = nil
     ) {
         self.id = id
         self.name = name
@@ -80,10 +85,28 @@ public struct RemoteWorkspace: Codable, Equatable, Sendable, Identifiable {
         self.updatedAt = updatedAt
         self.sealed = sealed
         self.storageId = storageId
+        self.move = move
     }
 
     /// Encrypted unless the server says otherwise (ADR 0075).
     public var isSealed: Bool { sealed ?? true }
+}
+
+/// A workspace's move to another storage on the server (ADR 0076, Kennel ADR 0027).
+public struct RemoteMove: Codable, Equatable, Sendable {
+    /// The storage it moves to; nil: the account's storage.
+    public var to: String?
+    /// `running` or `failed`.
+    public var state: String
+    public var detail: String?
+
+    public init(to: String?, state: String, detail: String? = nil) {
+        self.to = to
+        self.state = state
+        self.detail = detail
+    }
+
+    public var isRunning: Bool { state == "running" }
 }
 
 /// How a new workspace lies on the server, chosen once (ADR 0075). The default is what every workspace was before.
@@ -189,6 +212,14 @@ public struct APIClient: NoteTransport, Sendable {
             body: try InkhashJSON.encode(body),
             contentType: "application/json"
         )
+        return try InkhashJSON.decode(RemoteWorkspace.self, from: data)
+    }
+
+    /// Moves a workspace to another storage (`nil`: the account's), in the background on Kennel (ADR 0076). The answer
+    /// has the running move, or none when it already lies there. Writes to it are refused until the move is over.
+    public func moveWorkspace(id: String, to storageID: String?) async throws -> RemoteWorkspace {
+        let body = try JSONSerialization.data(withJSONObject: ["storageId": storageID.map { $0 as Any } ?? NSNull()])
+        let data = try await send("/workspaces/\(id)/storage", method: "PUT", body: body, contentType: "application/json")
         return try InkhashJSON.decode(RemoteWorkspace.self, from: data)
     }
 
