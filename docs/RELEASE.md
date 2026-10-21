@@ -38,7 +38,7 @@ DEVICES="<udid> <udid>"   # xcrun devicectl list devices
 MAC_TARGETS="/Applications /Volumes/Dominik"
 ```
 
-Danach legt das Skript Mac-App und iOS-Build im Depot ab (`../depot/scripts/publish.sh`, interne Download-Seite unter `/Volumes/Media/Apps`). Fehlt das Depot oder der Ordner, gibt es eine Warnung, die Installation läuft trotzdem durch. Ein anderes Skript setzt `DEPOT_PUBLISH`.
+Danach lädt das Skript Mac-App und iOS-Build ins Depot hoch (`../depot/scripts/publish.sh`, interne Download-Seite; Adresse und Token in `~/.config/depot/env`, siehe README von Depot). Fehlt das Depot oder ist es nicht erreichbar, gibt es eine Warnung, die Installation läuft trotzdem durch. Ein anderes Skript setzt `DEPOT_PUBLISH`.
 
 ## Release der App
 
