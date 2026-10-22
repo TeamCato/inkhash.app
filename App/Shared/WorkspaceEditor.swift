@@ -510,7 +510,6 @@ struct StorageSheet: View {
 /// „Neuer Speicher …“ from KennelKitUI, only for inkhash (Kennel ADR 0025). `created` hears of the new one.
 struct NewStorageSheet: View {
     @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
     var created: (KennelStorage) -> Void
 
     var body: some View {
@@ -519,11 +518,6 @@ struct NewStorageSheet: View {
                 KennelNewStorageView(client: client.kennel, module: APIClient.module) { storage in
                     model.addStorage(storage)
                     created(storage)
-                }
-                .toolbar {
-                    ToolbarItem(placement: .cancellationAction) {
-                        Button("Abbrechen") { dismiss() }
-                    }
                 }
             } else {
                 Text("Nicht mit Kennel verbunden.").foregroundStyle(Ink.muted)
