@@ -1,5 +1,7 @@
 # inkhash
 
+<img src="docs/assets/inkhash-logo.png" alt="inkhash-Logo: ein mit dem Pinsel gemaltes # auf Papier" width="160">
+
 > **In Entwicklung.** inkhash ist noch nicht fertig. Speicherformat, API und Oberfläche können sich ändern, und es gibt noch keine App im App Store. Abgeglichen wird über Kennel, den Server des Haushalts (siehe `docs/DEPLOY.md`).
 
 Notizen für iPad, iPhone und Mac. Handschrift auf dem iPad, Text auf beiden, Abgleich über den eigenen Server. Die Bibliothek durchsucht Text und Handschrift, ohne auf den exakten Wortlaut zu bestehen, und erkennt Schlagwörter.

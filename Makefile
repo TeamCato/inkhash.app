@@ -47,10 +47,11 @@ ipad-device: generate
 icon:
 	mkdir -p .build/icon
 	swiftc -parse-as-library -O App/Shared/Theme.swift tools/RenderIcon.swift -o .build/icon/render-icon
+	swiftc -O tools/CutMark.swift -o .build/icon/cut-mark
 	.build/icon/render-icon App/Resources/Assets.xcassets/AppIcon.appiconset/AppIcon.png
 	.build/icon/render-icon --mac App/Resources/Assets.xcassets/AppIcon.appiconset
-	python3 tools/cut-mark.py tools/AppIconArtwork.png App/Resources/Assets.xcassets/InkhashMark.imageset/InkhashMark.png
-	python3 tools/cut-mark.py tools/AppIconArtwork.png Website/mark.png
+	.build/icon/cut-mark tools/AppIconArtwork.png App/Resources/Assets.xcassets/InkhashMark.imageset/InkhashMark.png
+	.build/icon/cut-mark tools/AppIconArtwork.png Website/mark.png
 
 # Spike for ADR 0024 and 0041: PDF export or .goodnotes notebook to PKDrawing blobs and PNG previews.
 # make import-spike FILE=path/to/export.pdf or notebook.goodnotes  ->  .build/import-spike/<name>/

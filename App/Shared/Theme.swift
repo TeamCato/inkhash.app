@@ -161,7 +161,7 @@ struct InkToolButtonStyle: ButtonStyle {
     }
 }
 
-/// The mark is the painted `#` of the app icon without its paper, cut by `tools/cut-mark.py` (ADR 0066).
+/// The mark is the painted `#` of the app icon without its paper, cut by `tools/CutMark.swift` (ADR 0066, 0080).
 struct InkhashMark: View {
     var body: some View {
         Image("InkhashMark")
