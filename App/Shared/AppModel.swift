@@ -12,6 +12,8 @@ enum EditorAction: Equatable {
     case toggleBold
     case toggleItalic
     case toggleCode
+    /// Underline, strikethrough or highlighter. See ADR 0079.
+    case toggleDecoration(InlineDecoration)
     /// Puts a link on the selection, or takes it off with nil. See ADR 0024.
     case setLink(String?)
 }

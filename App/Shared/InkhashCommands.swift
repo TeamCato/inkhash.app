@@ -1,3 +1,4 @@
+import InkhashCore
 import SwiftUI
 
 struct InkhashCommands: Commands {
@@ -18,6 +19,12 @@ struct InkhashCommands: Commands {
                 .keyboardShortcut("b")
             Button("Kursiv") { model.sendInline(.toggleItalic) }
                 .keyboardShortcut("i")
+            Button("Unterstrichen") { model.sendInline(.toggleDecoration(.underline)) }
+                .keyboardShortcut("u")
+            Button("Durchgestrichen") { model.sendInline(.toggleDecoration(.strike)) }
+                .keyboardShortcut("x", modifiers: [.command, .shift])
+            Button("Textmarker") { model.sendInline(.toggleDecoration(.highlight)) }
+                .keyboardShortcut("h", modifiers: [.command, .shift])
             Button("Code im Text") { model.sendInline(.toggleCode) }
                 .keyboardShortcut("e", modifiers: [.command])
             Button("Link…") { model.promptLink() }

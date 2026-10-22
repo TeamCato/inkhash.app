@@ -385,6 +385,12 @@ final class EditorEngine {
             case .toggleCode:
                 if current.code { typing.removeValue(forKey: .inkhashCode) } else { typing[.inkhashCode] = true }
                 typing[.font] = EditorFont.font(size: font.pointSize, serif: serif, bold: false, italic: false, code: !current.code)
+            case .toggleDecoration(let decoration):
+                for key in [decoration.attributeKey] + decoration.drawingKeys { typing.removeValue(forKey: key) }
+                if !current.decorations.contains(decoration) {
+                    typing[decoration.attributeKey] = true
+                    typing.merge(decoration.drawingAttributes) { _, new in new }
+                }
             case .setLink:
                 break
             }
@@ -411,6 +417,13 @@ final class EditorEngine {
                     storage.removeAttribute(.inkhashCode, range: range)
                 } else {
                     storage.addAttribute(.inkhashCode, value: true, range: range)
+                }
+            case .toggleDecoration(let decoration):
+                // `restyle` below draws it.
+                if current.decorations.contains(decoration) {
+                    storage.removeAttribute(decoration.attributeKey, range: range)
+                } else {
+                    storage.addAttribute(decoration.attributeKey, value: true, range: range)
                 }
             case .setLink(let target):
                 for key in RichText.linkAttributeKeys { storage.removeAttribute(key, range: range) }

@@ -156,11 +156,15 @@ struct TextExcerptCard: View {
 
     private static func inline(_ spans: [InlineSpan]) -> Text {
         spans.reduce(Text("")) { text, span in
-            var piece = Text(span.text)
+            var source = AttributedString(span.text)
+            if span.highlight { source.backgroundColor = Color(RichText.highlightColor) }
+            var piece = Text(source)
             if span.bold { piece = piece.bold() }
             if span.italic { piece = piece.italic() }
             if span.code { piece = piece.font(.system(size: 13, design: .monospaced)) }
             if span.link != nil { piece = piece.foregroundColor(Ink.accent) }
+            if span.underline { piece = piece.underline() }
+            if span.strike { piece = piece.strikethrough() }
             return text + piece
         }
     }

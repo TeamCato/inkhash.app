@@ -128,9 +128,11 @@ struct TextNoteView: View {
                 setType: { session.setType($0) },
                 toggle: { session.toggleInline($0) },
                 setLink: { session.setLink($0) },
-                noteID: session.noteID
+                noteID: session.noteID,
+                compact: compact
             )
-            .offset(x: max(0, rect.minX - 8), y: max(-40, rect.minY - 44))
+            // On a narrow sheet the bar is as wide as the text; it starts at its left edge.
+            .offset(x: compact ? 0 : max(0, rect.minX - 8), y: max(-40, rect.minY - 44))
         } else if let target = state.caretLink, state.slashQuery == nil, state.noteQuery == nil {
             OpenLinkChip(target: target)
                 .offset(x: max(0, state.caret.minX - 8), y: max(-34, state.caret.minY - 32))
@@ -181,6 +183,8 @@ struct FormatBar: View {
     var toggle: (EditorAction) -> Void
     var setLink: (String?) -> Void
     var noteID: UUID?
+    /// On a narrow sheet underline, strikethrough, highlighter and code share one menu.
+    var compact = false
 
     private static let types: [SlashCommand] = [.paragraph, .heading1, .heading2, .heading3, .bullet, .numbered, .checkbox, .code, .table]
 
@@ -221,17 +225,68 @@ struct FormatBar: View {
 
             styleButton("bold", on: selection.bold, help: "Fett") { toggle(.toggleBold) }
             styleButton("italic", on: selection.italic, help: "Kursiv") { toggle(.toggleItalic) }
-            styleButton("chevron.left.forwardslash.chevron.right", on: selection.code, help: "Code im Text") { toggle(.toggleCode) }
+            if compact {
+                moreStyles
+            } else {
+                ForEach(Self.decorations, id: \.decoration) { item in
+                    styleButton(item.symbol, on: selection.decorations.contains(item.decoration), help: item.title) {
+                        toggle(.toggleDecoration(item.decoration))
+                    }
+                }
+                styleButton("chevron.left.forwardslash.chevron.right", on: selection.code, help: "Code im Text") { toggle(.toggleCode) }
+            }
             styleButton("link", on: selection.link != nil, help: "Link") {
                 linkPrompt = true
             }
             .popover(isPresented: $linkPrompt, arrowEdge: .top) {
                 linkEditor
             }
+
+            Divider()
+                .frame(height: 16)
+                .padding(.horizontal, 4)
+
+            // Every marked paragraph becomes a list item; a list turns back into text. See ADR 0079.
+            styleButton("list.bullet", on: type == .bullet, help: type == .bullet ? "Aufzählung aufheben" : "In Aufzählung umwandeln") {
+                setType(type == .bullet ? .paragraph : .bullet)
+            }
         }
         .padding(.horizontal, 6)
         .padding(.vertical, 4)
         .inkPanel(radius: 12)
+    }
+
+    private static let decorations: [(decoration: InlineDecoration, symbol: String, title: String)] = [
+        (.underline, "underline", "Unterstrichen"),
+        (.strike, "strikethrough", "Durchgestrichen"),
+        (.highlight, "highlighter", "Textmarker"),
+    ]
+
+    private var moreStyles: some View {
+        let active = !selection.decorations.isEmpty || selection.code
+        return Menu {
+            ForEach(Self.decorations, id: \.decoration) { item in
+                Toggle(isOn: Binding(get: { selection.decorations.contains(item.decoration) }, set: { _ in toggle(.toggleDecoration(item.decoration)) })) {
+                    Label(item.title, systemImage: item.symbol)
+                }
+            }
+            Toggle(isOn: Binding(get: { selection.code }, set: { _ in toggle(.toggleCode) })) {
+                Label("Code im Text", systemImage: "chevron.left.forwardslash.chevron.right")
+            }
+        } label: {
+            Image(systemName: "textformat")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundStyle(active ? Ink.accent : Ink.ink)
+                .frame(width: 30, height: 28)
+                .background(active ? Ink.accent.opacity(0.12) : Color.clear, in: RoundedRectangle(cornerRadius: 8, style: .continuous))
+                .contentShape(Rectangle())
+        }
+        .menuStyle(.button)
+        .buttonStyle(.plain)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Weitere Stile")
+        .accessibilityLabel("Weitere Stile")
     }
 
     private var linkEditor: some View {

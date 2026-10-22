@@ -17,6 +17,7 @@ struct InlineSelection: Equatable {
     var italic: Bool
     var code: Bool
     var link: String?
+    var decorations: Set<InlineDecoration> = []
 
     static let none = InlineSelection(length: 0, bold: false, italic: false, code: false)
 
@@ -34,7 +35,8 @@ struct InlineSelection: Equatable {
             bold: font.map(RichText.isBold) ?? false,
             italic: font.map(RichText.isItalic) ?? false,
             code: attributes[.inkhashCode] != nil,
-            link: attributes[.inkhashLink] as? String
+            link: attributes[.inkhashLink] as? String,
+            decorations: RichText.decorations(in: attributes)
         )
     }
 }
@@ -168,6 +170,11 @@ enum RichText {
             if let link = span.link, type != .code {
                 attributes.merge(linkAttributes(link)) { _, new in new }
             }
+            if type != .code {
+                for decoration in InlineDecoration.allCases where decoration.isOn(span) {
+                    attributes[decoration.attributeKey] = true
+                }
+            }
             result.append(NSAttributedString(string: span.text, attributes: attributes))
         }
         if result.length == 0 {
@@ -208,6 +215,7 @@ enum RichText {
         storage.removeAttribute(.strikethroughStyle, range: range)
         storage.removeAttribute(.strikethroughColor, range: range)
         storage.removeAttribute(.inkhashDue, range: range)
+        defer { paintDecorations(in: storage, range: range) }
         guard style.type == .checkbox else { return }
         if style.checked {
             storage.addAttributes([
@@ -229,8 +237,37 @@ enum RichText {
     }
 
     private static let markerPattern = try! NSRegularExpression(
-        pattern: #"\*{1,3}|`|(?<![\w#])#[^\s#]+"#
+        pattern: #"\*{1,3}|`|~~|==|</?u>|(?<![\w#])#[^\s#]+"#
     )
+
+    static var highlightColor: PlatformColor {
+        PlatformColor(red: 0.98, green: 0.86, blue: 0.45, alpha: 0.45)
+    }
+
+    /// Draws underline, strikethrough and highlighter from the `inkhash.*` keys. The drawing attributes
+    /// are shared with links and done tasks, so the keys stay the truth and survive their removal. See ADR 0079.
+    static func paintDecorations(in storage: NSMutableAttributedString, range: NSRange) {
+        guard range.length > 0 else { return }
+        storage.removeAttribute(.backgroundColor, range: range)
+        storage.enumerateAttributes(in: range, options: []) { attributes, run, _ in
+            let decorations = decorations(in: attributes)
+            if decorations.contains(.underline) || attributes[.inkhashLink] != nil {
+                storage.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: run)
+            } else {
+                storage.removeAttribute(.underlineStyle, range: run)
+            }
+            if decorations.contains(.strike), attributes[.inkhashDue] == nil {
+                storage.addAttribute(.strikethroughStyle, value: NSUnderlineStyle.single.rawValue, range: run)
+            }
+            if decorations.contains(.highlight) {
+                storage.addAttribute(.backgroundColor, value: highlightColor, range: run)
+            }
+        }
+    }
+
+    static func decorations(in attributes: [NSAttributedString.Key: Any]) -> Set<InlineDecoration> {
+        Set(InlineDecoration.allCases.filter { attributes[$0.attributeKey] != nil })
+    }
 
     /// A link is accent coloured and underlined. The target travels in `.inkhashLink`, not `.link`,
     /// so a plain click still places the cursor; on the Mac the pointer and a tooltip tell the target.
@@ -273,29 +310,36 @@ enum RichText {
             guard !text.isEmpty else { return }
             let font = attributes[.font] as? PlatformFont
             let code = attributes[.inkhashCode] != nil
+            let decorations = decorations(in: attributes)
             spans.append(InlineSpan(
                 text: text,
                 bold: heading ? false : (font.map(isBold) ?? false),
                 italic: font.map(isItalic) ?? false,
                 code: code,
-                link: attributes[.inkhashLink] as? String
+                link: attributes[.inkhashLink] as? String,
+                underline: decorations.contains(.underline),
+                strike: decorations.contains(.strike),
+                highlight: decorations.contains(.highlight)
             ))
         }
         return MarkdownCodec.normalize(spans)
     }
 
     static func reconcile(_ attr: NSAttributedString, cursor: Int, type: BlockType) -> (spans: [InlineSpan], cursor: Int)? {
-        guard attr.string.contains(where: { "*`\\)".contains($0) }) else { return nil }
-        let parsed = MarkdownCodec.parseInline(markdown(from: attr, type: type), cursorUTF16: cursor)
+        guard attr.string.contains(where: { "*`\\)~=>".contains($0) }) else { return nil }
+        let source = markdown(from: attr, cursor: cursor, type: type)
+        let parsed = MarkdownCodec.parseInline(source.text, cursorUTF16: source.cursor)
         guard parsed.plain != attr.string else { return nil }
         return (parsed.spans, parsed.cursorUTF16)
     }
 
-    /// The text as Markdown for the live reparse. Unlike `serializeInline` it does not escape:
-    /// what the person typed as `*` is meant as a marker here.
-    private static func markdown(from attr: NSAttributedString, type: BlockType) -> String {
+    /// The text as Markdown for the live reparse, and where `cursor` lies in it: styles already in the
+    /// text add markers before it. Unlike `serializeInline` it does not escape: what the person typed
+    /// as `*` is meant as a marker here.
+    private static func markdown(from attr: NSAttributedString, cursor: Int, type: BlockType) -> (text: String, cursor: Int) {
         let heading = isHeading(type)
         var output = ""
+        var sourceCursor: Int?
         var openLink: String?
         let full = NSRange(location: 0, length: attr.length)
         attr.enumerateAttributes(in: full) { attributes, range, _ in
@@ -310,20 +354,31 @@ enum RichText {
                 if link != nil { output += "[" }
                 openLink = link
             }
+            var marker = ""
             if code {
-                output += "`\(text)`"
+                marker = "`"
             } else if bold && italic {
-                output += "***\(text)***"
+                marker = "***"
             } else if bold {
-                output += "**\(text)**"
+                marker = "**"
             } else if italic {
-                output += "*\(text)*"
-            } else {
-                output += text
+                marker = "*"
             }
+            var prefix = marker
+            var suffix = marker
+            for decoration in InlineDecoration.allCases.reversed() where attributes[decoration.attributeKey] != nil {
+                prefix = decoration.opener + prefix
+                suffix += decoration.closer
+            }
+            if sourceCursor == nil, cursor < NSMaxRange(range) {
+                // At the start of a run the cursor stands before its markers.
+                let offset = cursor - range.location
+                sourceCursor = (output as NSString).length + (offset > 0 ? (prefix as NSString).length + offset : 0)
+            }
+            output += prefix + text + suffix
         }
         if let openLink { output += "](\(openLink))" }
-        return output
+        return (output, sourceCursor ?? (output as NSString).length)
     }
 
     static var accentColor: PlatformColor {
@@ -366,6 +421,10 @@ enum RichText {
 extension NSAttributedString.Key {
     static let inkhashCode = NSAttributedString.Key("inkhash.code")
     static let inkhashLink = NSAttributedString.Key("inkhash.link")
+    /// Inline decorations; `RichText.paintDecorations` draws them. See ADR 0079.
+    static let inkhashUnderline = NSAttributedString.Key("inkhash.underline")
+    static let inkhashStrike = NSAttributedString.Key("inkhash.strike")
+    static let inkhashHighlight = NSAttributedString.Key("inkhash.highlight")
     /// Paragraph attributes, on every character of a paragraph including its newline. See ADR 0025.
     static let inkhashBlockType = NSAttributedString.Key("inkhash.blockType")
     static let inkhashChecked = NSAttributedString.Key("inkhash.checked")
@@ -378,6 +437,27 @@ extension NSAttributedString.Key {
     static let inkhashTable = NSAttributedString.Key("inkhash.table")
     /// On every row: where the columns lie and how the row is drawn (`TableRowLayout`).
     static let inkhashTableRow = NSAttributedString.Key("inkhash.tableRow")
+}
+
+extension InlineDecoration {
+    var attributeKey: NSAttributedString.Key {
+        switch self {
+        case .underline: .inkhashUnderline
+        case .strike: .inkhashStrike
+        case .highlight: .inkhashHighlight
+        }
+    }
+
+    /// What `RichText.paintDecorations` draws for this decoration, for typing before any text exists.
+    var drawingAttributes: [NSAttributedString.Key: Any] {
+        switch self {
+        case .underline: [.underlineStyle: NSUnderlineStyle.single.rawValue]
+        case .strike: [.strikethroughStyle: NSUnderlineStyle.single.rawValue]
+        case .highlight: [.backgroundColor: RichText.highlightColor]
+        }
+    }
+
+    var drawingKeys: [NSAttributedString.Key] { Array(drawingAttributes.keys) }
 }
 
 /// A value type in an attributed string needs a class around it to survive copies through Foundation.

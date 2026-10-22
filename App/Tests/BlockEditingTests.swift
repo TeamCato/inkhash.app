@@ -98,6 +98,48 @@ final class BlockEditingTests: EditorTestCase {
         XCTAssertEqual(markdown, "eins **zwei**\n")
     }
 
+    /// ADR 0079: underline, strikethrough and highlighter from the selection, stored as `<u>`, `~~`, `==`.
+    func testDecorationsFromTheSelection() {
+        open("eins zwei drei\n")
+        view.selectedRange = NSRange(location: 5, length: 4)
+        engine.selectionChanged()
+        engine.toggle(.toggleDecoration(.highlight))
+        engine.toggle(.toggleDecoration(.underline))
+        XCTAssertEqual(markdown, "eins <u>==zwei==</u> drei\n")
+        XCTAssertNotNil(view.storage.attribute(.backgroundColor, at: 5, effectiveRange: nil))
+        view.selectedRange = NSRange(location: 10, length: 4)
+        engine.selectionChanged()
+        engine.toggle(.toggleDecoration(.strike))
+        XCTAssertEqual(markdown, "eins <u>==zwei==</u> ~~drei~~\n")
+        view.selectedRange = NSRange(location: 5, length: 4)
+        engine.selectionChanged()
+        engine.toggle(.toggleDecoration(.underline))
+        XCTAssertEqual(markdown, "eins ==zwei== ~~drei~~\n")
+        XCTAssertNil(view.storage.attribute(.underlineStyle, at: 5, effectiveRange: nil))
+    }
+
+    func testTypedDecorationMarkersBecomeStyles() {
+        open()
+        type("==wichtig== und ~~weg~~ normal")
+        XCTAssertEqual(markdown, "==wichtig== und ~~weg~~ normal\n")
+        XCTAssertEqual(view.storage.string, "wichtig und weg normal")
+    }
+
+    /// P-069: styles before the cursor add markers to the Markdown, not to the text.
+    func testCursorAfterAnEarlierStyle() {
+        open()
+        type("**fett** und *ku* weiter")
+        XCTAssertEqual(markdown, "**fett** und *ku* weiter\n")
+    }
+
+    func testMarkedLinesBecomeAList() {
+        open("eins\nzwei\ndrei\n")
+        view.selectedRange = NSRange(location: 2, length: 6)
+        engine.selectionChanged()
+        engine.setType(.bullet)
+        XCTAssertEqual(markdown, "- eins\n- zwei\n\ndrei\n")
+    }
+
     func testCodeBlockKeepsItsLines() {
         open()
         type("``` let a = 1\nlet b = 2")

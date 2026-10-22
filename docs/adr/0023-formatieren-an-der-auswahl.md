@@ -1,6 +1,6 @@
 # 0023 Formatieren an der Auswahl
 
-Status: angenommen. Seit 0025 hängt die Leiste an der Auswahl im einen Textfeld der Notiz; die Sitzung bekommt die Auswahl vom Editor statt von einzelnen Blöcken. Seit 0029 ist die Leiste Papier, nicht Glas.
+Status: angenommen. Seit 0025 hängt die Leiste an der Auswahl im einen Textfeld der Notiz; die Sitzung bekommt die Auswahl vom Editor statt von einzelnen Blöcken. Seit 0029 ist die Leiste Papier, nicht Glas. Seit 0079 kommen Unterstrichen, Durchgestrichen, Textmarker und „In Aufzählung umwandeln“ dazu.
 
 Präzisiert 0011 und 0018: „keine Werkzeugleiste über dem Text“ gilt für feste Leisten.
 
@@ -18,4 +18,4 @@ Fett und Kursiv waren nur über Tastenkürzel, das Menü oder `/` erreichbar. We
 
 ## Nicht
 
-Keine feste Leiste, kein Erscheinen beim bloßen Schweben über Text. Keine Stile, die das Markdown nicht kennt: Unterstreichen und Durchstreichen bleiben außen vor. Links kamen mit 0024 dazu. Keine Leiste auf der Handschriftseite.
+Keine feste Leiste, kein Erscheinen beim bloßen Schweben über Text. Keine Stile, die das Markdown nicht kennt. Links kamen mit 0024 dazu, Unterstreichen, Durchstreichen und Textmarker mit 0079. Keine Leiste auf der Handschriftseite.

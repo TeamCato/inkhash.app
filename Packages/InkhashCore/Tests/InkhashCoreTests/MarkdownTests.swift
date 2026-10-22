@@ -159,6 +159,59 @@ final class MarkdownTests: XCTestCase {
         XCTAssertEqual(left.id, block.id)
     }
 
+    func testDecorations() {
+        let parsed = MarkdownCodec.parseInline("a <u>unter</u> ~~durch~~ ==mark== b")
+        XCTAssertEqual(parsed.plain, "a unter durch mark b")
+        XCTAssertEqual(parsed.spans.map(\.underline), [false, true, false, false, false, false, false])
+        XCTAssertEqual(parsed.spans.map(\.strike), [false, false, false, true, false, false, false])
+        XCTAssertEqual(parsed.spans.map(\.highlight), [false, false, false, false, false, true, false])
+    }
+
+    func testDecorationsWrapEmphasisAndCode() {
+        let parsed = MarkdownCodec.parseInline("==**fett** und `code`==")
+        XCTAssertEqual(parsed.plain, "fett und code")
+        XCTAssertTrue(parsed.spans.allSatisfy(\.highlight))
+        XCTAssertEqual(parsed.spans.map(\.bold), [true, false, false])
+        XCTAssertEqual(parsed.spans.map(\.code), [false, false, true])
+        XCTAssertEqual(MarkdownCodec.serializeInline(parsed.spans), "==**fett** und `code`==")
+    }
+
+    func testDecorationsRoundtrip() {
+        let spans = [
+            InlineSpan(text: "a", underline: true, strike: true),
+            InlineSpan(text: "b", bold: true, underline: true, highlight: true),
+            InlineSpan(text: "c", highlight: true),
+            InlineSpan(text: "d", link: "https://example.org", strike: true),
+            InlineSpan(text: "e"),
+        ]
+        let markdown = MarkdownCodec.serializeInline(spans)
+        XCTAssertEqual(markdown, "<u>~~a~~==**b**==</u>==c==[~~d~~](https://example.org)e")
+        XCTAssertEqual(MarkdownCodec.parseInline(markdown).spans, spans)
+    }
+
+    func testUnclosedDecorationStays() {
+        XCTAssertEqual(MarkdownCodec.parseInline("a == b").plain, "a == b")
+        XCTAssertEqual(MarkdownCodec.parseInline("~~offen").plain, "~~offen")
+        XCTAssertEqual(MarkdownCodec.parseInline("<u>offen").plain, "<u>offen")
+        XCTAssertEqual(MarkdownCodec.parseInline("zu</u>").plain, "zu</u>")
+        XCTAssertEqual(MarkdownCodec.parseInline("~~~~").plain, "~~~~")
+        XCTAssertFalse(MarkdownCodec.parseInline("==`a==`").spans.contains(where: \.highlight))
+    }
+
+    func testDecorationMarkersInTextAreEscaped() {
+        for text in ["a == b == c", "x ~~ y ~~", "<u>roh</u>", "ende=", "~", "a<"] {
+            let spans = [InlineSpan(text: text), InlineSpan(text: "z", highlight: true)]
+            let parsed = MarkdownCodec.parseInline(MarkdownCodec.serializeInline(spans))
+            XCTAssertEqual(parsed.spans, spans, text)
+        }
+    }
+
+    func testCursorAfterDecoration() {
+        let parsed = MarkdownCodec.parseInline("~~ab~~", cursorUTF16: 6)
+        XCTAssertEqual(parsed.plain, "ab")
+        XCTAssertEqual(parsed.cursorUTF16, 2)
+    }
+
     private func snapshots(_ blocks: [Block]) -> [String] {
         blocks.map { "\($0.type)|\($0.checked)|\($0.language)|\(MarkdownCodec.serializeInline($0.spans))" }
     }

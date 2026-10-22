@@ -7,18 +7,77 @@ public struct InlineSpan: Equatable, Sendable {
     public var code: Bool
     /// Target of `[text](link)`. Nil for plain text. See ADR 0024.
     public var link: String?
+    /// `<u>text</u>`. Markdown has no underline; the HTML tag is what other Markdown apps show. See ADR 0079.
+    public var underline: Bool
+    /// `~~text~~`. See ADR 0079.
+    public var strike: Bool
+    /// `==text==`, the highlighter. See ADR 0079.
+    public var highlight: Bool
 
-    public init(text: String, bold: Bool = false, italic: Bool = false, code: Bool = false, link: String? = nil) {
+    public init(
+        text: String,
+        bold: Bool = false,
+        italic: Bool = false,
+        code: Bool = false,
+        link: String? = nil,
+        underline: Bool = false,
+        strike: Bool = false,
+        highlight: Bool = false
+    ) {
         self.text = text
         self.bold = bold
         self.italic = italic
         self.code = code
         self.link = link
+        self.underline = underline
+        self.strike = strike
+        self.highlight = highlight
     }
 
     /// Same styles and link, so the two could be one span.
     public func sameStyle(as other: InlineSpan) -> Bool {
         bold == other.bold && italic == other.italic && code == other.code && link == other.link
+            && underline == other.underline && strike == other.strike && highlight == other.highlight
+    }
+}
+
+/// Styles that wrap around bold, italic and code and may overlap them. Outermost first, which is
+/// also the order `serializeInline` nests them in. See ADR 0079.
+public enum InlineDecoration: CaseIterable, Sendable {
+    case underline
+    case strike
+    case highlight
+
+    public var opener: String {
+        switch self {
+        case .underline: "<u>"
+        case .strike: "~~"
+        case .highlight: "=="
+        }
+    }
+
+    public var closer: String {
+        switch self {
+        case .underline: "</u>"
+        case .strike: "~~"
+        case .highlight: "=="
+        }
+    }
+
+    public func isOn(_ span: InlineSpan) -> Bool {
+        switch self {
+        case .underline: span.underline
+        case .strike: span.strike
+        case .highlight: span.highlight
+        }
+    }
+
+    public func set(_ on: Bool, on span: inout InlineSpan) {
+        switch self {
+        case .underline: span.underline = on
+        case .strike: span.strike = on
+        case .highlight: span.highlight = on
+        }
     }
 }
 
@@ -280,18 +339,31 @@ public enum MarkdownCodec {
         var index = 0
         let all = normalize(spans)
         while index < all.count {
-            guard let link = all[index].link else {
-                output += styled(all[index])
-                index += 1
-                continue
-            }
             // Neighbouring spans with the same target are one link with styles inside.
-            var label = ""
-            while index < all.count, all[index].link == link {
-                label += styled(all[index])
-                index += 1
-            }
-            output += "[\(label)](\(link))"
+            let link = all[index].link
+            var end = index
+            while end < all.count, all[end].link == link { end += 1 }
+            let body = decorated(all[index..<end], level: 0)
+            output += link.map { "[\(body)](\($0))" } ?? body
+            index = end
+        }
+        return output
+    }
+
+    /// Opens each decoration once for a run of spans that share it, so `==**a** b==` stays one highlight.
+    private static func decorated(_ spans: ArraySlice<InlineSpan>, level: Int) -> String {
+        let all = InlineDecoration.allCases
+        guard level < all.count else { return spans.map(styled).joined() }
+        let decoration = all[level]
+        var output = ""
+        var index = spans.startIndex
+        while index < spans.endIndex {
+            let on = decoration.isOn(spans[index])
+            var end = index
+            while end < spans.endIndex, decoration.isOn(spans[end]) == on { end += 1 }
+            let inner = decorated(spans[index..<end], level: level + 1)
+            output += on ? decoration.opener + inner + decoration.closer : inner
+            index = end
         }
         return output
     }
@@ -529,6 +601,7 @@ public enum MarkdownCodec {
         var italic: Bool
         var code: Bool
         var link: String? = nil
+        var decorations: Set<InlineDecoration> = []
     }
 
     private enum Mode {
@@ -555,11 +628,12 @@ public enum MarkdownCodec {
         var committed: [Cell] = []
         var pending: [Cell] = []
         var mode = Mode.plain
+        var decorations: Set<InlineDecoration> = []
         var markerSource = 0
         var index = 0
 
         func addText(_ text: String, source: Int) {
-            let cell = Cell(sourcePos: source, text: text, bold: mode.bold, italic: mode.italic, code: mode.code)
+            let cell = Cell(sourcePos: source, text: text, bold: mode.bold, italic: mode.italic, code: mode.code, decorations: decorations)
             if mode == .plain {
                 committed.append(cell)
             } else {
@@ -571,7 +645,7 @@ public enum MarkdownCodec {
             var cursor = position
             for character in marker {
                 let text = String(character)
-                committed.append(Cell(sourcePos: cursor, text: text, bold: false, italic: false, code: false))
+                committed.append(Cell(sourcePos: cursor, text: text, bold: false, italic: false, code: false, decorations: decorations))
                 cursor += text.utf16.count
             }
         }
@@ -592,6 +666,28 @@ public enum MarkdownCodec {
             pending.removeAll()
         }
 
+        /// A decoration marker at `index`: closes an open decoration, opens one whose closer follows
+        /// with text in between, and is text otherwise. Returns the source length consumed.
+        func decorate() -> Int? {
+            for decoration in InlineDecoration.allCases {
+                if decorations.contains(decoration), starts(ns, index, count, decoration.closer) {
+                    decorations.remove(decoration)
+                    return (decoration.closer as NSString).length
+                }
+                guard !decorations.contains(decoration), starts(ns, index, count, decoration.opener) else { continue }
+                let length = (decoration.opener as NSString).length
+                if let closer = closerAt(decoration, in: ns, from: index + length, count), closer > index + length {
+                    decorations.insert(decoration)
+                    return length
+                }
+                for (offset, character) in decoration.opener.enumerated() {
+                    addText(String(character), source: index + offset)
+                }
+                return length
+            }
+            return nil
+        }
+
         while index < count {
             if starts(ns, index, count, "\\"), index + 1 < count {
                 let (text, length) = readChar(ns, index + 1, count)
@@ -610,12 +706,17 @@ public enum MarkdownCodec {
                 }
                 continue
             }
+            if let length = decorate() {
+                index += length
+                continue
+            }
             if mode == .plain {
                 if let (label, target, length) = linkAt(ns, index, count) {
                     for cell in inlineCells(label) {
                         var linked = cell
                         linked.sourcePos += index + 1
                         linked.link = target
+                        linked.decorations.formUnion(decorations)
                         committed.append(linked)
                     }
                     index += length
@@ -658,18 +759,37 @@ public enum MarkdownCodec {
         }
         if mode != .plain {
             let marker = mode.marker
+            let open = pending
+            pending.removeAll()
             emitLiteral(marker, at: markerSource)
-            for cell in pending {
-                committed.append(Cell(sourcePos: cell.sourcePos, text: cell.text, bold: false, italic: false, code: false))
+            for cell in open {
+                committed.append(Cell(sourcePos: cell.sourcePos, text: cell.text, bold: false, italic: false, code: false, decorations: cell.decorations))
             }
         }
         return committed
     }
 
+    /// Where the closer of `decoration` starts, skipping escapes, code and links, which the parser reads as a whole.
+    private static func closerAt(_ decoration: InlineDecoration, in ns: NSString, from start: Int, _ count: Int) -> Int? {
+        var cursor = start
+        while cursor < count {
+            if starts(ns, cursor, count, "\\") { cursor += 2; continue }
+            if starts(ns, cursor, count, decoration.closer) { return cursor }
+            if starts(ns, cursor, count, "`") {
+                let rest = ns.range(of: "`", range: NSRange(location: cursor + 1, length: count - cursor - 1))
+                if rest.location != NSNotFound { cursor = rest.location + 1; continue }
+            }
+            if let (_, _, length) = linkAt(ns, cursor, count) { cursor += length; continue }
+            cursor += 1
+        }
+        return nil
+    }
+
     private static func group(_ cells: [Cell]) -> [InlineSpan] {
         var spans: [InlineSpan] = []
         for cell in cells {
-            let span = InlineSpan(text: cell.text, bold: cell.bold, italic: cell.italic, code: cell.code, link: cell.link)
+            var span = InlineSpan(text: cell.text, bold: cell.bold, italic: cell.italic, code: cell.code, link: cell.link)
+            for decoration in cell.decorations { decoration.set(true, on: &span) }
             if var last = spans.last, last.sameStyle(as: span) {
                 last.text += cell.text
                 spans[spans.count - 1] = last
@@ -764,9 +884,15 @@ public enum MarkdownCodec {
         var output = ""
         let characters = Array(text)
         for (index, character) in characters.enumerated() {
+            let next = index + 1 < characters.count ? characters[index + 1] : nil
             if character == "\\" || character == "*" || character == "`" {
                 output.append("\\")
             } else if character == "[", String(characters[(index + 1)...]).contains("](") {
+                output.append("\\")
+            } else if character == "~" || character == "=", next == nil || next == character {
+                // A pair is a decoration marker; at the end a marker of the next span may follow.
+                output.append("\\")
+            } else if character == "<", String(characters[(index + 1)...]).hasPrefix("u>") || String(characters[(index + 1)...]).hasPrefix("/u>") {
                 output.append("\\")
             }
             output.append(character)

@@ -1,6 +1,6 @@
 # 0004 Text ist kanonisches Markdown
 
-Status: angenommen. Tabellen ergänzt durch 0027, Links durch 0024.
+Status: angenommen. Tabellen ergänzt durch 0027, Links durch 0024, Unterstrichen, Durchgestrichen und Textmarker durch 0079.
 
 ## Entscheidung
 
