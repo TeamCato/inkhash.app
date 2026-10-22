@@ -119,28 +119,44 @@ public enum TakeOverPlanner {
     }
 }
 
-/// Kennel's storages as inkhash shows them: „Standard“ first, then those inkhash may use (ADR 0077).
+/// Kennel's storages as inkhash shows them: the account's standard storage first, under its real name and visibility,
+/// then the others inkhash may use (ADR 0077). A workspace without `storageId` lies in the standard storage.
 public enum KennelStorages {
-    /// `storages`: from `APIClient.noteStorages`. `remotes`: the account's Kennel workspaces, to count per storage.
-    /// Without `counts` no count is shown.
-    public static func summaries(_ storages: [KennelStorage], remotes: [RemoteWorkspace]? = nil) -> [KennelStorageSummary] {
-        let standard = KennelStorageSummary(
-            id: TakeOverPlanner.standardStorage, name: "Standard", visibility: .onlyMe,
-            count: remotes.map { count(remotes: $0, in: nil) })
-        return [standard] + storages.map { storage in
-            KennelStorageSummary(storage, count: remotes.map { count(remotes: $0, in: storage.id) })
-        }
+    /// `storages`: from `APIClient.noteStorages`. `standardID`: the account's binding for inkhash (`nil`: Kennel's
+    /// default storage). `remotes`: the account's Kennel workspaces, to count per storage; without them no count.
+    public static func summaries(
+        _ storages: [KennelStorage], standardID: String? = nil, remotes: [RemoteWorkspace]? = nil
+    ) -> [KennelStorageSummary] {
+        let bound = standard(in: storages, id: standardID)
+        let summary = KennelStorageSummary(
+            id: TakeOverPlanner.standardStorage, name: bound?.name ?? "Standard",
+            // Unknown: say what is true for Kennel's default storage, which belongs to the household.
+            visibility: bound?.visibility ?? .household,
+            count: remotes.map { remotes in
+                workspaces(remotes.filter { $0.storageId == nil || $0.storageId == bound?.id }.count)
+            })
+        return [summary]
+            + storages.filter { $0.id != bound?.id }.map { storage in
+                KennelStorageSummary(storage, count: remotes.map { count(remotes: $0, in: storage.id) })
+            }
     }
 
-    /// The summary's id as Kennel's `storageId`: nil for „Standard“.
+    /// The storage a workspace without `storageId` lies in: the account's binding, else Kennel's default storage.
+    public static func standard(in storages: [KennelStorage], id: String?) -> KennelStorage? {
+        if let id, let bound = storages.first(where: { $0.id == id }) { return bound }
+        return storages.first(where: \.isDefault)
+    }
+
+    /// The summary's id as Kennel's `storageId`: nil for the standard storage.
     public static func storageID(_ summaryID: String?) -> String? {
         guard let summaryID, summaryID != TakeOverPlanner.standardStorage else { return nil }
         return summaryID
     }
 
     /// The summary id of a Kennel workspace's storage.
-    public static func summaryID(of remote: RemoteWorkspace) -> String {
-        remote.storageId ?? TakeOverPlanner.standardStorage
+    public static func summaryID(of remote: RemoteWorkspace, standardID: String? = nil) -> String {
+        guard let id = remote.storageId, id != standardID else { return TakeOverPlanner.standardStorage }
+        return id
     }
 
     /// „1 Workspace“, „3 Workspaces“.

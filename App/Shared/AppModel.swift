@@ -545,6 +545,7 @@ final class AppModel {
             overview.module = module
             overview.remotes = try await client.workspaceList().workspaces
             if module?.workspaceStorage == true { overview.storages = (try? await client.noteStorages()) ?? overview.storages }
+            overview.standardStorageID = (try? await client.standardStorageID()) ?? overview.standardStorageID
             return true
         } catch APIError.unauthorized {
             sessions.expire(kennel.id, ifStill: client.token)

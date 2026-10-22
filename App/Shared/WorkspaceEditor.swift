@@ -303,7 +303,7 @@ struct WorkspaceEditor: View {
         if remote?.move?.isRunning == true { return [] }
         var actions: [KennelPlaceAction] = []
         if model.isSyncEnabled, !link.sealed, model.overview.module?.workspaceMove == true, let remote {
-            actions.append(KennelPlaceAction("Anderer Speicher …") { storageSheet = .move(current: KennelStorages.summaryID(of: remote)) })
+            actions.append(KennelPlaceAction("Anderer Speicher …") { storageSheet = .move(current: KennelStorages.summaryID(of: remote, standardID: model.overview.standardStorageID)) })
         }
         actions.append(KennelPlaceAction("Nur noch auf diesem Gerät …") { confirmHereOnly = true })
         if model.isSyncEnabled, remote != nil, model.overview.remotes.count > 1 {

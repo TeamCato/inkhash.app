@@ -77,10 +77,30 @@ final class TakeOverTests: XCTestCase {
         let summaries = KennelStorages.summaries(
             [KennelStorage(id: "nas", name: "NAS", driver: "smb", scope: .private, kinds: ["blobs"], modules: ["inkhash"])],
             remotes: remotes)
-        XCTAssertEqual(summaries.map(\.detail), ["Nur ich · 1 Workspace", "Nur ich · 2 Workspaces"])
+        XCTAssertEqual(summaries.map(\.detail), ["Haushalt · 1 Workspace", "Nur ich · 2 Workspaces"])
         XCTAssertNil(KennelStorages.storageID("standard"))
         XCTAssertEqual(KennelStorages.storageID("nas"), "nas")
         XCTAssertEqual(KennelStorages.summaryID(of: remotes[0]), "standard")
+    }
+
+    /// Dominik on 2026-10-22: „Standard“ showed „Nur ich“ while Kennel's default storage belongs to the household.
+    func testTheStandardStorageShowsItsRealNameAndVisibilityOnce() {
+        let storages = [
+            KennelStorage(id: "def", name: "Kennel", driver: "folder", scope: .household, kinds: ["blobs"], isDefault: true),
+            KennelStorage(id: "mine", name: "Meins", driver: "smb", scope: .private, kinds: ["blobs"]),
+        ]
+        let remotes = [
+            RemoteWorkspace(id: "1", name: "A", storageId: nil), RemoteWorkspace(id: "2", name: "B", storageId: "def"),
+        ]
+
+        let byDefault = KennelStorages.summaries(storages, remotes: remotes)
+        let bound = KennelStorages.summaries(storages, standardID: "mine", remotes: remotes)
+
+        XCTAssertEqual(byDefault.map(\.name), ["Kennel", "Meins"])
+        XCTAssertEqual(byDefault.map(\.detail), ["Haushalt · 2 Workspaces", "Nur ich · 0 Workspaces"])
+        XCTAssertEqual(bound.map(\.name), ["Meins", "Kennel"])
+        XCTAssertEqual(bound.first?.visibility, .onlyMe)
+        XCTAssertEqual(KennelStorages.summaryID(of: remotes[1], standardID: "def"), "standard")
     }
 
     // MARK: Status

@@ -96,6 +96,7 @@ final class SyncCoordinator {
             if module.workspaceStorage == true {
                 overview.storages = (try? await client.noteStorages()) ?? overview.storages
             }
+            overview.standardStorageID = (try? await client.standardStorageID()) ?? overview.standardStorageID
             let key = await vaultKey(for: kennel.id)
             let waiting = try await converter.run(kennel: kennel, client: client, remotes: list.workspaces, module: module, key: key)
             overview.state.waitingForKey = waiting.forKey

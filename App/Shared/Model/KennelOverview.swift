@@ -14,6 +14,8 @@ final class KennelOverview {
     var remotes: [RemoteWorkspace] = []
     /// Storages inkhash may put notes in, without the account's own.
     var storages: [KennelStorage] = []
+    /// The account's binding for inkhash: where workspaces without `storageId` lie. `nil`: Kennel's default storage.
+    var standardStorageID: String?
     /// What the module can do; nil until Kennel answered.
     var module: ModuleInfo?
 
@@ -22,6 +24,7 @@ final class KennelOverview {
         state = KennelSyncState()
         remotes = []
         storages = []
+        standardStorageID = nil
         module = nil
     }
 
@@ -39,14 +42,17 @@ final class KennelOverview {
     /// Name and visibility of the storage a Kennel workspace lies in.
     func storage(of remote: RemoteWorkspace?) -> (name: String, visibility: KennelVisibility)? {
         guard let remote else { return nil }
-        guard let id = remote.storageId else { return ("Standard", .onlyMe) }
+        guard let id = remote.storageId else {
+            let standard = KennelStorages.standard(in: storages, id: standardStorageID)
+            return (standard?.name ?? "Standard", standard?.visibility ?? .household)
+        }
         guard let storage = storages.first(where: { $0.id == id }) else { return nil }
         return (storage.name, storage.visibility)
     }
 
     /// The storages for pickers and the Kennel page: „Standard“ first, with how many workspaces lie in each.
     var summaries: [KennelStorageSummary] {
-        let all = KennelStorages.summaries(storages, remotes: remotes)
+        let all = KennelStorages.summaries(storages, standardID: standardStorageID, remotes: remotes)
         return module?.workspaceStorage == true ? all : Array(all.prefix(1))
     }
 

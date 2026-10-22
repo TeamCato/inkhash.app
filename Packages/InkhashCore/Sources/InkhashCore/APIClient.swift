@@ -228,6 +228,12 @@ public struct APIClient: NoteTransport, Sendable {
         try await kennel.storages(for: Self.module).filter { $0.kinds.contains("blobs") }
     }
 
+    /// The storage Kennel keeps this account's notes in when a workspace names none (`/v1/storage-bindings`);
+    /// `nil` before the first workspace bound one.
+    public func standardStorageID() async throws -> String? {
+        try await kennel.storageBindings().first { $0.module == Self.module && $0.kind == "blobs" }?.storageID
+    }
+
     public func updateWorkspace(id: String, look: WorkspaceLook) async throws -> RemoteWorkspace {
         // `icon` goes out as null to remove a picture, so it is written by hand.
         var body: [String: Any] = ["name": look.name, "symbol": look.symbol]
