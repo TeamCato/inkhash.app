@@ -50,6 +50,9 @@ jobs:
           rm -rf "$RUNNER_TEMP/depot"
           git clone -q --depth 1 git@github.com:TeamCato/depot.git "$RUNNER_TEMP/depot"
           echo "PUBLISH=$RUNNER_TEMP/depot/scripts/publish.sh" >>"$GITHUB_ENV"
+      # A Package.resolved from an earlier run would pin an old KennelKit revision, see ci.yml.
+      - name: Newest KennelKit
+        run: find . -name Package.resolved -not -path './.build/*' -delete
       - run: xcodegen generate
       - name: Mac app
         run: |

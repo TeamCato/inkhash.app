@@ -43,8 +43,12 @@ jobs:
           }
       # The build folder stays between runs (clean: false). When SwiftPM checks out a new KennelKit there, Xcode may
       # keep its old module and the app fails against it; KennelKit builds afresh in seconds.
+      # KennelKit follows kennel's main (ADR 0078), but a Package.resolved left by an earlier run pins the old
+      # revision, and the package then fails against the newer app. No Package.resolved is tracked, so all can go.
       - name: Fresh KennelKit build
-        run: rm -rf .build/xcode/Build/Intermediates.noindex/KennelKit*.build .build/xcode/Build/Products/*/KennelKit*
+        run: |
+          find . -name Package.resolved -not -path './.build/*' -delete
+          rm -rf .build/xcode/Build/Intermediates.noindex/KennelKit*.build .build/xcode/Build/Products/*/KennelKit*
       - run: make test
       - run: make app-test
       - run: make ui-test
