@@ -119,7 +119,7 @@ public enum TakeOverPlanner {
     }
 }
 
-/// Kennel's storages as inkhash shows them: the account's standard storage first, under its real name and visibility,
+/// Kennel's storages as inkhash shows them: the account's standard storage („Mein Speicher“) first, under its name and visibility,
 /// then the others inkhash may use (ADR 0077). A workspace without `storageId` lies in the standard storage.
 public enum KennelStorages {
     /// `storages`: from `APIClient.noteStorages`. `standardID`: the account's binding for inkhash (`nil`: Kennel's
@@ -129,22 +129,23 @@ public enum KennelStorages {
     ) -> [KennelStorageSummary] {
         let bound = standard(in: storages, id: standardID)
         let summary = KennelStorageSummary(
-            id: TakeOverPlanner.standardStorage, name: bound?.name ?? "Standard",
-            // Unknown: say what is true for Kennel's default storage, which belongs to the household.
-            visibility: bound?.visibility ?? .household,
+            id: TakeOverPlanner.standardStorage, name: bound?.displayName ?? KennelStorage.ownName,
+            visibility: bound?.visibility ?? .onlyMe,
             count: remotes.map { remotes in
                 workspaces(remotes.filter { $0.storageId == nil || $0.storageId == bound?.id }.count)
-            })
+            },
+            isOwn: bound?.isOwn ?? true)
         return [summary]
             + storages.filter { $0.id != bound?.id }.map { storage in
                 KennelStorageSummary(storage, count: remotes.map { count(remotes: $0, in: storage.id) })
             }
     }
 
-    /// The storage a workspace without `storageId` lies in: the account's binding, else Kennel's default storage.
+    /// The storage a workspace without `storageId` lies in: the account's binding, else „Mein Speicher“ (Kennel ADR
+    /// 0030); a Kennel from before that still names a default storage.
     public static func standard(in storages: [KennelStorage], id: String?) -> KennelStorage? {
         if let id, let bound = storages.first(where: { $0.id == id }) { return bound }
-        return storages.first(where: \.isDefault)
+        return storages.first(where: \.isOwn) ?? storages.first(where: \.isDefault)
     }
 
     /// The summary's id as Kennel's `storageId`: nil for the standard storage.

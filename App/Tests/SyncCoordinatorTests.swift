@@ -51,7 +51,7 @@ final class SyncCoordinatorTests: LibraryTestCase {
         XCTAssertEqual(overview.place(of: workspace), .moving)
         workspace.link = nil
         XCTAssertEqual(overview.place(of: workspace), .here)
-        XCTAssertEqual(overview.storage(of: overview.remotes[0])?.name, "Standard")
+        XCTAssertEqual(overview.storage(of: overview.remotes[0])?.name, "Mein Speicher")
     }
 
     func testTheRestingStatusSaysWhereAWorkspaceLies() {

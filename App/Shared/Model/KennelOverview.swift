@@ -44,7 +44,7 @@ final class KennelOverview {
         guard let remote else { return nil }
         guard let id = remote.storageId else {
             let standard = KennelStorages.standard(in: storages, id: standardStorageID)
-            return (standard?.name ?? "Standard", standard?.visibility ?? .household)
+            return (standard?.displayName ?? KennelStorage.ownName, standard?.visibility ?? .onlyMe)
         }
         guard let storage = storages.first(where: { $0.id == id }) else { return nil }
         return (storage.name, storage.visibility)

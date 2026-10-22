@@ -19,7 +19,7 @@ final class TakeOverTests: XCTestCase {
         XCTAssertEqual(plan.onDevice.map(\.title), ["Privat", "Einkauf"])
         XCTAssertEqual(plan.proposals["local:" + privat.id.uuidString.lowercased()], "kennel:standard")
         XCTAssertEqual(plan.proposals["local:" + einkauf.id.uuidString.lowercased()], "keep")
-        XCTAssertEqual(plan.onDevice[0].choices.map(\.label), ["Nur hier lassen", "In Kennel · Standard", "In Kennel · NAS"])
+        XCTAssertEqual(plan.onDevice[0].choices.map(\.label), ["Nur hier lassen", "In Kennel · Mein Speicher", "In Kennel · NAS"])
         XCTAssertEqual(plan.inKennel.map(\.title), ["Arbeit"])
         XCTAssertEqual(plan.proposals["remote:w1"], "add")
         XCTAssertNil(plan.notice)
@@ -77,30 +77,31 @@ final class TakeOverTests: XCTestCase {
         let summaries = KennelStorages.summaries(
             [KennelStorage(id: "nas", name: "NAS", driver: "smb", scope: .private, kinds: ["blobs"], modules: ["inkhash"])],
             remotes: remotes)
-        XCTAssertEqual(summaries.map(\.detail), ["Haushalt · 1 Workspace", "Nur ich · 2 Workspaces"])
+        XCTAssertEqual(summaries.map(\.detail), ["Nur ich · 1 Workspace", "Nur ich · 2 Workspaces"])
         XCTAssertNil(KennelStorages.storageID("standard"))
         XCTAssertEqual(KennelStorages.storageID("nas"), "nas")
         XCTAssertEqual(KennelStorages.summaryID(of: remotes[0]), "standard")
     }
 
-    /// Dominik on 2026-10-22: „Standard“ showed „Nur ich“ while Kennel's default storage belongs to the household.
-    func testTheStandardStorageShowsItsRealNameAndVisibilityOnce() {
+    /// Dominik on 2026-10-22: „Standard“ showed „Nur ich“ for a household storage. Since Kennel ADR 0030 the standard
+    /// is „Mein Speicher“, and a storage the account bound instead shows under its own name and visibility, once.
+    func testTheStandardStorageIsMeinSpeicherOrTheBoundOneOnce() {
         let storages = [
-            KennelStorage(id: "def", name: "Kennel", driver: "folder", scope: .household, kinds: ["blobs"], isDefault: true),
-            KennelStorage(id: "mine", name: "Meins", driver: "smb", scope: .private, kinds: ["blobs"]),
+            KennelStorage(id: "own", name: "Ignored", driver: "folder", scope: .private, kinds: ["blobs"], isOwn: true),
+            KennelStorage(id: "nas", name: "NAS", driver: "smb", scope: .household, kinds: ["blobs"]),
         ]
         let remotes = [
-            RemoteWorkspace(id: "1", name: "A", storageId: nil), RemoteWorkspace(id: "2", name: "B", storageId: "def"),
+            RemoteWorkspace(id: "1", name: "A", storageId: nil), RemoteWorkspace(id: "2", name: "B", storageId: "own"),
         ]
 
-        let byDefault = KennelStorages.summaries(storages, remotes: remotes)
-        let bound = KennelStorages.summaries(storages, standardID: "mine", remotes: remotes)
+        let byOwn = KennelStorages.summaries(storages, remotes: remotes)
+        let bound = KennelStorages.summaries(storages, standardID: "nas", remotes: remotes)
 
-        XCTAssertEqual(byDefault.map(\.name), ["Kennel", "Meins"])
-        XCTAssertEqual(byDefault.map(\.detail), ["Haushalt · 2 Workspaces", "Nur ich · 0 Workspaces"])
-        XCTAssertEqual(bound.map(\.name), ["Meins", "Kennel"])
-        XCTAssertEqual(bound.first?.visibility, .onlyMe)
-        XCTAssertEqual(KennelStorages.summaryID(of: remotes[1], standardID: "def"), "standard")
+        XCTAssertEqual(byOwn.map(\.name), ["Mein Speicher", "NAS"])
+        XCTAssertEqual(byOwn.map(\.detail), ["Nur ich · 2 Workspaces", "Haushalt · 0 Workspaces"])
+        XCTAssertEqual(bound.map(\.name), ["NAS", "Mein Speicher"])
+        XCTAssertEqual(bound.first?.visibility, .household)
+        XCTAssertEqual(KennelStorages.summaryID(of: remotes[1], standardID: "own"), "standard")
     }
 
     // MARK: Status
