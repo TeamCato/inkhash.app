@@ -1,5 +1,5 @@
-# Every commit on main lands in the depot (teamCato/depot, internal download page): the Mac app
-# as a zip, the iPad/iPhone app as an over-the-air install. ci.yml has already tested the commit
+# Every commit on main is installed on the runner Mac (/Applications) and lands in the depot
+# (teamCato/depot, internal download page): the Mac app as a zip, the iPad/iPhone app as an over-the-air install. ci.yml has already tested the commit
 # before it fast-forwarded main; this workflow only builds and files.
 # The repository is public: never add a pull_request or pull_request_target trigger here,
 # it would run fork code on the Mac.
@@ -57,6 +57,29 @@ jobs:
             -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" \
             CURRENT_PROJECT_VERSION="$BUILD" build -quiet
           "$PUBLISH" .build/depot-mac/Build/Products/Debug/Inkhash.app
+      # This Mac is Dominik's own: every main build replaces the app in /Applications. A running copy
+      # is quit (killed if it does not quit), replaced and opened again, without asking. The old copy
+      # goes to the Trash, not away for good.
+      - name: Install on this Mac
+        env:
+          APP: .build/depot-mac/Build/Products/Debug/Inkhash.app
+        run: |
+          name=$(basename "$APP")
+          target="/Applications/$name"
+          bundle_id=$(plutil -extract CFBundleIdentifier raw "$APP/Contents/Info.plist")
+          osascript -e "quit app id \"$bundle_id\"" 2>/dev/null || true
+          for _ in $(seq 20); do
+            pgrep -f "$target/Contents/MacOS/" >/dev/null || break
+            sleep 0.5
+          done
+          pkill -f "$target/Contents/MacOS/" || true
+          if [[ -e "$target" ]]; then
+            mv "$target" "$HOME/.Trash/${name%.app} $(date +%Y-%m-%d-%H%M%S).app"
+          fi
+          # cp, not ditto, as in inkhash's tools/install-local.sh; -X copies no extended attributes.
+          cp -R -X "$APP" /Applications/
+          open "$target" || echo "::warning::$name installiert, aber nicht geöffnet (niemand angemeldet?)."
+          echo "$name $(plutil -extract CFBundleVersion raw "$target/Contents/Info.plist") in /Applications"
       - name: iPad and iPhone app
         run: |
           xcodebuild -scheme Inkhash -destination 'generic/platform=iOS' -derivedDataPath .build/depot-ios \
