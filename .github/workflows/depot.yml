@@ -54,18 +54,29 @@ jobs:
       - name: Newest KennelKit
         run: rm -rf .build/depot-mac/SourcePackages .build/depot-ios/SourcePackages
       - run: xcodegen generate
+      # Developer ID, hardened runtime and notarized: only then does a download from the depot open on
+      # another Mac. No get-task-allow, notarization rejects it. Profile from
+      # `xcrun notarytool store-credentials teamcato-notary`, in the Mac user's keychain.
       - name: Mac app
         run: |
-          xcodebuild -scheme InkhashMac -destination 'platform=macOS' -derivedDataPath .build/depot-mac \
-            -allowProvisioningUpdates CODE_SIGN_STYLE=Automatic DEVELOPMENT_TEAM="$TEAM" CODE_SIGN_IDENTITY="Apple Development" \
+          xcodebuild -scheme InkhashMac -destination 'generic/platform=macOS' -configuration Release -derivedDataPath .build/depot-mac \
+            CODE_SIGN_STYLE=Manual CODE_SIGN_IDENTITY="Developer ID Application" DEVELOPMENT_TEAM="$TEAM" CODE_SIGNING_REQUIRED=YES \
+            ENABLE_HARDENED_RUNTIME=YES CODE_SIGN_INJECT_BASE_ENTITLEMENTS=NO OTHER_CODE_SIGN_FLAGS=--timestamp \
             CURRENT_PROJECT_VERSION="$BUILD" build -quiet
-          "$PUBLISH" .build/depot-mac/Build/Products/Debug/Inkhash.app
+          app=.build/depot-mac/Build/Products/Release/Inkhash.app
+          zip="$RUNNER_TEMP/Inkhash-notary.zip"
+          rm -f "$zip"
+          ditto -c -k --keepParent "$app" "$zip"
+          xcrun notarytool submit "$zip" --keychain-profile teamcato-notary --wait
+          xcrun stapler staple "$app"
+          spctl -a -vv -t exec "$app"
+          "$PUBLISH" "$app"
       # This Mac is Dominik's own: every main build replaces the app in /Applications. A running copy
       # is quit (killed if it does not quit), replaced and opened again, without asking. The old copy
       # goes to the Trash, not away for good.
       - name: Install on this Mac
         env:
-          APP: .build/depot-mac/Build/Products/Debug/Inkhash.app
+          APP: .build/depot-mac/Build/Products/Release/Inkhash.app
         run: |
           name=$(basename "$APP")
           target="/Applications/$name"
