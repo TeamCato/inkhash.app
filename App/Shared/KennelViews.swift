@@ -143,7 +143,9 @@ struct KennelSettingsView: View {
     @ViewBuilder
     private func storageSheet(_ storage: KennelStorage?) -> some View {
         if let kennel = model.kennel, let client = model.sessions.client(for: kennel.id) {
-            kennelSheet {
+            // KennelNewStorageView brings its own „Abbrechen“ and „Anlegen“; a second cancellation action would push
+            // „Abbrechen“ out (Kennel ADR 0037).
+            kennelFrame {
                 if let storage {
                     KennelNewStorageView(client: client.kennel, editing: storage) { model.addStorage($0) }
                 } else {
@@ -153,14 +155,21 @@ struct KennelSettingsView: View {
         }
     }
 
+    /// For sheets without buttons of their own: adds „Fertig“.
     private func kennelSheet<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
-        NavigationStack {
+        kennelFrame {
             content()
                 .toolbar {
                     ToolbarItem(placement: .cancellationAction) {
                         CloseButton()
                     }
                 }
+        }
+    }
+
+    private func kennelFrame<Content: View>(@ViewBuilder _ content: () -> Content) -> some View {
+        NavigationStack {
+            content()
         }
         .kennelBrand(.inkhash)
         .macSheetSize(minWidth: 440, minHeight: 460)
