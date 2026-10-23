@@ -48,7 +48,7 @@ jobs:
       - name: Fresh KennelKit build
         run: |
           swift package --package-path Packages/InkhashCore update kennel
-          rm -rf .build/xcode/SourcePackages
+          rm -rf .build/xcode/SourcePackages Inkhash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
           rm -rf .build/xcode/Build/Intermediates.noindex/KennelKit*.build .build/xcode/Build/Products/*/KennelKit*
       - run: make test
       - run: make app-test
