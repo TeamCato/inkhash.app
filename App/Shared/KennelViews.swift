@@ -246,8 +246,8 @@ struct RecoveryKeyField: View {
 }
 
 /// The status line at the foot of the sidebar while Kennel is connected, with its action: „Anmelden …“ opens the
-/// connect flow again, „Tresor öffnen …“ the conversion sheet (teamCato ADR 0009 point 7). Centered, and the status
-/// itself starts a sync instead of a separate button, like in Xoot.
+/// connect flow again, „Tresor öffnen …“ the conversion sheet (teamCato ADR 0009 point 7). Leading, flush with the
+/// logo below, and the status itself starts a sync instead of a separate button, like in Xoot.
 struct KennelFooter: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -259,7 +259,9 @@ struct KennelFooter: View {
             if let status = model.kennelStatus {
                 statusRow(status)
                     .font(.caption)
-                    .padding(.horizontal, 12)
+                    // Same insets as the sidebar's footer row, so the status starts where the logo starts.
+                    .padding(.leading, 16)
+                    .padding(.trailing, 10)
                     .padding(.vertical, 8)
             }
         }
@@ -276,7 +278,7 @@ struct KennelFooter: View {
         let line = KennelStatusLine(status, action: action)
             // A line with a detail may need two lines of text, so it keeps the full width.
             .fixedSize(horizontal: status.detail == nil, vertical: false)
-            .frame(maxWidth: .infinity)
+            .frame(maxWidth: .infinity, alignment: .leading)
         if status.canSyncNow {
             Button {
                 Task { await model.sync() }
