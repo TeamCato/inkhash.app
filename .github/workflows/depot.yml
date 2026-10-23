@@ -52,8 +52,12 @@ jobs:
           echo "PUBLISH=$RUNNER_TEMP/depot/scripts/publish.sh" >>"$GITHUB_ENV"
       # Package state from an earlier run would pin an old KennelKit revision, see ci.yml. The checkout keeps
       # untracked files (clean: false), and xcodegen leaves the project's Package.resolved in place, so it goes too.
+      # Xcode resolves the local package InkhashCore with its own Package.resolved, which pins kennel as well.
       - name: Newest KennelKit
-        run: rm -rf .build/depot-mac/SourcePackages .build/depot-ios/SourcePackages Inkhash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
+        run: |
+          rm -f Packages/InkhashCore/Package.resolved
+          swift package --package-path Packages/InkhashCore update kennel
+          rm -rf .build/depot-mac/SourcePackages .build/depot-ios/SourcePackages Inkhash.xcodeproj/project.xcworkspace/xcshareddata/swiftpm
       - run: xcodegen generate
       # Developer ID, hardened runtime and notarized: only then does a download from the depot open on
       # another Mac. No get-task-allow, notarization rejects it. Profile from
