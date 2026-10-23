@@ -465,15 +465,11 @@ struct SidebarView: View {
 
     private var footer: some View {
         HStack(spacing: 8) {
-            Image(systemName: model.isSyncEnabled ? "arrow.triangle.2.circlepath" : "internaldrive")
-                .font(.system(size: 11))
-                .foregroundStyle(Ink.muted)
-                .help(statusText)
-                .accessibilityLabel(statusText)
             if StatusLine.isRoutine(model.status) {
                 InkhashLogo(markSide: 14, wordSize: 12)
                     .opacity(0.55)
-                    .accessibilityHidden(true)
+                    .help(statusText)
+                    .accessibilityLabel(statusText)
             } else {
                 Text(model.status)
                     .font(.system(size: 11))

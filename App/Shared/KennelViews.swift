@@ -246,7 +246,8 @@ struct RecoveryKeyField: View {
 }
 
 /// The status line at the foot of the sidebar while Kennel is connected, with its action: „Anmelden …“ opens the
-/// connect flow again, „Tresor öffnen …“ the conversion sheet (teamCato ADR 0009 point 7).
+/// connect flow again, „Tresor öffnen …“ the conversion sheet (teamCato ADR 0009 point 7). Centered, and the status
+/// itself starts a sync instead of a separate button, like in Xoot.
 struct KennelFooter: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
@@ -254,15 +255,40 @@ struct KennelFooter: View {
     @State private var converting = false
 
     var body: some View {
-        KennelStatusFooter(
-            model.kennelStatus,
-            syncNow: { Task { await model.sync() } },
-            action: action
-        )
+        Group {
+            if let status = model.kennelStatus {
+                statusRow(status)
+                    .font(.caption)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 8)
+            }
+        }
         .foregroundStyle(Ink.muted)
         .kennelBrand(.inkhash)
         .kennelConnectSheet(isPresented: $signingIn, prefill: model.signInAgainPrefill, name: model.kennel?.accountName ?? "")
         .sheet(isPresented: $converting) { ConversionSheet() }
+    }
+
+    /// The status only syncs while `canSyncNow` (not while syncing); a status with an action („Anmelden …“) never
+    /// can, so no button holds another.
+    @ViewBuilder
+    private func statusRow(_ status: KennelStatus) -> some View {
+        let line = KennelStatusLine(status, action: action)
+            // A line with a detail may need two lines of text, so it keeps the full width.
+            .fixedSize(horizontal: status.detail == nil, vertical: false)
+            .frame(maxWidth: .infinity)
+        if status.canSyncNow {
+            Button {
+                Task { await model.sync() }
+            } label: {
+                line.contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .help("Jetzt mit Kennel abgleichen")
+            .accessibilityHint("Gleicht jetzt mit Kennel ab")
+        } else {
+            line
+        }
     }
 
     private var action: (@MainActor () -> Void)? {
