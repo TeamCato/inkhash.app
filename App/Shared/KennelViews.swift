@@ -82,7 +82,6 @@ struct KennelSettingsView: View {
     @State private var signingInAgain = false
     @State private var newStorage = false
     @State private var editing: KennelStorage?
-    @State private var deviceCode = false
     @State private var password = false
     @State private var converting = false
 
@@ -94,7 +93,6 @@ struct KennelSettingsView: View {
                 isPresented: $signingInAgain, prefill: model.signInAgainPrefill, name: model.kennel?.accountName ?? "")
             .sheet(isPresented: $newStorage) { storageSheet(nil) }
             .sheet(item: $editing) { storageSheet($0) }
-            .sheet(isPresented: $deviceCode) { kennelSheet { DeviceCodeView(serverID: model.kennel?.id ?? UUID()) } }
             .sheet(isPresented: $password) { kennelSheet { PasswordChangeView(serverID: model.kennel?.id ?? UUID()) } }
             .sheet(isPresented: $converting) { ConversionSheet() }
             .task { if model.kennel != nil { await model.sync() } }
@@ -107,7 +105,6 @@ struct KennelSettingsView: View {
         let editStorage = only(signedIn) { (summary: KennelStorageSummary) in
             editing = model.overview.storages.first { $0.id == summary.id }
         }
-        let connectDevice = only(signedIn) { deviceCode = true }
         let changePassword = only(signedIn) { password = true }
         return KennelSettingsPage(
             connection: connection,
@@ -117,7 +114,6 @@ struct KennelSettingsView: View {
             storages: signedIn ? model.overview.summaries : nil,
             newStorage: newStorageAction,
             editStorage: editStorage,
-            connectDevice: connectDevice,
             changePassword: changePassword,
             disconnect: { model.disconnect() },
             disconnectConsequence: AppModel.disconnectConsequence,

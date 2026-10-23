@@ -95,49 +95,6 @@ final class ContractTests: XCTestCase {
         return try XCTUnwrap(JoinCode(raw))
     }
 
-    func testDeviceCodeOpensASessionOfTheSameAccount() async throws {
-        let first = try await account()
-        let code = try await joinCode("device", by: first.token)
-        // Read the way a person types it: lowercase, no dashes.
-        let typed = try XCTUnwrap(JoinCode(code.description.lowercased().replacingOccurrences(of: "-", with: "")))
-        let session = try await KennelClient(address: url).join(code: typed)
-        XCTAssertNotEqual(session.token, first.token)
-        XCTAssertNotNil(ServerAddress.accountID(session.account.id))
-        _ = try await APIClient(session: session).workspaceList()
-        do {
-            _ = try await KennelClient(address: url).join(code: code)
-            XCTFail("a code is good once")
-        } catch {
-            XCTAssertEqual(error as? KennelError, .unauthorized)
-        }
-    }
-
-    func testAppMakesADeviceCodeAndRevokesAnother() async throws {
-        let first = try await account()
-        let issued = try await first.kennel.issueJoinCode(.device)
-        XCTAssertEqual(issued.kind, .device)
-        XCTAssertGreaterThan(issued.expiresAt, Date())
-        let link = try XCTUnwrap(issued.joinLink(on: url))
-        let target = try XCTUnwrap(JoinLink.parse(link.absoluteString, appScheme: "inkhash"))
-        let session = try await KennelClient(address: target.address).join(code: try XCTUnwrap(target.code))
-        _ = try await APIClient(session: session).workspaceList()
-
-        let withdrawn = try await first.kennel.issueJoinCode(.device)
-        try await first.kennel.revokeJoinCode(withdrawn.id)
-        do {
-            _ = try await KennelClient(address: url).join(code: withdrawn.code)
-            XCTFail("a withdrawn code is no good")
-        } catch {
-            XCTAssertEqual(error as? KennelError, .unauthorized)
-        }
-        do {
-            try await first.kennel.revokeJoinCode(withdrawn.id)
-            XCTFail("withdrawn twice")
-        } catch {
-            XCTAssertEqual((error as? KennelError)?.status, 404)
-        }
-    }
-
     func testInviteAsksForAnAccountThenCreatesIt() async throws {
         let code = try await joinCode("invite", by: adminToken)
         let open = KennelClient(address: url)

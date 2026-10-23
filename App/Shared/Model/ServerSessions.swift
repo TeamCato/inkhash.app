@@ -178,28 +178,6 @@ final class ServerSessions {
         }
     }
 
-    /// A code for another device of the account on `server` (ADR 0072). An ended session also ends here.
-    func issueDeviceCode(on server: UUID) async throws -> IssuedJoinCode {
-        guard let client = client(for: server) else { throw KennelError.unauthorized }
-        do {
-            return try await client.kennel.issueJoinCode(.device)
-        } catch KennelError.unauthorized {
-            expire(server, ifStill: client.token)
-            throw KennelError.unauthorized
-        }
-    }
-
-    /// Withdraws a device code. One that is used or expired already is gone too: KennelKitUI takes its `404` as done.
-    func revokeDeviceCode(_ id: String, on server: UUID) async throws {
-        guard let client = client(for: server) else { throw KennelError.unauthorized }
-        do {
-            try await client.kennel.revokeJoinCode(id)
-        } catch KennelError.unauthorized {
-            expire(server, ifStill: client.token)
-            throw KennelError.unauthorized
-        }
-    }
-
     /// Ends the session. Linked workspaces keep their notes and their binding; syncing pauses.
     func logout(_ server: UUID) {
         if let client = client(for: server) {
