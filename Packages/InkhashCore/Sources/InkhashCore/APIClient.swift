@@ -17,8 +17,8 @@ extension KennelHealth {
     /// The module of this app, nil if Kennel does not run it.
     public var inkhash: ModuleInfo? { module(APIClient.module, as: ModuleInfo.self) }
 
-    /// True when Kennel keeps vaults for inkhash (ADR 0052). Kennel's module always does.
-    public var vault: Bool { inkhash?.vault == true }
+    /// True when Kennel keeps vaults for inkhash (ADR 0052). Kennel's module always does. Not KennelKit's `vault`, the core's vault.
+    public var inkhashVault: Bool { inkhash?.vault == true }
 
     public var registrationMode: RegistrationMode { RegistrationMode(kennel: registration) }
 }

@@ -75,7 +75,7 @@ final class ContractTests: XCTestCase {
 
     func testHealthSaysVault() async throws {
         let health = try await KennelClient(address: url).health()
-        XCTAssertTrue(health.vault)
+        XCTAssertTrue(health.inkhashVault)
         XCTAssertTrue(health.isKennel)
         XCTAssertTrue(health.join)
         XCTAssertEqual(health.inkhash?.appScheme, "inkhash")

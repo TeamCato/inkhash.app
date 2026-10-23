@@ -21,7 +21,7 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual(requests().first?.path, "/v1/health")
         XCTAssertTrue(health.isKennel)
         XCTAssertEqual(health.inkhash?.pairing, true)
-        XCTAssertTrue(health.vault)
+        XCTAssertTrue(health.inkhashVault)
     }
 
     func testHealthWithoutTheModuleHasNoVault() async throws {
@@ -30,7 +30,7 @@ final class APIClientTests: XCTestCase {
         let (client, _) = HTTPStub.client { _ in HTTPStub.json(200, old) }
         let health = try await client.kennel.health()
         XCTAssertNil(health.inkhash)
-        XCTAssertFalse(health.vault)
+        XCTAssertFalse(health.inkhashVault)
     }
 
     func testVaultIsNilWithoutOne() async throws {
