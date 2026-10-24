@@ -435,6 +435,7 @@ final class ContractTests: XCTestCase {
         let client = try await account()
         let health = try await client.kennel.health()
         XCTAssertEqual(health.inkhash?.workspaceMove, true)
+        XCTAssertEqual(health.inkhash?.workspacePurge, true)
         let folder = FileManager.default.temporaryDirectory.appendingPathComponent("inkhash-move-\(UUID().uuidString)")
         try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
         let admin = KennelClient(address: url, token: adminToken)

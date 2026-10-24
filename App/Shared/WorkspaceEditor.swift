@@ -33,7 +33,8 @@ struct WorkspaceEditor: View {
     /// „In Kennel ablegen …“ or „Anderer Speicher …“ of an existing workspace.
     @State private var storageSheet: StorageSheet.Mode?
     @State private var confirmHereOnly = false
-    @State private var confirmKennelDelete = false
+    /// The Kennel workspace „In Kennel löschen …“ asks about, kept while the sheet is up even once it is gone.
+    @State private var kennelDelete: RemoteWorkspace?
     @State private var busy = false
     @State private var failure: String?
     @State private var confirmRemoval = false
@@ -322,13 +323,8 @@ struct WorkspaceEditor: View {
             } message: {
                 Text("Der Workspace gleicht nicht mehr ab. Seine Notizen bleiben auf diesem Gerät, die Kopie in Kennel bleibt dort.")
             }
-            .confirmationDialog("„\(current.name)“ in Kennel löschen?", isPresented: $confirmKennelDelete, titleVisibility: .visible) {
-                Button("In Kennel löschen", role: .destructive) {
-                    guard let remote else { return }
-                    run { await model.deleteInKennel(remote) }
-                }
-            } message: {
-                Text("Er verschwindet in Kennel für alle Geräte; dort bleibt er nur noch auf dem jeweiligen Gerät. Hier bleiben die Notizen, ohne Abgleich. Rückgängig machen kann das nur ein Admin in Kennel.")
+            .sheet(item: $kennelDelete) { remote in
+                KennelDeleteSheet(remote: remote, storage: storage?.name, removesContent: model.overview.module?.workspacePurge == true)
             }
         }
     }
@@ -344,8 +340,8 @@ struct WorkspaceEditor: View {
             actions.append(KennelPlaceAction("Anderer Speicher …") { storageSheet = .move(current: KennelStorages.summaryID(of: remote, standardID: model.overview.standardStorageID)) })
         }
         actions.append(KennelPlaceAction("Nur noch auf diesem Gerät …") { confirmHereOnly = true })
-        if model.isSyncEnabled, remote != nil, model.overview.remotes.count > 1 {
-            actions.append(KennelPlaceAction("In Kennel löschen …", isDestructive: true) { confirmKennelDelete = true })
+        if model.isSyncEnabled, let remote, model.overview.remotes.count > 1 {
+            actions.append(KennelPlaceAction("In Kennel löschen …", isDestructive: true) { kennelDelete = remote })
         }
         return actions
     }
@@ -382,15 +378,6 @@ struct WorkspaceEditor: View {
             await model.addFromKennel([remote])
             busy = false
             dismiss()
-        }
-    }
-
-    private func run(_ work: @escaping () async -> String?) {
-        busy = true
-        failure = nil
-        Task {
-            failure = await work()
-            busy = false
         }
     }
 
