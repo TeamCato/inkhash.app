@@ -25,6 +25,9 @@ struct WorkspaceEditor: View {
     /// Where a new workspace lies.
     @State private var place: KennelPlacePicker<AnyView>.Choice? = .device
     @State private var storageID: String? = TakeOverPlanner.standardStorage
+    /// „Ende-zu-Ende verschlüsseln“: chosen once when the Kennel workspace is made, never switched (ADR 0082).
+    @State private var encrypt = false
+    @State private var vaultSheet: VaultSheet?
     @State private var connecting = false
     @State private var newStorage = false
     /// „In Kennel ablegen …“ or „Anderer Speicher …“ of an existing workspace.
@@ -71,6 +74,7 @@ struct WorkspaceEditor: View {
                 ) {
                     // `AnyView`: the picker's choice type depends on what it holds below.
                     AnyView(Group {
+                        if place == .kennel { encryptionSection }
                         lookSections
                         if place == .kennel { alreadyInKennel }
                     })
@@ -93,7 +97,9 @@ struct WorkspaceEditor: View {
             }
             ToolbarItem(placement: .confirmationAction) {
                 Button(workspace == nil ? "Anlegen" : "Sichern") { save() }
-                    .disabled(busy || name.trimmingCharacters(in: .whitespaces).isEmpty || (place == .kennel && storageID == nil))
+                    .disabled(
+                        busy || name.trimmingCharacters(in: .whitespaces).isEmpty || (place == .kennel && storageID == nil)
+                            || (place == .kennel && encrypt && !vaultIsOpen))
             }
         }
         .fileExporter(
@@ -114,6 +120,7 @@ struct WorkspaceEditor: View {
             place = .kennel
             Task { await model.refreshKennel() }
         }
+        .sheet(item: $vaultSheet) { VaultSheetView(sheet: $0) }
         .sheet(isPresented: $newStorage) {
             NewStorageSheet { storageID = $0.id }
         }
@@ -257,6 +264,37 @@ struct WorkspaceEditor: View {
         }
     }
 
+    private var vaultIsOpen: Bool {
+        if case .ready? = model.vaultState { return true }
+        return false
+    }
+
+    /// „Ende-zu-Ende verschlüsseln“ for a new Kennel workspace; without an open vault it leads to the vault (ADR 0082).
+    @ViewBuilder
+    private var encryptionSection: some View {
+        Section {
+            Toggle("Ende-zu-Ende verschlüsseln", isOn: $encrypt)
+            if encrypt {
+                switch model.vaultState {
+                case .none?:
+                    Button("Tresor anlegen …") { vaultSheet = .setUp }
+                case .needsKey?:
+                    Button("Tresor öffnen …") { vaultSheet = .open }
+                case .unknown?, .failed?:
+                    ProgressView().task { await model.checkVault() }
+                case .ready?, nil:
+                    EmptyView()
+                }
+            }
+        } footer: {
+            Text(
+                encrypt && !vaultIsOpen
+                    ? "Dafür brauchst du einen Tresor. Er gilt für alle teamCato-Apps; den Wiederherstellungsschlüssel erzeugt inkhash beim Anlegen und zeigt ihn einmal."
+                    : "Nur deine Geräte können die Notizen lesen, Kennel nicht. Gilt nur beim Anlegen und lässt sich später nicht ändern."
+            )
+        }
+    }
+
     /// „Ort“: where it lies and how to change that, the only place for it (teamCato ADR 0009 point 6).
     @ViewBuilder
     private func placeSection(_ workspace: Workspace) -> some View {
@@ -269,7 +307,7 @@ struct WorkspaceEditor: View {
                 actions: placeActions(current, remote: remote)
             ) {
                 if current.link?.sealed == true {
-                    Text(model.overview.state.conversionText ?? "Verschlüsselt. inkhash wandelt ihn beim nächsten Abgleich in einen unverschlüsselten Workspace auf demselben Speicher um.")
+                    Label("Ende-zu-Ende verschlüsselt: nur deine Geräte können die Notizen lesen.", systemImage: "lock")
                         .font(.system(size: 12))
                         .foregroundStyle(Ink.muted)
                 }
@@ -364,7 +402,8 @@ struct WorkspaceEditor: View {
                 model.updateWorkspace(workspace.id, name: name, symbol: symbol)
                 if imageChanged { model.setWorkspaceImage(workspace.id, png: image) }
             } else {
-                let target: WorkspaceTarget = place == .kennel ? .kennel(storageID: KennelStorages.storageID(storageID)) : .local
+                let target: WorkspaceTarget =
+                    place == .kennel ? .kennel(storageID: KennelStorages.storageID(storageID), sealed: encrypt) : .local
                 if let problem = await model.createWorkspace(
                     name: name, symbol: symbol, image: imageChanged ? image : nil, target: target)
                 {

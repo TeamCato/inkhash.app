@@ -19,9 +19,9 @@ public struct KennelSyncState: Equatable, Sendable {
     public var phase: Phase
     /// Kennel no longer knows the session (ADR 0017).
     public var sessionExpired: Bool
-    /// Encrypted workspaces Kennel holds notes in this device cannot read without the vault (ADR 0077).
+    /// Encrypted workspaces that do not sync here while the vault is not open on this device (ADR 0082).
     public var waitingForKey: [String]
-    /// Encrypted workspaces that wait for Kennel: it cannot make plain workspaces yet, or they are moving.
+    /// Kept for the conversions of ADR 0077 still running on older devices; inkhash starts none anymore.
     public var waitingForKennel: [String]
 
     public init(phase: Phase = .idle, sessionExpired: Bool = false, waitingForKey: [String] = [], waitingForKennel: [String] = []) {
@@ -31,9 +31,9 @@ public struct KennelSyncState: Equatable, Sendable {
         self.waitingForKennel = waitingForKennel
     }
 
-    /// Title of the attention state while encrypted workspaces wait.
-    public static let convertTitle = "Umwandeln"
-    /// Its action, which opens the explanation and the vault.
+    /// Title of the attention state while encrypted workspaces are locked (ADR 0082). Only then the vault is mentioned.
+    public static let lockedTitle = "Verschlüsselte Workspaces gesperrt"
+    /// Its action, which opens the vault.
     public static let openVault = "Tresor öffnen …"
 
     /// The status line; the app shows it only while Kennel is connected. Signing in again beats everything, then the
@@ -46,8 +46,7 @@ public struct KennelSyncState: Equatable, Sendable {
         case .syncing: return .syncing
         default: break
         }
-        if !waitingForKey.isEmpty { return .attention(title: Self.convertTitle, action: Self.openVault) }
-        if !waitingForKennel.isEmpty { return .attention(title: Self.convertTitle, action: nil) }
+        if !waitingForKey.isEmpty { return .attention(title: Self.lockedTitle, action: Self.openVault) }
         switch phase {
         case .idle: return .checking
         case .synced(let date): return .synced(date)
@@ -56,20 +55,12 @@ public struct KennelSyncState: Equatable, Sendable {
         }
     }
 
-    /// What „Umwandeln“ means, for the sheet behind its action and the workspace's „Ort“.
-    public var conversionText: String? {
-        if !waitingForKey.isEmpty {
-            return Self.waitingForKeyText(waitingForKey)
-        }
-        if !waitingForKennel.isEmpty {
-            return "\(Self.list(waitingForKennel)) \(waitingForKennel.count == 1 ? "wartet" : "warten") auf Kennel: Es braucht eine Version, die unverschlüsselte Workspaces anlegt, oder ein Umzug läuft noch. Die Notizen bleiben auf diesem Gerät."
-        }
-        return nil
-    }
+    /// What a locked encrypted workspace says where it is shown.
+    public static let lockedHint = "Zum Ansehen den Tresor öffnen."
 
-    public static func waitingForKeyText(_ names: [String]) -> String {
-        let one = names.count == 1
-        return "inkhash verschlüsselt in Kennel nicht mehr. \(list(names)) \(one ? "ist" : "sind") noch verschlüsselt und \(one ? "wird" : "werden") zu \(one ? "einem unverschlüsselten Workspace" : "unverschlüsselten Workspaces") auf demselben Speicher. Dazu muss ein Gerät den letzten Stand lesen: eines, auf dem der Tresor offen ist, oder dieses mit dem Wiederherstellungsschlüssel. Bis dahin bleiben die Notizen auf diesem Gerät und es geht nichts verloren."
+    /// Whether this workspace is locked here.
+    public func isLocked(_ name: String) -> Bool {
+        waitingForKey.contains(name)
     }
 
     static func list(_ names: [String]) -> String {

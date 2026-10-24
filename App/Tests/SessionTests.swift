@@ -16,7 +16,7 @@ final class SessionTests: LibraryTestCase {
 
     override func tearDown() async throws {
         SecretStore.clear(account: SecretStore.key(for: server))
-        SecretStore.clear(account: VaultSessions.keychainAccount(server))
+        SecretStore.clear(account: VaultSessions.legacyAccount(server))
         UserDefaults.standard.removeObject(forKey: "inkhash.expiredServers")
         try await super.tearDown()
     }
@@ -59,14 +59,16 @@ final class SessionTests: LibraryTestCase {
         XCTAssertFalse(ServerSessions(registry: registry, status: status).expired.contains(server))
     }
 
-    func testAVaultKeyIsKeptPerServerAndForgottenWithIt() throws {
+    /// A key an older inkhash kept (ADR 0052) is not used unchecked, and goes when the Kennel goes (ADR 0082).
+    func testAKeyFromBeforeIsNotUsedUncheckedAndGoesWithTheKennel() throws {
         let key = VaultKey(keyId: "k", material: Data(repeating: 1, count: 32), epoch: 2)
-        try VaultSessions.store(key, for: server)
-        XCTAssertEqual(VaultSessions.storedKey(for: server), key)
-        let vaults = VaultSessions(sessions: ServerSessions(registry: registry, status: status), status: status)
+        try SecretStore.set(String(decoding: try InkhashJSON.encode(key), as: UTF8.self), account: VaultSessions.legacyAccount(server))
+        XCTAssertEqual(VaultSessions.legacyKey(for: server), key)
+        let vaults = VaultSessions(
+            sessions: ServerSessions(registry: registry, status: status), status: status, store: .inMemory())
         XCTAssertNil(vaults.key(for: server), "unchecked against the server, it is not used")
         vaults.forget(server)
-        XCTAssertNil(VaultSessions.storedKey(for: server))
+        XCTAssertNil(VaultSessions.legacyKey(for: server))
     }
 
     /// One Kennel per app (ADR 0077): a second server from before goes with its session and key; its workspaces stay.
@@ -79,10 +81,10 @@ final class SessionTests: LibraryTestCase {
         let linked = Workspace(name: "Arbeit", link: WorkspaceLink(server: other, remote: "w1", sealed: false))
         setup.workspaces.append(linked)
         try Workspaces.save(setup, base: base)
-        try VaultSessions.store(VaultKey(keyId: "k", material: Data(repeating: 1, count: 32), epoch: 0), for: other)
+        try SecretStore.set(String(decoding: try InkhashJSON.encode(VaultKey(keyId: "k", material: Data(repeating: 1, count: 32), epoch: 0)), as: UTF8.self), account: VaultSessions.legacyAccount(other))
         defer {
             SecretStore.clear(account: SecretStore.key(for: other))
-            SecretStore.clear(account: VaultSessions.keychainAccount(other))
+            SecretStore.clear(account: VaultSessions.legacyAccount(other))
         }
         let reopened = try WorkspaceRegistry(base: base, legacy: nil, status: status)
 
@@ -90,6 +92,6 @@ final class SessionTests: LibraryTestCase {
         XCTAssertEqual(reopened.servers.map(\.id), [server], "the signed-in one stays")
         XCTAssertTrue(sessions.isSignedIn(server))
         XCTAssertNil(reopened.workspace(linked.id)?.link, "„Nur hier“, with its notes")
-        XCTAssertNil(VaultSessions.storedKey(for: other))
+        XCTAssertNil(VaultSessions.legacyKey(for: other))
     }
 }

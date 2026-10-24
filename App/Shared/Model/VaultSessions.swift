@@ -1,109 +1,150 @@
 import Foundation
 import InkhashCore
+import KennelKit
 import Observation
 
-/// Where the vault of the Kennel stands on this device. inkhash creates no vaults anymore; an old one is opened only
-/// to read encrypted workspaces once, so they can be converted (ADR 0077, teamCato ADR 0009 point 10).
+/// Where the vault of the Kennel stands on this device (ADR 0082, Kennel ADR 0043, 0058).
 enum VaultState: Equatable {
     case unknown
-    /// The account has no vault.
+    /// The account has no vault yet; „Tresor anlegen“ makes one.
     case none
-    /// The account has a vault, this device lacks its key: the recovery key opens it.
-    case needsKey(VaultRecord)
-    /// The key is in the keychain and matches Kennel's vault.
+    /// The account has a vault, this device has not opened it: pairing or the recovery key opens it.
+    case needsKey(KennelVaultRecord)
+    /// Open here; the key encrypts notes and blobs of encrypted workspaces (ADR 0052).
     case ready(VaultKey)
     case failed(String)
 }
 
-/// The vault key of this device, for reading encrypted workspaces until they are converted: checked against Kennel,
-/// opened with the recovery key, forgotten with the Kennel. See ADR 0052, 0054, 0077.
+/// The vault through KennelKit, the same for every teamCato app: one recovery key, one pairing, one reset (teamCato ADR
+/// 0013). The account key is kept by `KennelVaultKeyStore`; sync gets it as inkhash's `VaultKey` with the epoch of
+/// inkhash's `/vault`, so notes and blobs keep their format (ADR 0052).
 @MainActor
 @Observable
 final class VaultSessions {
     private(set) var states: [UUID: VaultState] = [:]
     private let sessions: ServerSessions
     private let status: StatusLine
+    /// The app's own keychain; the teamCato group where the app may use it (Kennel ADR 0043).
+    let store: KennelVaultKeyStore
 
-    init(sessions: ServerSessions, status: StatusLine) {
+    init(sessions: ServerSessions, status: StatusLine, store: KennelVaultKeyStore = VaultSessions.defaultStore) {
         self.sessions = sessions
         self.status = status
+        self.store = store
     }
+
+    static let defaultStore = KennelVaultKeyStore(service: SecretStore.service)
 
     func state(of server: UUID) -> VaultState {
         states[server] ?? .unknown
     }
 
-    /// The key to read encrypted workspaces with, or nil while the vault is not open on this device.
+    /// The key for encrypted workspaces, or nil while the vault is not open on this device.
     func key(for server: UUID) -> VaultKey? {
         if case .ready(let key) = state(of: server) { return key }
         return nil
     }
 
-    /// Compares the keychain with Kennel's vault.
+    /// Whether the vault came over from inkhash and still has no key pair: inkhash's old recovery key opens it.
+    func isFromInkhash(_ server: UUID) -> Bool {
+        if case .needsKey(let record) = state(of: server) { return record.isFromInkhash }
+        return false
+    }
+
+    private func vault(_ server: UUID) -> KennelVault? {
+        sessions.session(of: server).map { KennelVault(session: $0, store: store) }
+    }
+
+    /// Compares this device with Kennel's vault. A key kept by an older inkhash (`vault-<server>`) is taken over once.
     func check(_ server: UUID) async {
-        guard let client = sessions.client(for: server) else { return }
+        guard let vault = vault(server), let client = sessions.client(for: server) else { return }
         do {
-            let stored = Self.storedKey(for: server)
-            guard let record = try await client.vault() else {
-                // Reset on another device, or never made: whatever key is here is no longer the account's.
-                if stored != nil { SecretStore.clear(account: Self.keychainAccount(server)) }
+            switch try await vault.state() {
+            case .none:
+                SecretStore.clear(account: Self.legacyAccount(server))
                 states[server] = VaultState.none
-                return
+            case .locked(let record):
+                if let kept = Self.legacyKey(for: server), kept.keyId == record.keyId {
+                    let open = try await vault.adopt(KennelAccountKey(keyId: kept.keyId, material: kept.material))
+                    try await ready(open, server: server, client: client)
+                } else {
+                    states[server] = .needsKey(record)
+                }
+            case .open(let open):
+                try await ready(open, server: server, client: client)
             }
-            if var key = stored, key.keyId == record.keyId {
-                key.epoch = record.epoch ?? 0
-                try? Self.store(key, for: server)
-                states[server] = .ready(key)
-            } else {
-                states[server] = .needsKey(record)
-            }
-        } catch APIError.unauthorized {
+        } catch KennelError.unauthorized {
             sessions.expire(server, ifStill: client.token)
         } catch {
-            states[server] = .failed(StatusLine.describe(error))
+            states[server] = .failed(KennelErrorText.describe(error))
         }
     }
 
-    /// Opens the vault with the recovery key and keeps the account key on this device, until the encrypted
-    /// workspaces are converted. Nil on success, else why not, for the sheet.
-    func unlock(_ server: UUID, recoveryKey: RecoveryKey) async -> String? {
-        if case .unknown = state(of: server) { await check(server) }
-        guard case .needsKey(let record) = state(of: server) else {
-            return key(for: server) == nil ? "Kennel hat für diesen Account keinen Tresor." : nil
-        }
+    /// inkhash's `/vault` counts resets: a new epoch binds encrypted libraries anew (ADR 0052).
+    private func ready(_ open: KennelOpenVault, server: UUID, client: APIClient) async throws {
+        let epoch = try await client.vault()?.epoch ?? 0
+        states[server] = .ready(VaultKey(keyId: open.accountKey.keyId, material: open.accountKey.material, epoch: epoch))
+        SecretStore.clear(account: Self.legacyAccount(server))
+    }
+
+    // MARK: For the vault windows; each returns nil on success, else what went wrong.
+
+    func create(_ server: UUID, recoveryKey: KennelRecoveryKey) async -> String? {
+        await act(server) { _ = try await $0.create(recoveryKey: recoveryKey) }
+    }
+
+    func unlock(_ server: UUID, recoveryKey: KennelRecoveryKey) async -> String? {
+        await act(server) { _ = try await $0.open(recoveryKey: recoveryKey) }
+    }
+
+    func unlock(_ server: UUID, pairingCode: String) async -> String? {
+        await act(server) { _ = try await $0.open(pairingCode: pairingCode) }
+    }
+
+    /// With the sign-in password; Kennel archives the encrypted notes and counts the epoch up (Kennel ADR 0058).
+    func reset(_ server: UUID, password: String) async -> String? {
+        await act(server) { try await $0.reset(password: password) }
+    }
+
+    func offerPairing(_ server: UUID) async -> Result<KennelPairing, KennelProblem> {
+        guard let vault = vault(server) else { return .failure(KennelProblem("Nicht mit Kennel verbunden.")) }
         do {
-            let key = try await Task.detached { try VaultCrypto.open(record, recoveryKey: recoveryKey) }.value
-            try Self.store(key, for: server)
-            states[server] = .ready(key)
-            status.message = "Tresor offen. Die verschlüsselten Workspaces werden jetzt umgewandelt."
-            return nil
-        } catch VaultError.wrongRecoveryKey {
-            return "Der Wiederherstellungsschlüssel passt nicht zu diesem Tresor."
-        } catch VaultError.unsupported {
-            return "Dieser Tresor stammt aus einer neueren Version der App."
+            return .success(try await vault.offerPairing())
         } catch {
-            return StatusLine.describe(error)
+            return .failure(KennelProblem(KennelErrorText.describe(error)))
         }
+    }
+
+    func withdraw(_ server: UUID, _ pairing: KennelPairing) async {
+        try? await vault(server)?.withdrawPairing(pairing)
+    }
+
+    private func act(_ server: UUID, _ work: (KennelVault) async throws -> Void) async -> String? {
+        guard let vault = vault(server) else { return "Nicht mit Kennel verbunden." }
+        do {
+            try await work(vault)
+        } catch {
+            return KennelErrorText.describe(error)
+        }
+        await check(server)
+        return nil
     }
 
     /// Disconnecting takes the key off this device.
     func forget(_ server: UUID) {
-        SecretStore.clear(account: Self.keychainAccount(server))
+        if let account = sessions.session(of: server)?.account.id { try? store.clear(accountId: account) }
+        SecretStore.clear(account: Self.legacyAccount(server))
         states[server] = nil
     }
 
-    // MARK: Keychain
+    // MARK: The key an older inkhash kept (ADR 0052)
 
-    static func keychainAccount(_ server: UUID) -> String {
+    static func legacyAccount(_ server: UUID) -> String {
         "vault-" + server.uuidString.lowercased()
     }
 
-    static func storedKey(for server: UUID) -> VaultKey? {
-        guard let text = SecretStore.get(account: keychainAccount(server)) else { return nil }
+    static func legacyKey(for server: UUID) -> VaultKey? {
+        guard let text = SecretStore.get(account: legacyAccount(server)) else { return nil }
         return try? InkhashJSON.decode(VaultKey.self, from: Data(text.utf8))
-    }
-
-    static func store(_ key: VaultKey, for server: UUID) throws {
-        try SecretStore.set(String(decoding: try InkhashJSON.encode(key), as: UTF8.self), account: keychainAccount(server))
     }
 }

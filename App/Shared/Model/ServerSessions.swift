@@ -54,7 +54,7 @@ final class ServerSessions {
         let signedIn = Set(registry.servers.map(\.id).filter { isSignedIn($0) })
         for gone in registry.keepOneKennel(isSignedIn: { signedIn.contains($0) }) {
             try? Self.store(for: gone.id).clear()
-            SecretStore.clear(account: VaultSessions.keychainAccount(gone.id))
+            SecretStore.clear(account: VaultSessions.legacyAccount(gone.id))
             sessions[gone.id] = nil
             expired.remove(gone.id)
         }
@@ -81,6 +81,11 @@ final class ServerSessions {
     func isSignedIn(_ server: UUID) -> Bool {
         guard let entry = registry.server(server), !entry.accountID.isEmpty else { return false }
         return !(sessions[server]?.token ?? "").isEmpty
+    }
+
+    /// The session of a signed-in server, nil while signed out.
+    func session(of server: UUID) -> KennelSession? {
+        isSignedIn(server) ? sessions[server] : nil
     }
 
     /// A client for one workspace on a signed-in server, or nil while signed out.

@@ -28,7 +28,7 @@ Doku, die dem Code widerspricht, ist ein Fehler. Korrigiere sie im selben Schrit
 
 - Der Server speichert, liefert aus und synchronisiert. Er erkennt keine Handschrift, rendert nicht und leitet keine Tags ab.
 - Suche läuft auf dem Gerät über die lokale Bibliothek, inklusive der mitgelieferten Abschriften.
-- **Ein Kennel, kein Tresor in der Oberfläche** (ADR 0077, teamCato ADR 0009): Kennel heißt in der Oberfläche nie „Server“, hat eine Seite „Kennel“ in den Einstellungen, und wo ein Workspace liegt, ändert nur sein Abschnitt „Ort“. Neue Kennel-Workspaces sind unverschlüsselt; verschlüsselte wandelt die App um und löscht den alten erst, wenn alles im Nachfolger liegt.
+- **Ein Kennel, ein Tresor für alle Apps** (ADR 0077, 0082, teamCato ADR 0009, 0013): Kennel heißt in der Oberfläche nie „Server“, hat eine Seite „Kennel“ in den Einstellungen, und wo ein Workspace liegt, ändert nur sein Abschnitt „Ort“. Ein neuer Kennel-Workspace kann beim Anlegen Ende-zu-Ende verschlüsselt werden, danach nie umgeschaltet. Den Tresor verwaltet KennelKit, derselbe wie in Xoot; die Notizen bleiben im Format von ADR 0052. Umgewandelt wird nichts mehr.
 - **Eigenständigkeit geht immer vor.** Nichts in der App darf einen Server voraussetzen. Ohne gehosteten Kennel und ohne Anmeldung geht alles außer dem Abgleich; Kennel wertet auf, er ist nie Voraussetzung (ADR 0017, teamCato ADR 0002).
 - Kein iCloud als Ablage oder Abgleich (iCloud Drive, CloudKit), kein zweites Sync-Ziel, kein Assistent und kein Embedding-Modell in der App. Das iCloud-Backup des Geräts ist erlaubt und erwünscht (ADR 0051).
 - Keine Notion-Datenbanken, keine Whiteboards.

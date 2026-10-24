@@ -2,8 +2,8 @@ import Foundation
 import InkhashCore
 import KennelKit
 
-/// When and what to sync: waits for a pause in editing, then asks Kennel what it holds, converts encrypted
-/// workspaces, syncs the look and order of the workspaces and every linked library. Reports to `KennelOverview`,
+/// When and what to sync: waits for a pause in editing, then asks Kennel what it holds, syncs the look and order of the
+/// workspaces and every linked library, encrypted ones with the vault's key (ADR 0082). Reports to `KennelOverview`,
 /// whose state becomes the status line. See ADR 0017, 0020, 0043, 0077 and PITFALLS P-053.
 @MainActor
 final class SyncCoordinator {
@@ -31,7 +31,6 @@ final class SyncCoordinator {
         self.status = status
         self.overview = overview
         converter = WorkspaceConverter(registry: registry, status: status)
-        converter.synced = { [weak library] note, meta in library?.synced(note, meta: meta) }
         refreshExpired()
     }
 
@@ -98,9 +97,10 @@ final class SyncCoordinator {
             }
             overview.standardStorageID = (try? await client.standardStorageID()) ?? overview.standardStorageID
             let key = await vaultKey(for: kennel.id)
-            let waiting = try await converter.run(kennel: kennel, client: client, remotes: list.workspaces, module: module, key: key)
-            overview.state.waitingForKey = waiting.forKey
-            overview.state.waitingForKennel = waiting.forKennel
+            // Encrypted workspaces sync with the vault open here and wait without it (ADR 0082); nothing converts.
+            overview.state.waitingForKey = key == nil
+                ? registry.workspaces.filter { $0.link?.sealed == true && $0.link?.server == kennel.id }.map(\.name) : []
+            overview.state.waitingForKennel = []
             await syncLooks(kennel: kennel, client: client, key: key)
             let problem = try await syncNotes(kennel: kennel, client: client, key: key)
             if let fresh = try? await client.workspaceList() { overview.remotes = fresh.workspaces }
@@ -117,25 +117,28 @@ final class SyncCoordinator {
         }
     }
 
-    /// The vault key, only while a workspace here is still encrypted. Checked against Kennel until it is known.
+    /// The vault key, only while a workspace here is encrypted. Checked against Kennel until it is open here.
     private func vaultKey(for server: UUID) async -> VaultKey? {
         guard registry.workspaces.contains(where: { $0.link?.sealed == true }) else { return nil }
-        if case .unknown = vaults.state(of: server) { await vaults.check(server) }
+        if vaults.key(for: server) == nil { await vaults.check(server) }
         return vaults.key(for: server)
     }
 
-    /// Every workspace linked to a plain Kennel workspace. Encrypted ones wait for their conversion. Returns what went
-    /// wrong for the status line, if anything.
+    /// Every linked workspace: plain ones as they are, encrypted ones sealed with the vault's key; without it they
+    /// wait (ADR 0052, 0082). Returns what went wrong for the status line, if anything.
     private func syncNotes(kennel: ServerEntry, client: APIClient, key: VaultKey?) async throws -> String? {
         var problem: String?
         for workspace in registry.workspaces {
-            guard let link = workspace.link, !link.sealed, link.server == kennel.id else { continue }
+            guard let link = workspace.link, link.server == kennel.id else { continue }
+            if link.sealed, key == nil { continue }
             var scoped = client
             scoped.workspace = link.remote
             let isCurrent = workspace.id == registry.current.id
             let store = registry.store(for: workspace.id)
             do {
-                let bindingKey = Workspaces.bindingKey(accountID: kennel.accountID, remote: link.remote)
+                // A reset vault counts the epoch up: encrypted libraries start over, plain ones stay (ADR 0052).
+                let epoch = link.sealed ? key?.epoch ?? 0 : 0
+                let bindingKey = Workspaces.bindingKey(accountID: kennel.accountID, remote: link.remote, epoch: epoch)
                 if workspace.retiring != nil {
                     // The successor of an encrypted workspace holds these notes already: merge, do not start over.
                     try await Relinker.adopt(store, from: scoped, bindingKey: bindingKey)
@@ -143,7 +146,11 @@ final class SyncCoordinator {
                     // Idempotent. Another workspace on Kennel starts over (ADR 0017).
                     try Library.bind(store, to: bindingKey)
                 }
-                let report = try await Syncer.sync(store: store, transport: scoped) { [weak self] note, meta in
+                let transport: any NoteTransport =
+                    if link.sealed, let key { SealedTransport(wire: scoped, sealer: Sealer(key)) } else { scoped }
+                let report = try await Syncer.sync(
+                    store: store, transport: transport, sealedWith: link.sealed ? key?.keyId : nil
+                ) { [weak self] note, meta in
                     guard let self, workspace.id == self.registry.current.id else { return }
                     self.library.synced(note, meta: meta)
                 }

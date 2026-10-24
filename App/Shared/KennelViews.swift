@@ -54,16 +54,17 @@ extension AppModel {
         kennel.flatMap { URL(string: ServerAddress.admin($0.url)) }
     }
 
-    /// What the status line's action does: sign in again, explain the conversion, or open the admin page.
+    /// What the status line's action does: sign in again, open the vault for locked encrypted workspaces, or open
+    /// the admin page.
     func statusAction(
-        signIn: @escaping @MainActor () -> Void, convert: @escaping @MainActor () -> Void,
+        signIn: @escaping @MainActor () -> Void, openVault: @escaping @MainActor () -> Void,
         open: @escaping @MainActor (URL) -> Void
     ) -> (@MainActor () -> Void)? {
         switch kennelStatus {
         case .signInAgain:
             return signIn
         case .attention:
-            return convert
+            return openVault
         case .moduleOff:
             guard let page = adminPage else { return nil }
             return { open(page) }
@@ -83,7 +84,7 @@ struct KennelSettingsView: View {
     @State private var newStorage = false
     @State private var editing: KennelStorage?
     @State private var password = false
-    @State private var converting = false
+    @State private var vaultSheet: VaultSheet?
 
     var body: some View {
         page
@@ -94,8 +95,12 @@ struct KennelSettingsView: View {
             .sheet(isPresented: $newStorage) { storageSheet(nil) }
             .sheet(item: $editing) { storageSheet($0) }
             .sheet(isPresented: $password) { kennelSheet { PasswordChangeView(serverID: model.kennel?.id ?? UUID()) } }
-            .sheet(isPresented: $converting) { ConversionSheet() }
-            .task { if model.kennel != nil { await model.sync() } }
+            .sheet(item: $vaultSheet) { VaultSheetView(sheet: $0) }
+            .task {
+                guard model.kennel != nil else { return }
+                await model.sync()
+                await model.checkVault()
+            }
     }
 
     private var page: some View {
@@ -117,7 +122,8 @@ struct KennelSettingsView: View {
             changePassword: changePassword,
             disconnect: { model.disconnect() },
             disconnectConsequence: AppModel.disconnectConsequence,
-            notConnectedText: "inkhash funktioniert ohne Kennel. Mit Kennel gleichst du Workspaces zwischen deinen Geräten ab und legst sie in den Speichern deines Haushalts ab."
+            notConnectedText: "inkhash funktioniert ohne Kennel. Mit Kennel gleichst du Workspaces zwischen deinen Geräten ab und legst sie in den Speichern deines Haushalts ab.",
+            vault: signedIn ? model.vaultSection { vaultSheet = $0 } : nil
         )
     }
 
@@ -137,7 +143,8 @@ struct KennelSettingsView: View {
 
     /// „Anmelden …“, „Tresor öffnen …“ or the admin page, whichever the status asks for.
     private var statusAction: (@MainActor () -> Void)? {
-        model.statusAction(signIn: { signingInAgain = true }, convert: { converting = true }, open: { openURL($0) })
+        model.statusAction(
+            signIn: { signingInAgain = true }, openVault: { vaultSheet = model.vaultSheetToOpen }, open: { openURL($0) })
     }
 
     @ViewBuilder
@@ -185,83 +192,14 @@ private struct CloseButton: View {
     }
 }
 
-/// What „Umwandeln“ means, and the one way left to open the old vault: the recovery key (ADR 0077). A device with an
-/// open vault converts by itself; this is only needed when none is left.
-struct ConversionSheet: View {
-    @Environment(AppModel.self) private var model
-    @Environment(\.dismiss) private var dismiss
-    @State private var typedKey = ""
-    @State private var busy = false
-    @State private var failure: String?
-
-    var body: some View {
-        NavigationStack {
-            Form {
-                Section {
-                    Text(model.overview.state.conversionText ?? "Alle Workspaces sind umgewandelt.")
-                }
-                if !model.overview.state.waitingForKey.isEmpty {
-                    Section {
-                        RecoveryKeyField(text: $typedKey, onSubmit: open)
-                        Button("Tresor öffnen") { open() }
-                            .disabled(busy || RecoveryKey(parsing: typedKey) == nil)
-                        if let failure {
-                            Text(failure).foregroundStyle(Ink.warning)
-                        }
-                    } header: {
-                        Text("Mit dem Wiederherstellungsschlüssel")
-                    } footer: {
-                        Text("Hast du noch ein Gerät, auf dem der Tresor offen ist, öffne dort inkhash; es wandelt von selbst um. Sonst gib hier den Wiederherstellungsschlüssel ein. Er bleibt nur, bis alles umgewandelt ist.")
-                    }
-                }
-            }
-            .formStyle(.grouped)
-            .navigationTitle("Umwandeln")
-            .toolbar {
-                ToolbarItem(placement: .confirmationAction) {
-                    Button("Fertig") { dismiss() }
-                }
-            }
-        }
-        .macSheetSize(minWidth: 440, minHeight: 360)
-    }
-
-    private func open() {
-        guard let key = RecoveryKey(parsing: typedKey), !busy else { return }
-        busy = true
-        failure = nil
-        Task {
-            failure = await model.unlockVault(recoveryKey: key)
-            busy = false
-            if failure == nil { dismiss() }
-        }
-    }
-}
-
-/// Where a recovery key is typed or pasted. Case and dashes do not matter (ADR 0054).
-struct RecoveryKeyField: View {
-    @Binding var text: String
-    var onSubmit: () -> Void
-
-    var body: some View {
-        TextField("XXXXX-XXXXX-XXXXX-XXXXX-XXXXX", text: $text)
-            .font(.system(.body, design: .monospaced))
-            .autocorrectionDisabled()
-            #if os(iOS)
-            .textInputAutocapitalization(.characters)
-            #endif
-            .onSubmit(onSubmit)
-    }
-}
-
 /// The sync status as a symbol beside the buttons at the foot of the sidebar while Kennel is connected (teamCato ADR
 /// 0009 point 7, Kennel ADR 0060): a tap on the red cross runs its action, „Anmelden …“ opens the connect flow again,
-/// „Tresor öffnen …“ the conversion sheet; otherwise a tap syncs.
+/// „Tresor öffnen …“ the vault (ADR 0082); otherwise a tap syncs.
 struct KennelSyncSymbol: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var signingIn = false
-    @State private var converting = false
+    @State private var vaultSheet: VaultSheet?
 
     var body: some View {
         Group {
@@ -274,10 +212,11 @@ struct KennelSyncSymbol: View {
         }
         .kennelBrand(.inkhash)
         .kennelConnectSheet(isPresented: $signingIn, prefill: model.signInAgainPrefill, name: model.kennel?.accountName ?? "")
-        .sheet(isPresented: $converting) { ConversionSheet() }
+        .sheet(item: $vaultSheet) { VaultSheetView(sheet: $0) }
     }
 
     private var action: (@MainActor () -> Void)? {
-        model.statusAction(signIn: { signingIn = true }, convert: { converting = true }, open: { openURL($0) })
+        model.statusAction(
+            signIn: { signingIn = true }, openVault: { vaultSheet = model.vaultSheetToOpen }, open: { openURL($0) })
     }
 }

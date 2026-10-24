@@ -18,13 +18,13 @@ final class SyncCoordinatorTests: LibraryTestCase {
 
     override func tearDown() async throws {
         SecretStore.clear(account: SecretStore.key(for: server))
-        SecretStore.clear(account: VaultSessions.keychainAccount(server))
+        SecretStore.clear(account: VaultSessions.legacyAccount(server))
         try await super.tearDown()
     }
 
     private func coordinator(_ overview: KennelOverview) -> SyncCoordinator {
         let sessions = ServerSessions(registry: registry, status: status)
-        let vaults = VaultSessions(sessions: sessions, status: status)
+        let vaults = VaultSessions(sessions: sessions, status: status, store: .inMemory())
         return SyncCoordinator(registry: registry, sessions: sessions, vaults: vaults, library: library, status: status, overview: overview)
     }
 

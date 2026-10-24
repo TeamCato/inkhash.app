@@ -41,9 +41,9 @@ struct WorkspaceMenuLabel: View {
     var body: some View {
         Label {
             Text(workspace.name)
-            // Where it lies, while Kennel is connected (teamCato ADR 0009 point 1).
+            // Where it lies, while Kennel is connected (teamCato ADR 0009 point 1); encrypted ones say so (ADR 0082).
             if model.kennel != nil {
-                Text(model.overview.place(of: workspace).label)
+                Text(model.overview.place(of: workspace).label + (workspace.link?.sealed == true ? " · verschlüsselt" : ""))
             }
         } icon: {
             if isCurrent {

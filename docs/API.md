@@ -14,7 +14,7 @@ JSON-Bodies kommen mit `Content-Type: application/json`, sonst 415 `unsupported-
 
 | Methode | Pfad | Bedeutung |
 | --- | --- | --- |
-| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "join": true, "modules": { "inkhash": { "title", "encryption": "optional", "vault": true, "workspaces": true, "pairing": true, "plainWorkspaces": true, "workspaceStorage": true, "appScheme": "inkhash" } } }`, ohne Sitzung. Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
+| GET | `/v1/health` | `{ "ok": true, "server": "kennel", "version", "registration": "setup" \| "closed", "join": true, "modules": { "inkhash": { "title", "encryption": "optional", "vault": true, "workspaces": true, "pairing": true, "plainWorkspaces": true, "workspaceStorage": true, "sharedVault": true, "appScheme": "inkhash" } } }`, ohne Sitzung. `sharedVault`: `/vault` und die Kopplungen sind der Tresor im Kern (Kennel ADR 0058, ADR 0082). Fehlt `modules.inkhash`, ist das Modul aus oder der Server kein Kennel; die App gleicht dann nicht ab |
 | POST | `/v1/setup` | `{ "setupToken", "name", "password" }` → 201 `{ "token", "account": { "id", "name", "admin": true } }`, ohne Sitzung |
 | POST | `/v1/session` | `{ "name", "password", "module": "inkhash" }` → `{ "token", "account": { "id", "name", "admin" } }`. Mit `module` ist es die Sitzung der App; sie gibt Speicher nur für inkhash frei (Kennel ADR 0025). `POST /v1/join` schickt `module` ebenso |
 | DELETE | `/v1/session` | Sitzung beenden |

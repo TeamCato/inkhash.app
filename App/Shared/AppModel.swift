@@ -37,8 +37,8 @@ extension LibrarySection {
 enum WorkspaceTarget: Hashable {
     /// „Nur hier“.
     case local
-    /// A new plain Kennel workspace in this storage; nil: the account's.
-    case kennel(storageID: String?)
+    /// A new Kennel workspace in this storage (nil: the account's), end to end encrypted with `sealed` (ADR 0082).
+    case kennel(storageID: String?, sealed: Bool = false)
 }
 
 /// What the views share: where the user is (section, search, selection) and the steps that need
@@ -373,7 +373,7 @@ final class AppModel {
     }
 
     /// Syncs a local workspace with an existing Kennel workspace; the notes of both meet there (ADR 0017). An
-    /// encrypted one is converted on the way (ADR 0077).
+    /// encrypted one syncs with the vault open here (ADR 0082).
     func link(_ id: UUID, to remote: RemoteWorkspace) {
         guard let kennel = registry.kennel else { return }
         registry.setLink(id, to: WorkspaceLink(server: kennel.id, remote: remote.id, sealed: remote.isSealed))
@@ -459,22 +459,31 @@ final class AppModel {
         return nil
     }
 
-    /// A new Kennel workspace is always plain: inkhash offers no vault anymore (teamCato ADR 0009 point 10).
+    /// A new Kennel workspace: plain, or end to end encrypted with the vault open here (ADR 0082). Encryption is chosen
+    /// once and never changes (Kennel ADR 0026).
     private func link(for target: WorkspaceTarget, name: String) async throws -> WorkspaceLink? {
         switch target {
         case .local:
             return nil
-        case .kennel(let storageID):
+        case .kennel(let storageID, let sealed):
             guard let kennel = registry.kennel, let client = sessions.client(for: kennel.id) else {
                 throw KennelProblem("Nicht mit Kennel verbunden.")
             }
             let module = try await client.kennel.health().inkhash
-            guard module?.plainWorkspaces == true else {
-                throw KennelProblem("Dieser Kennel legt keine unverschlüsselten Workspaces an. Bitte Kennel aktualisieren.")
+            if sealed {
+                if vaults.key(for: kennel.id) == nil { await vaults.check(kennel.id) }
+                guard vaults.key(for: kennel.id) != nil else {
+                    throw KennelProblem("Öffne zuerst deinen Tresor, dann lässt sich der Workspace verschlüsseln.")
+                }
+            } else {
+                guard module?.plainWorkspaces == true else {
+                    throw KennelProblem("Dieser Kennel legt keine unverschlüsselten Workspaces an. Bitte Kennel aktualisieren.")
+                }
             }
             do {
                 let created = try await client.createWorkspace(
-                    name: name, as: NewRemoteWorkspace(sealed: false, storageID: module?.workspaceStorage == true ? storageID : nil))
+                    name: name,
+                    as: NewRemoteWorkspace(sealed: sealed, storageID: module?.workspaceStorage == true ? storageID : nil))
                 overview.remotes.append(created)
                 return WorkspaceLink(server: kennel.id, remote: created.id, sealed: created.isSealed)
             } catch let APIError.badStatus(400, body) where body.contains("storage") {
@@ -623,12 +632,54 @@ final class AppModel {
         if !overview.storages.contains(where: { $0.id == storage.id }) { overview.storages.append(storage) }
     }
 
-    // MARK: Vault, only to convert (ADR 0077)
+    // MARK: Vault (ADR 0082, Kennel ADR 0043, 0058)
 
-    /// Opens the old vault with the recovery key, then syncs, which converts what was encrypted. Nil on success.
-    func unlockVault(recoveryKey: RecoveryKey) async -> String? {
+    /// Where the vault stands here; nil without a Kennel.
+    var vaultState: VaultState? {
+        registry.kennel.map { vaults.state(of: $0.id) }
+    }
+
+    var vaultFromInkhash: Bool {
+        registry.kennel.map { vaults.isFromInkhash($0.id) } ?? false
+    }
+
+    /// Asks Kennel where the vault stands, for the Kennel page and „Wo soll er liegen?“.
+    func checkVault() async {
+        guard let kennel = registry.kennel, sessions.isSignedIn(kennel.id) else { return }
+        await vaults.check(kennel.id)
+    }
+
+    /// Each returns nil on success, else what went wrong, for KennelKitUI's vault windows; success syncs, so locked
+    /// encrypted workspaces open.
+    func createVault(_ key: KennelRecoveryKey) async -> String? {
+        await vaultAction { await self.vaults.create($0, recoveryKey: key) }
+    }
+
+    func openVault(_ key: KennelRecoveryKey) async -> String? {
+        await vaultAction { await self.vaults.unlock($0, recoveryKey: key) }
+    }
+
+    func openVault(pairingCode: String) async -> String? {
+        await vaultAction { await self.vaults.unlock($0, pairingCode: pairingCode) }
+    }
+
+    func resetVault(password: String) async -> String? {
+        await vaultAction { await self.vaults.reset($0, password: password) }
+    }
+
+    func offerPairing() async -> Result<KennelPairing, KennelProblem> {
+        guard let kennel = registry.kennel else { return .failure(KennelProblem("Nicht mit Kennel verbunden.")) }
+        return await vaults.offerPairing(kennel.id)
+    }
+
+    func withdraw(_ pairing: KennelPairing) async {
+        guard let kennel = registry.kennel else { return }
+        await vaults.withdraw(kennel.id, pairing)
+    }
+
+    private func vaultAction(_ work: (UUID) async -> String?) async -> String? {
         guard let kennel = registry.kennel else { return "Nicht mit Kennel verbunden." }
-        let problem = await vaults.unlock(kennel.id, recoveryKey: recoveryKey)
+        let problem = await work(kennel.id)
         if problem == nil { await sync() }
         return problem
     }

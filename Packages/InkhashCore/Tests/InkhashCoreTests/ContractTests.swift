@@ -41,6 +41,11 @@ final class ContractTests: XCTestCase {
 
     /// A new account, signed in like the app does.
     private func account() async throws -> APIClient {
+        APIClient(session: try await accountSession())
+    }
+
+    /// A new account's session, for KennelKit's vault as every teamCato app uses it.
+    private func accountSession() async throws -> KennelSession {
         let name = "u" + UUID().uuidString.prefix(8).lowercased()
         var request = URLRequest(url: url.appendingPathComponent("v1/accounts"))
         request.httpMethod = "POST"
@@ -49,8 +54,7 @@ final class ContractTests: XCTestCase {
         request.httpBody = try JSONSerialization.data(withJSONObject: ["name": name, "password": "secretsecret"])
         let (_, response) = try await URLSession.shared.data(for: request)
         XCTAssertEqual((response as? HTTPURLResponse)?.statusCode, 201)
-        let session = try await KennelClient(address: url).signIn(name: name, password: "secretsecret")
-        return APIClient(session: session)
+        return try await KennelClient(address: url).signIn(name: name, password: "secretsecret")
     }
 
     private func freshStore() throws -> LocalStore {
@@ -177,6 +181,59 @@ final class ContractTests: XCTestCase {
         for name in try XCTUnwrap(other.note(id: notes[1].id)?.pages?.first).blobNames {
             XCTAssertEqual(try other.blob(name), try store.blob(name))
         }
+    }
+
+    /// ADR 0082, Kennel ADR 0058: the vault another app made through KennelKit (as Xoot does) encrypts inkhash's
+    /// workspaces; a paired second device reads them; a reset from any app leaves them unreadable.
+    func testTheSharedVaultEncryptsWorkspacesAndAResetFromAnyAppLocksThem() async throws {
+        let session = try await accountSession()
+        let client = APIClient(session: session)
+        let health = try await client.kennel.health()
+        XCTAssertEqual(health.inkhash?.sharedVault, true)
+
+        // Made in another app: KennelKit's vault, kennel-vault-v1.
+        let otherApp = KennelVault(session: session, store: .inMemory())
+        let open = try await otherApp.create(recoveryKey: .generate())
+        let seen = try await client.vault()
+        let record = try XCTUnwrap(seen, "inkhash sees the vault in core")
+        XCTAssertEqual(record.keyId, open.accountKey.keyId)
+        let key = VaultKey(keyId: record.keyId, material: open.accountKey.material, epoch: record.epoch ?? 0)
+
+        let remote = try await client.createWorkspace(name: "Geheim", as: NewRemoteWorkspace(sealed: true))
+        XCTAssertTrue(remote.isSealed)
+        var scoped = client
+        scoped.workspace = remote.id
+        let store = try freshStore()
+        let notes = try fill(store)
+        let report = try await Syncer.sync(
+            store: store, transport: SealedTransport(wire: scoped, sealer: Sealer(key)), sealedWith: key.keyId)
+        XCTAssertEqual(report.rejected, [])
+        guard case .sealed = try await scoped.fetchWire(id: notes[0].id) else { return XCTFail("plain on Kennel") }
+
+        // A second device pairs with the code the first one shows, through the core's pairings.
+        let secondDevice = KennelVault(session: session, store: .inMemory())
+        let paired = try await secondDevice.open(pairingCode: try await otherApp.offerPairing().code)
+        let theirKey = VaultKey(keyId: paired.accountKey.keyId, material: paired.accountKey.material, epoch: key.epoch)
+        let other = try freshStore()
+        _ = try await Syncer.sync(
+            store: other, transport: SealedTransport(wire: scoped, sealer: Sealer(theirKey)), sealedWith: theirKey.keyId)
+        for note in notes {
+            XCTAssertTrue(try XCTUnwrap(other.note(id: note.id)).sameContent(as: try XCTUnwrap(store.note(id: note.id))))
+        }
+
+        // Reset in the other app: the old key is gone from Kennel, the notes are archived, the epoch counts up.
+        try await otherApp.reset(password: "secretsecret")
+        let afterReset = try await client.vault()
+        XCTAssertNil(afterReset)
+        let fresh = try await secondDevice.create(recoveryKey: .generate())
+        let renewed = try await client.vault()
+        let newRecord = try XCTUnwrap(renewed)
+        XCTAssertGreaterThan(newRecord.epoch ?? 0, key.epoch)
+        let newKey = VaultKey(keyId: newRecord.keyId, material: fresh.accountKey.material, epoch: newRecord.epoch ?? 0)
+        let later = try freshStore()
+        _ = try await Syncer.sync(
+            store: later, transport: SealedTransport(wire: scoped, sealer: Sealer(newKey)), sealedWith: newKey.keyId)
+        XCTAssertEqual(try later.list().count, 0, "nothing of before can be read with the new vault")
     }
 
     func testEditsConflictsAndRetriesWithSealedNotes() async throws {

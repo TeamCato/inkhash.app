@@ -1,6 +1,6 @@
 # 0077 Kennel-Ablauf nach teamCato ADR 0009, ohne Tresor
 
-Status: angenommen. Dominik am 2026-10-21 (teamCato ADR 0009, „umwandeln“). Setzt teamCato ADR 0009 und Kennel ADR
+Status: angenommen, Punkte 5 (immer unverschlüsselt), 8 und 9 abgelöst durch ADR 0082. Dominik am 2026-10-21 (teamCato ADR 0009, „umwandeln“). Setzt teamCato ADR 0009 und Kennel ADR
 0028 in inkhash um. Ersetzt: in ADR 0020 die Wahl von Server und Server-Workspace im Workspace-Editor; die
 Oberfläche des Tresors aus ADR 0052 und 0054 (Anlegen, Koppeln, neuer Wiederherstellungsschlüssel, Zurücksetzen,
 das Blatt, das sich von selbst öffnet); die Fenster aus ADR 0071, 0072 und 0074 („Server verbinden“, die Seite des

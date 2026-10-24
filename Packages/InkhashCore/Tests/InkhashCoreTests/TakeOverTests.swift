@@ -118,15 +118,15 @@ final class TakeOverTests: XCTestCase {
         XCTAssertEqual(KennelSyncState(phase: .moduleOff, sessionExpired: true).status, .signInAgain)
     }
 
-    func testWaitingWorkspacesAskForAttention() {
+    /// ADR 0082: only locked encrypted workspaces mention the vault; without them nothing does.
+    func testLockedWorkspacesAskToOpenTheVault() {
         let date = Date(timeIntervalSince1970: 1_000)
-        let waiting = KennelSyncState(phase: .synced(date), waitingForKey: ["Arbeit"])
-        XCTAssertEqual(waiting.status, .attention(title: "Umwandeln", action: "Tresor öffnen …"))
-        XCTAssertTrue(waiting.conversionText?.contains("„Arbeit“ ist noch verschlüsselt") == true)
-        let kennel = KennelSyncState(phase: .synced(date), waitingForKennel: ["A", "B"])
-        XCTAssertEqual(kennel.status, .attention(title: "Umwandeln", action: nil))
-        XCTAssertTrue(kennel.conversionText?.hasPrefix("„A“ und „B“ warten auf Kennel") == true)
+        let locked = KennelSyncState(phase: .synced(date), waitingForKey: ["Arbeit"])
+        XCTAssertEqual(locked.status, .attention(title: "Verschlüsselte Workspaces gesperrt", action: "Tresor öffnen …"))
+        XCTAssertTrue(locked.isLocked("Arbeit"))
+        XCTAssertFalse(locked.isLocked("Privat"))
+        XCTAssertEqual(KennelSyncState(phase: .synced(date), waitingForKennel: ["A"]).status, .synced(date))
         XCTAssertEqual(KennelSyncState(phase: .unreachable, waitingForKey: ["A"]).status, .unreachable)
-        XCTAssertNil(KennelSyncState(phase: .synced(date)).conversionText)
+        XCTAssertEqual(KennelSyncState(phase: .synced(date)).status, .synced(date))
     }
 }

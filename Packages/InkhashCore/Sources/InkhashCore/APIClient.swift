@@ -38,11 +38,15 @@ public struct ModuleInfo: Codable, Equatable, Sendable {
     public var workspaceStorage: Bool?
     /// A workspace may move to another storage (ADR 0076, Kennel ADR 0027).
     public var workspaceMove: Bool?
+    /// The module's vault is the vault in Kennel's core, shared with every teamCato app (Kennel ADR 0058, ADR 0082).
+    public var sharedVault: Bool?
 
     public init(
         title: String? = nil, encryption: String? = nil, vault: Bool? = nil, workspaces: Bool? = nil, pairing: Bool? = nil,
-        appScheme: String? = nil, plainWorkspaces: Bool? = nil, workspaceStorage: Bool? = nil, workspaceMove: Bool? = nil
+        appScheme: String? = nil, plainWorkspaces: Bool? = nil, workspaceStorage: Bool? = nil, workspaceMove: Bool? = nil,
+        sharedVault: Bool? = nil
     ) {
+        self.sharedVault = sharedVault
         self.title = title
         self.encryption = encryption
         self.vault = vault

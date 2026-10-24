@@ -18,6 +18,8 @@ struct SidebarView: View {
     @State private var newWorkspace = false
     /// A note written to a file, waiting for the person to pick where it goes. See ADR 0051.
     @State private var exported: ExportedFile?
+    /// The vault, opened from a locked encrypted workspace (ADR 0082).
+    @State private var vaultSheet: VaultSheet?
 
     var body: some View {
         @Bindable var model = model
@@ -30,6 +32,9 @@ struct SidebarView: View {
             .padding(.top, 8)
             .padding(.bottom, 8)
             searchField
+            if model.overview.state.isLocked(model.registry.current.name) {
+                lockedHint
+            }
             if model.tagFilter != nil {
                 tagSuggestions
             }
@@ -45,6 +50,7 @@ struct SidebarView: View {
         .onChange(of: model.searchFocusToken) { _, _ in
             searchFocused = true
         }
+        .sheet(item: $vaultSheet) { VaultSheetView(sheet: $0) }
         .alert(folderPrompt?.title ?? "", isPresented: Binding(get: { folderPrompt != nil }, set: { if !$0 { folderPrompt = nil } })) {
             TextField("Name", text: $folderName)
             Button("Abbrechen", role: .cancel) { folderPrompt = nil }
@@ -549,6 +555,22 @@ struct SidebarView: View {
     }
 }
 
+extension SidebarView {
+    /// A locked encrypted workspace: its notes from Kennel come once the vault is open here (ADR 0082).
+    var lockedHint: some View {
+        HStack(spacing: 8) {
+            Label(KennelSyncState.lockedHint, systemImage: "lock")
+                .font(.caption)
+                .foregroundStyle(Ink.muted)
+            Spacer()
+            Button("Öffnen …") { vaultSheet = model.vaultSheetToOpen }
+                .font(.caption)
+        }
+        .padding(.horizontal, 14)
+        .padding(.bottom, 6)
+    }
+}
+
 struct WorkspaceSwitcher: View {
     @Environment(AppModel.self) private var model
     @Binding var newWorkspace: Bool
@@ -574,6 +596,12 @@ struct WorkspaceSwitcher: View {
                 Text(model.registry.current.name)
                     .font(.system(size: 15, weight: .semibold))
                     .lineLimit(1)
+                if model.registry.current.link?.sealed == true {
+                    Image(systemName: "lock.fill")
+                        .font(.system(size: 11))
+                        .foregroundStyle(Ink.muted)
+                        .accessibilityLabel("Verschlüsselt")
+                }
                 if model.kennel != nil {
                     KennelPlaceBadge(model.overview.place(of: model.registry.current), style: .icon)
                 }
