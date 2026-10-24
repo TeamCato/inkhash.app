@@ -40,7 +40,6 @@ struct SidebarView: View {
             } else {
                 flatList(title: model.section.title)
             }
-            KennelFooter()
             footer
         }
         .onChange(of: model.searchFocusToken) { _, _ in
@@ -478,6 +477,7 @@ struct SidebarView: View {
                     .help(model.status)
             }
             Spacer(minLength: 8)
+            KennelSyncSymbol()
             tasksButton
             footerButton("star", .favorites, label: "Favoriten")
             footerButton("trash", .trash, label: "Papierkorb", count: model.library.listing.trashCount)

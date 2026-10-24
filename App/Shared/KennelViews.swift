@@ -254,10 +254,10 @@ struct RecoveryKeyField: View {
     }
 }
 
-/// The status line at the foot of the sidebar while Kennel is connected, with its action: „Anmelden …“ opens the
-/// connect flow again, „Tresor öffnen …“ the conversion sheet (teamCato ADR 0009 point 7). Leading, flush with the
-/// logo below, and the status itself starts a sync instead of a separate button, like in Xoot.
-struct KennelFooter: View {
+/// The sync status as a symbol beside the buttons at the foot of the sidebar while Kennel is connected (teamCato ADR
+/// 0009 point 7, Kennel ADR 0060): a tap on the red cross runs its action, „Anmelden …“ opens the connect flow again,
+/// „Tresor öffnen …“ the conversion sheet; otherwise a tap syncs.
+struct KennelSyncSymbol: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL
     @State private var signingIn = false
@@ -266,40 +266,15 @@ struct KennelFooter: View {
     var body: some View {
         Group {
             if let status = model.kennelStatus {
-                statusRow(status)
-                    .font(.caption)
-                    // Same insets as the sidebar's footer row, so the status starts where the logo starts.
-                    .padding(.leading, 16)
-                    .padding(.trailing, 10)
-                    .padding(.vertical, 8)
+                KennelStatusSymbol(status, syncNow: { Task { await model.sync() } }, action: action)
+                    .font(.system(size: 13))
+                    .foregroundStyle(Ink.muted)
+                    .frame(width: 28, height: 28)
             }
         }
-        .foregroundStyle(Ink.muted)
         .kennelBrand(.inkhash)
         .kennelConnectSheet(isPresented: $signingIn, prefill: model.signInAgainPrefill, name: model.kennel?.accountName ?? "")
         .sheet(isPresented: $converting) { ConversionSheet() }
-    }
-
-    /// The status only syncs while `canSyncNow` (not while syncing); a status with an action („Anmelden …“) never
-    /// can, so no button holds another.
-    @ViewBuilder
-    private func statusRow(_ status: KennelStatus) -> some View {
-        let line = KennelStatusLine(status, action: action)
-            // A line with a detail may need two lines of text, so it keeps the full width.
-            .fixedSize(horizontal: status.detail == nil, vertical: false)
-            .frame(maxWidth: .infinity, alignment: .leading)
-        if status.canSyncNow {
-            Button {
-                Task { await model.sync() }
-            } label: {
-                line.contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .help("Jetzt mit Kennel abgleichen")
-            .accessibilityHint("Gleicht jetzt mit Kennel ab")
-        } else {
-            line
-        }
     }
 
     private var action: (@MainActor () -> Void)? {
