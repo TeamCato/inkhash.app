@@ -9,7 +9,7 @@ automatische Umwandeln), und teamCato ADR 0009 Punkt 10 für inkhash. Format und
 
 1. **Ein Tresor für alle Apps.** inkhash nimmt den Tresor aus KennelKit (`KennelVault`, Kennel ADR 0043): Anlegen,
    Öffnen mit Wiederherstellungsschlüssel oder Kopplung per QR, „Schlüssel nicht mehr da?“ mit Zurücksetzen über das
-   Kennel-Passwort, Gerät hinzufügen. Die Fenster sind KennelKitUIs (`KennelVaultSetupView`, `KennelVaultUnlockView`,
+   Kennel-Passwort, „Eigenes Gerät hinzufügen …“ (QR-Code für ein weiteres Gerät von dir). Die Fenster sind KennelKitUIs (`KennelVaultSetupView`, `KennelVaultUnlockView`,
    `KennelPairingOfferView`, `KennelVaultSection`). Ein Tresor aus Xoot öffnet sich in inkhash mit demselben Schlüssel;
    ein alter inkhash-Tresor (`inkhash-vault-v1`) öffnet weiter.
 2. **Der Schlüssel** liegt in `KennelVaultKeyStore` (Dienst `local.inkhash`). Ein Schlüssel, den eine ältere inkhash-
