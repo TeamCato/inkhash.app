@@ -31,10 +31,10 @@ public struct KennelSyncState: Equatable, Sendable {
         self.waitingForKennel = waitingForKennel
     }
 
-    /// Title of the attention state while encrypted workspaces are locked (ADR 0082). Only then the vault is mentioned.
-    public static let lockedTitle = "Verschlüsselte Workspaces gesperrt"
+    /// Title of the attention state while encrypted workspaces are locked (ADR 0082). Only then encryption is mentioned (Kennel ADR 0065).
+    public static let lockedTitle = "Verschlüsselte Inhalte gesperrt"
     /// Its action, which opens the vault.
-    public static let openVault = "Tresor öffnen …"
+    public static let openVault = "Freischalten …"
 
     /// The status line; the app shows it only while Kennel is connected. Signing in again beats everything, then the
     /// module, then what keeps the person's notes from Kennel, then the plain sync state.
@@ -56,7 +56,7 @@ public struct KennelSyncState: Equatable, Sendable {
     }
 
     /// What a locked encrypted workspace says where it is shown.
-    public static let lockedHint = "Zum Ansehen den Tresor öffnen."
+    public static let lockedHint = "Zum Ansehen freischalten."
 
     /// Whether this workspace is locked here.
     public func isLocked(_ name: String) -> Bool {

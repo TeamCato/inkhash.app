@@ -39,3 +39,12 @@ Verschlüsselung will (teamCato ADR 0013); mit dem Tresor im Kern fällt der Gru
   Tresor in inkhash einmal selbst (Kopplung per QR genügt).
 - Kein Umschalten bestehender Workspaces; Verschlüsseln heißt: neuen verschlüsselten Workspace anlegen und Notizen
   hineinschieben.
+
+## Nachtrag 2026-10-24: verschlüsseln, wo man es nutzt (Kennel ADR 0065)
+
+Kein Schritt vorab in den Einstellungen. „Anlegen“ eines Workspace mit „Ende-zu-Ende verschlüsseln“ richtet den
+Schlüssel ein (Wiederherstellungsschlüssel einmal zeigen) oder schaltet ihn frei und legt dann an. Ein gesperrter
+Workspace zeigt „Zum Ansehen freischalten.“ mit „Freischalten …“, das Sync-Symbol „Verschlüsselte Inhalte gesperrt“.
+Einstellungen › Kennel › Verschlüsselung erscheint nur mit Schlüssel oder verschlüsseltem Workspace, mit „Eigenes Gerät
+hinzufügen …“ und „Zurücksetzen …“. „Tresor“ steht in keinem Text mehr. Auf dem Mac nennt „Freischalten“ den QR-Code aus
+Xoot.

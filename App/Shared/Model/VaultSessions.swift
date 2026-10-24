@@ -6,7 +6,7 @@ import Observation
 /// Where the vault of the Kennel stands on this device (ADR 0082, Kennel ADR 0043, 0058).
 enum VaultState: Equatable {
     case unknown
-    /// The account has no vault yet; „Tresor anlegen“ makes one.
+    /// The account has no key yet; „Verschlüsselung einrichten“ makes one.
     case none
     /// The account has a vault, this device has not opened it: pairing or the recovery key opens it.
     case needsKey(KennelVaultRecord)

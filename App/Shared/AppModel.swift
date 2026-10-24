@@ -473,7 +473,7 @@ final class AppModel {
             if sealed {
                 if vaults.key(for: kennel.id) == nil { await vaults.check(kennel.id) }
                 guard vaults.key(for: kennel.id) != nil else {
-                    throw KennelProblem("Öffne zuerst deinen Tresor, dann lässt sich der Workspace verschlüsseln.")
+                    throw KennelProblem("Schalte zuerst die Verschlüsselung auf diesem Gerät frei.")
                 }
             } else {
                 guard module?.plainWorkspaces == true else {

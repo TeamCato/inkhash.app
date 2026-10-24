@@ -141,7 +141,7 @@ struct KennelSettingsView: View {
         return KennelSettingsPage.Connection(host: ServerAddress.host(kennel.url), account: kennel.accountName, status: status)
     }
 
-    /// „Anmelden …“, „Tresor öffnen …“ or the admin page, whichever the status asks for.
+    /// „Anmelden …“, „Freischalten …“ or the admin page, whichever the status asks for.
     private var statusAction: (@MainActor () -> Void)? {
         model.statusAction(
             signIn: { signingInAgain = true }, openVault: { vaultSheet = model.vaultSheetToOpen }, open: { openURL($0) })
@@ -194,7 +194,7 @@ private struct CloseButton: View {
 
 /// The sync status as a symbol beside the buttons at the foot of the sidebar while Kennel is connected (teamCato ADR
 /// 0009 point 7, Kennel ADR 0060): a tap on the red cross runs its action, „Anmelden …“ opens the connect flow again,
-/// „Tresor öffnen …“ the vault (ADR 0082); otherwise a tap syncs.
+/// „Freischalten …“ unlocks encrypted workspaces (ADR 0082, Kennel ADR 0065); otherwise a tap syncs.
 struct KennelSyncSymbol: View {
     @Environment(AppModel.self) private var model
     @Environment(\.openURL) private var openURL

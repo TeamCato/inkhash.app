@@ -122,7 +122,7 @@ final class TakeOverTests: XCTestCase {
     func testLockedWorkspacesAskToOpenTheVault() {
         let date = Date(timeIntervalSince1970: 1_000)
         let locked = KennelSyncState(phase: .synced(date), waitingForKey: ["Arbeit"])
-        XCTAssertEqual(locked.status, .attention(title: "Verschlüsselte Workspaces gesperrt", action: "Tresor öffnen …"))
+        XCTAssertEqual(locked.status, .attention(title: "Verschlüsselte Inhalte gesperrt", action: "Freischalten …"))
         XCTAssertTrue(locked.isLocked("Arbeit"))
         XCTAssertFalse(locked.isLocked("Privat"))
         XCTAssertEqual(KennelSyncState(phase: .synced(date), waitingForKennel: ["A"]).status, .synced(date))

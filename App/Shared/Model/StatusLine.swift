@@ -45,7 +45,7 @@ final class StatusLine {
         case VaultError.wrongRecoveryKey:
             return "Der Wiederherstellungsschlüssel passt nicht."
         case is VaultError:
-            return "Der Tresor ließ sich nicht öffnen."
+            return "Die Verschlüsselung ließ sich nicht freischalten."
         case let error as KeychainError:
             return "Die Anmeldung ließ sich nicht im Schlüsselbund sichern (\(error.status))."
         case let KennelSessionStoreError.keychain(status):

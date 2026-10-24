@@ -563,7 +563,7 @@ extension SidebarView {
                 .font(.caption)
                 .foregroundStyle(Ink.muted)
             Spacer()
-            Button("Öffnen …") { vaultSheet = model.vaultSheetToOpen }
+            Button("Freischalten …") { vaultSheet = model.vaultSheetToOpen }
                 .font(.caption)
         }
         .padding(.horizontal, 14)

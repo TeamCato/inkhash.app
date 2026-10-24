@@ -28,6 +28,8 @@ struct WorkspaceEditor: View {
     /// „Ende-zu-Ende verschlüsseln“: chosen once when the Kennel workspace is made, never switched (ADR 0082).
     @State private var encrypt = false
     @State private var vaultSheet: VaultSheet?
+    /// Made after setting up or unlocking: the sheet closes once that window is gone.
+    @State private var isCreatedEncrypted = false
     @State private var connecting = false
     @State private var newStorage = false
     /// „In Kennel ablegen …“ or „Anderer Speicher …“ of an existing workspace.
@@ -99,8 +101,7 @@ struct WorkspaceEditor: View {
             ToolbarItem(placement: .confirmationAction) {
                 Button(workspace == nil ? "Anlegen" : "Sichern") { save() }
                     .disabled(
-                        busy || name.trimmingCharacters(in: .whitespaces).isEmpty || (place == .kennel && storageID == nil)
-                            || (place == .kennel && encrypt && !vaultIsOpen))
+                        busy || name.trimmingCharacters(in: .whitespaces).isEmpty || (place == .kennel && storageID == nil))
             }
         }
         .fileExporter(
@@ -121,7 +122,10 @@ struct WorkspaceEditor: View {
             place = .kennel
             Task { await model.refreshKennel() }
         }
-        .sheet(item: $vaultSheet) { VaultSheetView(sheet: $0) }
+        // Setting up or unlocking on „Anlegen“, then the workspace is made in the same go (Kennel ADR 0065).
+        .sheet(item: $vaultSheet, onDismiss: { if isCreatedEncrypted { dismiss() } }) {
+            VaultSheetView(sheet: $0) { await createEncrypted() }
+        }
         .sheet(isPresented: $newStorage) {
             NewStorageSheet { storageID = $0.id }
         }
@@ -270,28 +274,14 @@ struct WorkspaceEditor: View {
         return false
     }
 
-    /// „Ende-zu-Ende verschlüsseln“ for a new Kennel workspace; without an open vault it leads to the vault (ADR 0082).
-    @ViewBuilder
+    /// „Ende-zu-Ende verschlüsseln“ for a new Kennel workspace. A missing or locked key is set up or unlocked on „Anlegen“
+    /// (Kennel ADR 0065).
     private var encryptionSection: some View {
         Section {
             Toggle("Ende-zu-Ende verschlüsseln", isOn: $encrypt)
-            if encrypt {
-                switch model.vaultState {
-                case .none?:
-                    Button("Tresor anlegen …") { vaultSheet = .setUp }
-                case .needsKey?:
-                    Button("Tresor öffnen …") { vaultSheet = .open }
-                case .unknown?, .failed?:
-                    ProgressView().task { await model.checkVault() }
-                case .ready?, nil:
-                    EmptyView()
-                }
-            }
         } footer: {
             Text(
-                encrypt && !vaultIsOpen
-                    ? "Dafür brauchst du einen Tresor. Er gilt für alle teamCato-Apps; den Wiederherstellungsschlüssel erzeugt inkhash beim Anlegen und zeigt ihn einmal."
-                    : "Nur deine Geräte können die Notizen lesen, Kennel nicht. Gilt nur beim Anlegen und lässt sich später nicht ändern."
+                "Nur deine Geräte können die Notizen lesen, Kennel nicht. Gilt nur beim Anlegen und lässt sich später nicht ändern. Fehlt noch ein Schlüssel, richtet „Anlegen“ ihn ein."
             )
         }
     }
@@ -381,10 +371,28 @@ struct WorkspaceEditor: View {
         }
     }
 
+    /// Makes the encrypted workspace; nil on success, else why not, also shown in the sheet.
+    private func createEncrypted() async -> String? {
+        let target = WorkspaceTarget.kennel(storageID: KennelStorages.storageID(storageID), sealed: true)
+        let problem = await model.createWorkspace(name: name, symbol: symbol, image: imageChanged ? image : nil, target: target)
+        failure = problem
+        isCreatedEncrypted = problem == nil
+        return problem
+    }
+
     private func save() {
         busy = true
         failure = nil
         Task {
+            if workspace == nil, place == .kennel, encrypt {
+                // Without a key or unlocked here, setting up or unlocking comes first, in the same go.
+                if !vaultIsOpen { await model.checkVault() }
+                guard vaultIsOpen else {
+                    busy = false
+                    vaultSheet = model.vaultSheetToOpen
+                    return
+                }
+            }
             if let workspace {
                 model.updateWorkspace(workspace.id, name: name, symbol: symbol)
                 if imageChanged { model.setWorkspaceImage(workspace.id, png: image) }
