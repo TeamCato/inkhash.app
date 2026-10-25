@@ -141,10 +141,10 @@ struct TextSettingsSection: View {
 /// "made by teamCato" at the foot of the settings, like in the other apps of the family. Links to the
 /// teamCato website.
 struct MadeByTeamCato: View {
-    @ScaledMetric(relativeTo: .footnote) private var logoHeight: CGFloat = 20
+    @ScaledMetric(relativeTo: .footnote) private var logoHeight: CGFloat = 12
 
     /// Fraction of the logo height where the "teamCato" wordmark sits on its baseline.
-    private nonisolated static let logoBaselineRatio: CGFloat = 0.79
+    private nonisolated static let logoBaselineRatio: CGFloat = 0.875
     private static let website = URL(string: "https://teamcato.de")!
 
     var body: some View {
