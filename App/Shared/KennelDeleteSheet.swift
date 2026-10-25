@@ -43,6 +43,7 @@ struct KennelDeleteSheet: View {
                 Button("Abbrechen") { dismiss() }
                     .keyboardShortcut(.cancelAction)
                     .buttonStyle(.bordered)
+                    .tint(Ink.accent)
                 Button(role: .destructive, action: delete) {
                     if busy {
                         ProgressView().controlSize(.small)
@@ -56,9 +57,15 @@ struct KennelDeleteSheet: View {
             }
         }
         .padding(24)
-        .frame(maxWidth: 460, alignment: .leading)
+        #if os(macOS)
+        .frame(width: 460, alignment: .leading)
+        #else
+        // The whole sheet is paper: a narrower frame showed as a second edge on the iPad.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .presentationDetents([.medium, .large])
+        .presentationBackground(Ink.paper)
+        #endif
         .background(Ink.paper)
-        .presentationDetents([.medium])
         .interactiveDismissDisabled(busy)
         .task { noteCount = await model.noteCount(of: remote) }
     }
@@ -69,7 +76,7 @@ struct KennelDeleteSheet: View {
     private var storageLine: String {
         let place = storage.map { "im Speicher „\($0)“" } ?? "in Kennel"
         let notes = switch noteCount {
-        case .none: "Seine Notizen und Bilder"
+        case .none, .some(0): "Seine Notizen und Bilder"
         case .some(1): "Seine eine Notiz und ihre Bilder"
         case .some(let count): "Seine \(count) Notizen und ihre Bilder"
         }

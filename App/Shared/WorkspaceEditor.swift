@@ -132,6 +132,13 @@ struct WorkspaceEditor: View {
         .sheet(item: $storageSheet) { mode in
             if let workspace { StorageSheet(workspace: workspace, mode: mode) }
         }
+        // Up here, not on the „Ort“ section: a refresh that rebuilds the section must not take the sheet with it.
+        .sheet(item: $kennelDelete) { remote in
+            KennelDeleteSheet(
+                remote: remote, storage: model.overview.storage(of: remote)?.name,
+                removesContent: model.overview.module?.workspacePurge == true
+            )
+        }
         .photosPicker(isPresented: $showsPhotos, selection: $photoItem, matching: .images)
         .onChange(of: photoItem) { _, item in
             guard let item else { return }
@@ -312,9 +319,6 @@ struct WorkspaceEditor: View {
                 Button("Nur noch hier") { model.keepOnlyHere(workspace.id) }
             } message: {
                 Text("Der Workspace gleicht nicht mehr ab. Seine Notizen bleiben auf diesem Gerät, die Kopie in Kennel bleibt dort.")
-            }
-            .sheet(item: $kennelDelete) { remote in
-                KennelDeleteSheet(remote: remote, storage: storage?.name, removesContent: model.overview.module?.workspacePurge == true)
             }
         }
     }
