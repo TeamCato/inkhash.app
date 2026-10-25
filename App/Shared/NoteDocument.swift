@@ -272,10 +272,14 @@ enum NoteDocument {
 final class MarkerLayoutManager: NSLayoutManager {
     /// Style of the empty last paragraph, drawn in the extra line fragment.
     var trailing = BlockStyle.paragraph
+    /// Where the open find bar matches, and the one it stands on. See ADR 0084.
+    var findMatches: [NSRange] = []
+    var findCurrent: NSRange?
 
     override func drawBackground(forGlyphRange glyphsToShow: NSRange, at origin: CGPoint) {
         super.drawBackground(forGlyphRange: glyphsToShow, at: origin)
         guard let storage = textStorage else { return }
+        drawFindMatches(in: glyphsToShow, origin: origin)
         let ns = storage.string as NSString
         let chars = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
         var cursor = chars.location < ns.length ? ns.paragraphRange(for: NSRange(location: chars.location, length: 0)).location : ns.length
@@ -526,6 +530,33 @@ final class MarkerLayoutManager: NSLayoutManager {
             UIBezierPath(rect: fill).fill()
             #endif
         }
+    }
+
+    /// Every match gets a soft mark, the current one a strong one. Not the highlighter's yellow, which is text.
+    private func drawFindMatches(in glyphsToShow: NSRange, origin: CGPoint) {
+        guard !findMatches.isEmpty, let container = textContainers.first else { return }
+        let characters = characterRange(forGlyphRange: glyphsToShow, actualGlyphRange: nil)
+        for match in findMatches where NSIntersectionRange(match, characters).length > 0 {
+            let glyphs = glyphRange(forCharacterRange: match, actualCharacterRange: nil)
+            guard glyphs.length > 0 else { continue }
+            (match == findCurrent ? Self.findCurrentColor : Self.findColor).setFill()
+            enumerateEnclosingRects(forGlyphRange: glyphs, withinSelectedGlyphRange: NSRange(location: NSNotFound, length: 0), in: container) { rect, _ in
+                let fill = rect.offsetBy(dx: origin.x, dy: origin.y).insetBy(dx: -2, dy: 0)
+                #if os(macOS)
+                NSBezierPath(roundedRect: fill, xRadius: 3, yRadius: 3).fill()
+                #else
+                UIBezierPath(roundedRect: fill, cornerRadius: 3).fill()
+                #endif
+            }
+        }
+    }
+
+    private static var findColor: PlatformColor {
+        PlatformColor(red: 0.306, green: 0.420, blue: 0.478, alpha: 0.18)
+    }
+
+    private static var findCurrentColor: PlatformColor {
+        PlatformColor(red: 0.914, green: 0.718, blue: 0.427, alpha: 0.9)
     }
 
     private static var mutedColor: PlatformColor {

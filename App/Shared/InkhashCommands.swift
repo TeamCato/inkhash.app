@@ -30,8 +30,16 @@ struct InkhashCommands: Commands {
             Button("Link…") { model.promptLink() }
                 .keyboardShortcut("k")
             Divider()
-            Button("Suchen") { model.focusSearch() }
+            Button(model.findsInNote ? "In der Notiz suchen" : "Suchen") { model.find() }
                 .keyboardShortcut("f")
+            Button("Weitersuchen") { model.sendFind(.next) }
+                .keyboardShortcut("g")
+                .disabled(!model.findsInNote)
+            Button("Rückwärts suchen") { model.sendFind(.previous) }
+                .keyboardShortcut("g", modifiers: [.command, .shift])
+                .disabled(!model.findsInNote)
+            Button("In allen Notizen suchen") { model.focusSearch() }
+                .keyboardShortcut("f", modifiers: [.command, .shift])
         }
     }
 }

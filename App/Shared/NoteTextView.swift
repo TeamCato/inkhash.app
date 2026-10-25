@@ -59,7 +59,8 @@ struct MacNoteText: NSViewRepresentable {
         view.textContainerInset = NSSize(width: 0, height: 2)
         view.isHorizontallyResizable = false
         view.isVerticallyResizable = false
-        view.usesFindBar = true
+        // Finding has a bar of its own over the note, see ADR 0084.
+        view.usesFindBar = false
         let engine = EditorEngine(host: view, blocks: session.initialBlocks, source: session.excerptSource)
         engine.session = session
         view.engine = engine
@@ -152,6 +153,23 @@ final class InkNoteTextView: NSTextView, EditorHost {
     func reveal(_ rect: CGRect) {
         // Some room below, so a menu under the cursor has a line to start in.
         scrollToVisible(rect.insetBy(dx: 0, dy: -24))
+    }
+
+    /// The system's find commands open the note's own find bar. See ADR 0084.
+    override func performTextFinderAction(_ sender: Any?) {
+        guard let finder = engine?.session?.finder,
+              let tag = (sender as? NSValidatedUserInterfaceItem)?.tag,
+              let action = NSTextFinder.Action(rawValue: tag) else { return super.performTextFinderAction(sender) }
+        switch action {
+        case .nextMatch: finder.next()
+        case .previousMatch: finder.previous()
+        case .hideFindInterface: finder.close()
+        default: finder.open()
+        }
+    }
+
+    override func performFindPanelAction(_ sender: Any?) {
+        performTextFinderAction(sender)
     }
 
     /// Plain text only. Formatting from other apps would bring fonts the note cannot store.

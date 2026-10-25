@@ -39,4 +39,44 @@ final class MacEditorTests: XCTestCase {
         try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: "/tmp/inkhash-mac-editor.png"))
         print("CARET line1", engine.caretRect(0), "mid", engine.caretRect(3), "line2", engine.caretRect(9))
     }
+
+    /// Finding marks every match, the current one strongest, and leaves it selected on close. See ADR 0084.
+    func testFindMarksMatchesAndSelectsCurrentOnClose() throws {
+        open("""
+        # Einkauf
+        Äpfel und Birnen, dazu noch äpfel
+        - Apfelsaft
+
+        """)
+        let finder = NoteFinder()
+        finder.engine = engine
+        view.setSelectedRange(NSRange(location: 0, length: 0))
+        finder.open()
+        finder.setQuery("apfel")
+        XCTAssertEqual(finder.find?.matches.count, 3)
+        XCTAssertEqual(view.markers.findMatches.count, 3)
+        finder.next()
+        XCTAssertEqual(finder.find?.countLabel, "2 von 3")
+        let current = try XCTUnwrap(view.markers.findCurrent)
+        XCTAssertEqual((view.string as NSString).substring(with: current), "äpfel")
+        view.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: "/tmp/inkhash-mac-find.png"))
+        finder.close()
+        XCTAssertTrue(view.markers.findMatches.isEmpty)
+        XCTAssertEqual(view.selectedRange(), current)
+        XCTAssertFalse(finder.isOpen)
+    }
+
+    /// A selected word becomes the query when the bar opens.
+    func testFindStartsWithTheSelection() {
+        open("Treffen am Montag, Treffen am Freitag\n")
+        let finder = NoteFinder()
+        finder.engine = engine
+        view.setSelectedRange(NSRange(location: 0, length: 7))
+        finder.open()
+        XCTAssertEqual(finder.find?.query, "Treffen")
+        XCTAssertEqual(finder.find?.countLabel, "1 von 2")
+    }
 }

@@ -10,7 +10,11 @@ final class TextSession {
     private let model: AppModel
     /// What the editor starts with. Not kept in sync; the editor owns the text after that.
     let initialBlocks: [Block]
-    @ObservationIgnored weak var engine: EditorEngine?
+    @ObservationIgnored weak var engine: EditorEngine? {
+        didSet { finder.engine = engine }
+    }
+    /// Finding in this note. See ADR 0084.
+    let finder = NoteFinder()
     /// The text view's undo steps, for the buttons in the bar. See ADR 0059.
     let history = UndoHistory()
     var state = EditorState()
@@ -56,6 +60,7 @@ final class TextSession {
     func commit(_ blocks: [Block]) {
         model.library.updateMarkdown(id: noteID, markdown: MarkdownCodec.serialize(blocks))
         version += 1
+        finder.textChanged()
     }
 
     /// The text kept its content but not its height, as after a change of the text size.

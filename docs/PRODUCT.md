@@ -37,6 +37,8 @@ Sie durchsucht Titel, Text und die Abschrift der Handschrift. Sie besteht nicht 
 
 Sie versteht keine Synonyme. „Auto“ findet nicht „Wagen“. Dafür wäre ein Modell nötig, und das ist ein anderes Produkt.
 
+In einer offenen Textnotiz sucht Cmd+F im Text dieser Notiz: Treffer werden markiert, Return und Cmd+G springen weiter, Shift zurück (ADR 0084). Shift+Cmd+F geht immer in die Bibliothek.
+
 ## Schlagwörter in der Handschrift
 
 Nach dem Schreiben liest das Gerät die Seite mit der Apple-Texterkennung, auf dem Gerät, ohne Sprachkorrektur, damit seltene Wörter nicht weggebügelt werden. Die Abschrift und die Schlagwörter liegen als Text an der Notiz und wandern mit ihr auf den Server, falls es einen gibt. Der Server sieht die Striche nicht.

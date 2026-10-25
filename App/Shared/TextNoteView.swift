@@ -56,6 +56,14 @@ struct TextNoteView: View {
                 .frame(maxWidth: 760, alignment: .top)
                 .frame(maxWidth: .infinity)
         }
+        .safeAreaInset(edge: .top, spacing: 0) {
+            if session.finder.isOpen {
+                NoteFindBar(finder: session.finder)
+                    .padding(.horizontal, 16)
+                    .padding(.vertical, 8)
+                    .frame(maxWidth: .infinity)
+            }
+        }
         // The text view keeps the cursor in sight itself (`EditorHost.reveal`); a scroll proxy from
         // SwiftUI threw the note to the top. See PITFALLS P-062.
         // A text note has a colour only, no pattern. See ADR 0042.
@@ -87,6 +95,14 @@ struct TextNoteView: View {
         }
         .onChange(of: model.inlineImpulse) { _, impulse in
             if let impulse { session.toggleInline(impulse.action) }
+        }
+        .onChange(of: model.findImpulse) { _, impulse in
+            guard let impulse else { return }
+            switch impulse.step {
+            case .open: session.finder.open()
+            case .next: session.finder.next()
+            case .previous: session.finder.previous()
+            }
         }
         // A new font or size from the settings applies to the open note at once. See ADR 0061.
         .onChange(of: family) { _, _ in session.engine?.textSizeChanged() }

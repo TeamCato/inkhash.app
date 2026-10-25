@@ -18,6 +18,18 @@ enum EditorAction: Equatable {
     case setLink(String?)
 }
 
+/// What Cmd+F, Cmd+G and Cmd+Shift+G ask of the open text note. See ADR 0084.
+enum FindStep: Equatable {
+    case open
+    case next
+    case previous
+}
+
+struct FindImpulse: Equatable {
+    var token: Int
+    var step: FindStep
+}
+
 struct EditorImpulse: Equatable {
     var token: Int
     var action: EditorAction
@@ -68,6 +80,7 @@ final class AppModel {
     var editorEpoch = 0
     var searchFocusToken = 0
     var inlineImpulse: EditorImpulse?
+    var findImpulse: FindImpulse?
     /// Bumped by Cmd+K: the open note shows its link field for the selection.
     var linkPromptToken = 0
     /// Set by the menu; the sidebar shows the file picker and clears it. See ADR 0024 and 0041.
@@ -147,6 +160,26 @@ final class AppModel {
 
     func focusSearch() {
         searchFocusToken += 1
+    }
+
+    /// A text note fills the detail: Cmd+F finds in it instead of the library. See ADR 0084.
+    var findsInNote: Bool {
+        guard !showsTasks, let selectedID else { return false }
+        return library.record(selectedID)?.note.kind == .text
+    }
+
+    /// Cmd+F: in the open text note, otherwise in the library.
+    func find() {
+        if findsInNote {
+            sendFind(.open)
+        } else {
+            focusSearch()
+        }
+    }
+
+    func sendFind(_ step: FindStep) {
+        impulseToken += 1
+        findImpulse = FindImpulse(token: impulseToken, step: step)
     }
 
     func sendInline(_ action: EditorAction) {
