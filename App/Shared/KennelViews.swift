@@ -111,6 +111,9 @@ struct KennelSettingsView: View {
             editing = model.overview.storages.first { $0.id == summary.id }
         }
         let changePassword = only(signedIn) { password = true }
+        let invite = model.kennel.flatMap { model.sessions.session(of: $0.id)?.invitePage }.map { page in
+            { @MainActor in openURL(page) }
+        }
         return KennelSettingsPage(
             connection: connection,
             connect: { connecting = true },
@@ -120,6 +123,7 @@ struct KennelSettingsView: View {
             newStorage: newStorageAction,
             editStorage: editStorage,
             changePassword: changePassword,
+            invite: invite,
             disconnect: { model.disconnect() },
             disconnectConsequence: AppModel.disconnectConsequence,
             notConnectedText: "inkhash funktioniert ohne Kennel. Mit Kennel gleichst du Workspaces zwischen deinen Geräten ab und legst sie in den Speichern deines Haushalts ab.",
