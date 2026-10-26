@@ -53,3 +53,13 @@ Direkt auf `main` arbeiten. Keine Pull Requests, Dominik merged nicht selbst (te
 ## Sprache
 
 Oberfläche Deutsch. Code, Typen und Commits Englisch.
+
+## Nach Tests aufräumen
+
+Gilt für jede Arbeit in diesem Repo (teamCato `docs/CONVENTIONS.md`):
+
+- Jeden Simulator, den du für Tests, Vorschau oder Screenshots bootest, fährst du danach wieder herunter (`xcrun simctl shutdown <UDID>`). Nur so viele gleichzeitig wie nötig, keiner bleibt über das Ende der Arbeit hinaus an.
+- Testdaten vergangener Tests räumst du weg: Testfotos in Simulator-Mediatheken, kopierte Fixtures, temporäre Ordner, Testserver und Container. Nie Testdaten in die echte Fotos-Mediathek des Macs.
+- Hintergrundprozesse wie Log-Streams, Dev-Server und Docker-Container stoppst du, wenn die Arbeit fertig ist.
+
+Warum: Laufende Simulatoren schreiben ständig Bilder, Spotlight lässt sie von `mediaanalysisd` auswerten, und das hat am 26.10.2026 Dominiks Mac lahmgelegt.
