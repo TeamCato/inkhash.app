@@ -40,6 +40,40 @@ final class MacEditorTests: XCTestCase {
         print("CARET line1", engine.caretRect(0), "mid", engine.caretRect(3), "line2", engine.caretRect(9))
     }
 
+    private var markdown: String {
+        MarkdownCodec.serialize(NoteDocument.blocks(from: view.textStorage!, trailing: .paragraph))
+    }
+
+    /// Tab indents list items, never more than one level below the item above; Shift-Tab, Return and Backspace on an
+    /// empty nested item move it out. See ADR 0086.
+    func testTabIndentsListItems() throws {
+        open("- eins\n- zwei\n- drei\n")
+        let ns = view.string as NSString
+        let zwei = ns.range(of: "zwei").location
+        view.setSelectedRange(NSRange(location: zwei, length: 0))
+        view.insertTab(nil)
+        view.insertTab(nil)
+        XCTAssertEqual(markdown, "- eins\n  - zwei\n- drei\n")
+        view.setSelectedRange(NSRange(location: (view.string as NSString).range(of: "drei").location, length: 0))
+        view.insertTab(nil)
+        view.insertTab(nil)
+        XCTAssertEqual(markdown, "- eins\n  - zwei\n    - drei\n")
+        view.layoutSubtreeIfNeeded()
+        let rep = try XCTUnwrap(view.bitmapImageRepForCachingDisplay(in: view.bounds))
+        view.cacheDisplay(in: view.bounds, to: rep)
+        try XCTUnwrap(rep.representation(using: .png, properties: [:])).write(to: URL(fileURLWithPath: "/tmp/inkhash-mac-nested.png"))
+        view.insertBacktab(nil)
+        XCTAssertEqual(markdown, "- eins\n  - zwei\n  - drei\n")
+        XCTAssertFalse(view.string.contains("\t"))
+    }
+
+    func testTabOutsideAListDoesNothing() {
+        open("Absatz\n")
+        view.setSelectedRange(NSRange(location: 3, length: 0))
+        view.insertTab(nil)
+        XCTAssertEqual(markdown, "Absatz\n")
+    }
+
     /// Finding marks every match, the current one strongest, and leaves it selected on close. See ADR 0084.
     func testFindMarksMatchesAndSelectsCurrentOnClose() throws {
         open("""

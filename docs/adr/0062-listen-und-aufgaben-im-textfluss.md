@@ -1,6 +1,6 @@
 # 0062 Listen und Aufgaben im Textfluss
 
-Status: angenommen
+Status: angenommen. Verschachtelte Listen erlaubt durch 0086.
 
 Ändert 0025 (Marker im linken Einzug). Ergänzt 0060 (Fälligkeit).
 

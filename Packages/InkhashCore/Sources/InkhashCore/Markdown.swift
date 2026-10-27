@@ -112,6 +112,11 @@ public struct Block: Equatable, Sendable, Identifiable {
     public var language: String
     /// On the first row of a table: how the table looks. See ADR 0036.
     public var table: TableFormat?
+    /// How deep a list item stands, 0 to `maxIndent`; always 0 for anything else. See ADR 0086.
+    public var indent: Int
+
+    /// Deepest level of a nested list item.
+    public static let maxIndent = 4
 
     public init(
         id: UUID = UUID(),
@@ -119,7 +124,8 @@ public struct Block: Equatable, Sendable, Identifiable {
         spans: [InlineSpan],
         checked: Bool = false,
         language: String = "",
-        table: TableFormat? = nil
+        table: TableFormat? = nil,
+        indent: Int = 0
     ) {
         self.id = id
         self.type = type
@@ -127,6 +133,12 @@ public struct Block: Equatable, Sendable, Identifiable {
         self.checked = checked
         self.language = language
         self.table = table
+        self.indent = Block.isListItem(type) ? min(max(indent, 0), Block.maxIndent) : 0
+    }
+
+    /// Bullet, numbered and checkbox items; only they nest.
+    public static func isListItem(_ type: BlockType) -> Bool {
+        type == .bullet || type == .numbered || type == .checkbox
     }
 
     public var plain: String { spans.map(\.text).joined() }
@@ -160,9 +172,15 @@ public enum MarkdownCodec {
         }
         let lines = text.components(separatedBy: "\n")
         var blocks: [Block] = []
+        var nesting = ListNesting()
         var index = 0
         while index < lines.count {
             let line = lines[index]
+            if line.trimmingCharacters(in: .whitespaces).isEmpty {
+                index += 1
+                continue
+            }
+            if !isListLine(line) { nesting = ListNesting() }
             if line.trimmingCharacters(in: .whitespaces).hasPrefix("```") {
                 let fence = line.trimmingCharacters(in: .whitespaces)
                 let language = String(fence.dropFirst(3)).trimmingCharacters(in: .whitespaces)
@@ -194,7 +212,11 @@ public enum MarkdownCodec {
                 if style != .plain { blocks[first].table = style }
                 continue
             }
-            blocks.append(parseLine(line))
+            var block = parseLine(line)
+            if Block.isListItem(block.type) {
+                block.indent = nesting.level(of: line)
+            }
+            blocks.append(block)
             index += 1
         }
         if blocks.isEmpty {
@@ -207,9 +229,13 @@ public enum MarkdownCodec {
         struct Piece {
             var text: String
             var list: BlockType?
+            /// A nested list item: it belongs to the list above whatever its type.
+            var nested = false
         }
         var pieces: [Piece] = []
         var number = 0
+        /// Per level of the list being written: its next number and where its items' text begins. See ADR 0086.
+        var levels: [(number: Int, content: Int)] = []
         var tableColumns = 0
         var tableStyle = TableFormat.plain
         for (offset, block) in blocks.enumerated() {
@@ -237,6 +263,26 @@ public enum MarkdownCodec {
                 continue
             }
             let inline = serializeInline(block.spans)
+            if Block.isListItem(block.type) {
+                // A nested item stands under the text of its parent, as Markdown wants it; never deeper than one
+                // level below the item before.
+                let level = min(block.indent, levels.count)
+                levels.removeSubrange(min(level + 1, levels.count)...)
+                let column = level == 0 ? 0 : levels[level - 1].content
+                if levels.count == level { levels.append((number: 0, content: 0)) }
+                if block.type == .numbered { levels[level].number += 1 } else { levels[level].number = 0 }
+                let marker = switch block.type {
+                case .numbered: "\(levels[level].number). "
+                case .checkbox: "- [\(block.checked ? "x" : " ")] "
+                default: "- "
+                }
+                // The text of a task begins after `- `: the box belongs to it.
+                levels[level].content = column + (block.type == .numbered ? marker.count : 2)
+                let pad = String(repeating: " ", count: column)
+                pieces.append(Piece(text: pad + marker + inline, list: block.type, nested: level > 0))
+                continue
+            }
+            levels = []
             switch block.type {
             case .heading1:
                 number = 0
@@ -273,7 +319,10 @@ public enum MarkdownCodec {
         guard !pieces.isEmpty else { return "" }
         var output = pieces[0].text
         for index in 1..<pieces.count {
-            let sameList = pieces[index].list != nil && pieces[index].list == pieces[index - 1].list
+            let isList = { (piece: Piece) in piece.list.map(Block.isListItem) ?? false }
+            let nestedList = isList(pieces[index]) && isList(pieces[index - 1])
+                && (pieces[index].nested || pieces[index - 1].nested)
+            let sameList = nestedList || (pieces[index].list != nil && pieces[index].list == pieces[index - 1].list)
             output += sameList ? "\n" : "\n\n"
             output += pieces[index].text
         }
@@ -383,8 +432,8 @@ public enum MarkdownCodec {
         case .bullet, .numbered, .checkbox, .code, .tableRow: block.type
         case .heading1, .heading2, .heading3, .paragraph, .excerpt: .paragraph
         }
-        let left = Block(id: block.id, type: block.type, spans: leftSpans, checked: block.checked, language: block.language)
-        let right = Block(type: rightType, spans: rightSpans, checked: false, language: block.language)
+        let left = Block(id: block.id, type: block.type, spans: leftSpans, checked: block.checked, language: block.language, indent: block.indent)
+        let right = Block(type: rightType, spans: rightSpans, checked: false, language: block.language, indent: block.indent)
         return (left, right)
     }
 
@@ -529,6 +578,28 @@ public enum MarkdownCodec {
         guard let (label, target, length) = linkAt(ns, 1, ns.length), length == ns.length - 1,
               let excerpt = ExcerptTarget(target: target) else { return nil }
         return excerptBlock(excerpt, label: parseInline(label).plain)
+    }
+
+    /// Where nested list items stand while parsing: each open item's column and where its text begins. An item that
+    /// begins at or right of its parent's text is its child (ADR 0086).
+    private struct ListNesting {
+        var open: [(column: Int, content: Int)] = []
+
+        mutating func level(of line: String) -> Int {
+            let column = line.prefix(while: { $0 == " " || $0 == "\t" }).reduce(0) { $0 + ($1 == "\t" ? 4 : 1) }
+            // Items this line does not stand inside of are done.
+            while let last = open.last, column < last.content { open.removeLast() }
+            let level = min(open.count, Block.maxIndent)
+            let trimmed = line.drop(while: { $0 == " " || $0 == "\t" })
+            let marker = trimmed.prefix(while: \.isNumber).count
+            let width = marker > 0 && trimmed.dropFirst(marker).first == "." ? marker + 2 : 2
+            open.append((column: column, content: column + width))
+            return level
+        }
+    }
+
+    private static func isListLine(_ line: String) -> Bool {
+        Block.isListItem(parseLine(line).type)
     }
 
     private static func parseLine(_ line: String) -> Block {

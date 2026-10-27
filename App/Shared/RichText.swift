@@ -431,6 +431,8 @@ extension NSAttributedString.Key {
     /// On the `📅 JJJJ-MM-TT` of a task: the day. The layout manager draws a capsule there instead. See ADR 0062.
     static let inkhashDue = NSAttributedString.Key("inkhash.due")
     static let inkhashLanguage = NSAttributedString.Key("inkhash.language")
+    /// Level of a nested list item. See ADR 0086.
+    static let inkhashIndent = NSAttributedString.Key("inkhash.indent")
     /// Column count of the table a row belongs to; the layout manager draws the grid from it.
     static let inkhashTableColumns = NSAttributedString.Key("inkhash.tableColumns")
     /// On the first row of a table: its `TableFormat`, boxed. See ADR 0036.

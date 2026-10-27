@@ -14,14 +14,17 @@ struct BlockStyle: Equatable {
     var language = ""
     /// Only on the first row of a styled table. See ADR 0036.
     var table: TableFormat?
+    /// Level of a nested list item, 0 for everything else. See ADR 0086.
+    var indent = 0
 
     static let paragraph = BlockStyle(type: .paragraph)
 
-    init(type: BlockType, checked: Bool = false, language: String = "", table: TableFormat? = nil) {
+    init(type: BlockType, checked: Bool = false, language: String = "", table: TableFormat? = nil, indent: Int = 0) {
         self.type = type
         self.checked = checked
         self.language = language
         self.table = table
+        self.indent = Block.isListItem(type) ? min(max(indent, 0), Block.maxIndent) : 0
     }
 
     init(_ attributes: [NSAttributedString.Key: Any]) {
@@ -29,10 +32,11 @@ struct BlockStyle: Equatable {
         checked = attributes[.inkhashChecked] as? Bool ?? false
         language = attributes[.inkhashLanguage] as? String ?? ""
         table = type == .tableRow ? (attributes[.inkhashTable] as? TableFormatBox)?.style : nil
+        indent = Block.isListItem(type) ? attributes[.inkhashIndent] as? Int ?? 0 : 0
     }
 
     init(_ block: Block) {
-        self.init(type: block.type, checked: block.checked, language: block.language, table: block.table)
+        self.init(type: block.type, checked: block.checked, language: block.language, table: block.table, indent: block.indent)
     }
 
     var attributes: [NSAttributedString.Key: Any] {
@@ -40,13 +44,19 @@ struct BlockStyle: Equatable {
             .inkhashBlockType: type.rawValue,
             .inkhashChecked: checked,
             .inkhashLanguage: language,
-            .paragraphStyle: NoteDocument.paragraphStyle(type),
+            .inkhashIndent: indent,
+            .paragraphStyle: NoteDocument.paragraphStyle(type, indent: indent),
         ]
         if let table { result[.inkhashTable] = TableFormatBox(table) }
         return result
     }
 
-    var hasMarker: Bool { type == .bullet || type == .numbered || type == .checkbox }
+    var hasMarker: Bool { Block.isListItem(type) }
+
+    /// The same item one level deeper or shallower, within the bounds.
+    func indented(by step: Int) -> BlockStyle {
+        BlockStyle(type: type, checked: checked, language: language, table: table, indent: indent + step)
+    }
 }
 
 /// Converts between the blocks of a note and the one attributed text the editor shows. See ADR 0025.
@@ -66,10 +76,15 @@ enum NoteDocument {
         }
     }
 
-    static func paragraphStyle(_ type: BlockType) -> NSParagraphStyle {
+    /// How far one level of a nested list item moves right: its marker then stands under the parent's text.
+    static func levelOffset(_ indent: Int) -> CGFloat {
+        CGFloat(indent) * EditorFont.scaled(24)
+    }
+
+    static func paragraphStyle(_ type: BlockType, indent: Int = 0) -> NSParagraphStyle {
         let style = NSMutableParagraphStyle()
-        style.firstLineHeadIndent = gutter + listIndent(type)
-        style.headIndent = gutter + listIndent(type)
+        style.firstLineHeadIndent = gutter + levelOffset(indent) + listIndent(type)
+        style.headIndent = gutter + levelOffset(indent) + listIndent(type)
         style.lineSpacing = EditorFont.lineSpacing(for: type)
         style.paragraphSpacingBefore = EditorFont.scaled(spacingBefore(type))
         return style
@@ -220,7 +235,7 @@ enum NoteDocument {
                 return
             }
             let spans = RichText.spans(from: text.attributedSubstring(from: content), type: style.type)
-            blocks.append(Block(type: style.type, spans: spans, checked: style.checked, table: style.table))
+            blocks.append(Block(type: style.type, spans: spans, checked: style.checked, table: style.table, indent: style.indent))
             previousWasCode = false
         }
 
@@ -308,15 +323,23 @@ final class MarkerLayoutManager: NSLayoutManager {
         }
     }
 
-    /// 1 for the first of a run of numbered paragraphs. Matches how the codec numbers them.
+    /// 1 for the first of a run of numbered paragraphs at one level; deeper items in between do not end the run.
+    /// Matches how the codec numbers them (ADR 0086).
     private func number(endingAt location: Int, in storage: NSTextStorage) -> Int {
         let ns = storage.string as NSString
+        let level = location < ns.length
+            ? BlockStyle(storage.attributes(at: ns.paragraphRange(for: NSRange(location: location, length: 0)).location, effectiveRange: nil)).indent
+            : trailing.indent
         var count = 1
         var cursor = location
         while cursor > 0 {
             let previous = ns.paragraphRange(for: NSRange(location: cursor - 1, length: 0))
-            guard BlockStyle(storage.attributes(at: previous.location, effectiveRange: nil)).type == .numbered else { break }
-            count += 1
+            let style = BlockStyle(storage.attributes(at: previous.location, effectiveRange: nil))
+            guard style.hasMarker, style.indent >= level else { break }
+            if style.indent == level {
+                guard style.type == .numbered else { break }
+                count += 1
+            }
             cursor = previous.location
         }
         return count
@@ -325,7 +348,7 @@ final class MarkerLayoutManager: NSLayoutManager {
     /// Markers stand where paragraphs begin; the item's text starts one step right of them. See ADR 0062.
     private func drawMarker(_ style: BlockStyle, number: Int, baseline: CGFloat, origin: CGPoint) {
         let size = EditorFont.size(for: style.type)
-        let start = origin.x + NoteDocument.gutter
+        let start = origin.x + NoteDocument.gutter + NoteDocument.levelOffset(style.indent)
         let text = start + NoteDocument.listIndent(style.type)
         let y = origin.y + baseline
         switch style.type {

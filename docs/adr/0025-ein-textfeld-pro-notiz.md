@@ -1,6 +1,6 @@
 # 0025 Ein Textfeld pro Notiz
 
-Status: angenommen. Lage der Marker geändert durch 0062.
+Status: angenommen. Lage der Marker geändert durch 0062, verschachtelte Listen durch 0086.
 
 Ändert 0018 (Text) und 0023. Das Speicherformat aus 0004 bleibt.
 

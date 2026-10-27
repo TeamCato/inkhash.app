@@ -222,6 +222,8 @@ final class EditorEngine {
                 return false
             }
         } else if text == "\t" {
+            // Tab in a list item indents it; a note has no tab characters elsewhere (ADR 0086).
+            indent(by: 1)
             return false
         }
         pendingRange = NSRange(location: range.location, length: (text as NSString).length)
@@ -276,6 +278,11 @@ final class EditorEngine {
         if currentStyle.type == .paragraph, range.length == 0, startTable(current) {
             return false
         }
+        if range.length == 0, contentRange.length == 0, currentStyle.hasMarker, currentStyle.indent > 0 {
+            // Return on an empty nested item moves it out one level, as Shift-Tab does (ADR 0086).
+            setStyle(currentStyle.indented(by: -1), of: current)
+            return false
+        }
         if range.length == 0, contentRange.length == 0, currentStyle.hasMarker || currentStyle.type == .code {
             setStyle(.paragraph, of: current)
             return false
@@ -290,8 +297,9 @@ final class EditorEngine {
         } else {
             upper = currentStyle
             switch currentStyle.type {
-            case .bullet, .numbered, .code: below = BlockStyle(type: currentStyle.type, language: currentStyle.language)
-            case .checkbox: below = BlockStyle(type: .checkbox)
+            case .bullet, .numbered: below = BlockStyle(type: currentStyle.type, indent: currentStyle.indent)
+            case .code: below = BlockStyle(type: currentStyle.type, language: currentStyle.language)
+            case .checkbox: below = BlockStyle(type: .checkbox, indent: currentStyle.indent)
             default: below = .paragraph
             }
         }
@@ -347,8 +355,44 @@ final class EditorEngine {
             publish()
             return true
         }
+        if currentStyle.hasMarker, currentStyle.indent > 0 {
+            // A nested item moves out one level first (ADR 0086).
+            setStyle(currentStyle.indented(by: -1), of: current)
+            return true
+        }
         setStyle(.paragraph, of: current)
         return true
+    }
+
+    // MARK: Nested lists
+
+    /// Whether Tab or Shift-Tab means something here: the cursor or selection touches a list item.
+    var canIndent: Bool {
+        paragraphs(in: host.selection).contains { style(of: $0).hasMarker }
+    }
+
+    /// Tab (`step` 1) or Shift-Tab (-1) on every list item the selection touches. An item goes at most one level
+    /// deeper than the item above it, so a list never skips a level (ADR 0086). True if something changed.
+    @discardableResult
+    func indent(by step: Int) -> Bool {
+        let selection = host.selection
+        var changed = false
+        for paragraph in paragraphs(in: selection) {
+            let current = style(of: paragraph)
+            guard current.hasMarker else { continue }
+            var next = current.indented(by: step)
+            if step > 0 {
+                let above = paragraph.location > 0 ? style(of: self.paragraph(at: paragraph.location - 1)) : .paragraph
+                let limit = above.hasMarker ? above.indent + 1 : 0
+                next.indent = min(next.indent, limit)
+            }
+            guard next.indent != current.indent else { continue }
+            setStyle(next, of: paragraph)
+            changed = true
+        }
+        host.selection = selection
+        if changed { updateState() }
+        return changed
     }
 
     // MARK: Commands from the sheet
@@ -356,7 +400,7 @@ final class EditorEngine {
     func setType(_ type: BlockType) {
         let selection = host.selection
         for paragraph in paragraphs(in: selection).reversed() where style(of: paragraph).type != type && !hasExcerpt(paragraph) {
-            setStyle(BlockStyle(type: type), of: paragraph)
+            setStyle(BlockStyle(type: type, indent: style(of: paragraph).indent), of: paragraph)
         }
         host.selection = selection
         host.focus()
@@ -502,7 +546,8 @@ final class EditorEngine {
     func checkbox(at point: CGPoint) -> NSRange? {
         let local = CGPoint(x: point.x - host.containerOrigin.x, y: point.y - host.containerOrigin.y)
         // The box stands where paragraphs begin, before the task's text. See ADR 0062.
-        guard local.x >= NoteDocument.gutter - 8, local.x < NoteDocument.gutter + NoteDocument.listIndent(.checkbox) else { return nil }
+        let widest = NoteDocument.gutter + NoteDocument.levelOffset(Block.maxIndent) + NoteDocument.listIndent(.checkbox)
+        guard local.x >= NoteDocument.gutter - 8, local.x < widest else { return nil }
         let layout = host.markers
         layout.ensureLayout(for: host.container)
         let extra = layout.extraLineFragmentRect
@@ -515,7 +560,11 @@ final class EditorEngine {
         guard local.y >= fragment.minY, local.y <= fragment.maxY else { return nil }
         let character = layout.characterIndexForGlyph(at: glyph)
         let found = paragraph(at: character)
-        guard style(of: found).type == .checkbox else { return nil }
+        let foundStyle = style(of: found)
+        guard foundStyle.type == .checkbox else { return nil }
+        // A nested task's box stands one step right per level (ADR 0086).
+        let box = NoteDocument.gutter + NoteDocument.levelOffset(foundStyle.indent)
+        guard local.x >= box - 8, local.x < box + NoteDocument.listIndent(.checkbox) else { return nil }
         // Only the first line of a paragraph carries its marker.
         let first = layout.lineFragmentRect(forGlyphAt: layout.glyphIndexForCharacter(at: found.location), effectiveRange: nil)
         return first.minY == fragment.minY ? found : nil
@@ -835,7 +884,7 @@ final class EditorEngine {
         if current.length == 0 || ns.length == 0 {
             // The empty last line: its fragment holds no glyph to measure.
             let fragment = layout.extraLineFragmentRect
-            let x = NoteDocument.gutter + NoteDocument.listIndent(currentStyle.type)
+            let x = NoteDocument.gutter + NoteDocument.levelOffset(currentStyle.indent) + NoteDocument.listIndent(currentStyle.type)
             let top = fragment.maxY - EditorFont.lineSpacing(for: currentStyle.type) - height
             return CGRect(x: x, y: top, width: 1, height: height).offsetBy(dx: origin.x, dy: origin.y)
         }

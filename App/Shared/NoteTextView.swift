@@ -252,10 +252,18 @@ final class InkNoteTextView: NSTextView, EditorHost {
         super.cancelOperation(sender)
     }
 
-    /// Tab moves between table cells; elsewhere it does nothing, a note has no tab characters.
+    /// Tab moves between table cells and indents list items (ADR 0086); elsewhere it does nothing, a note has no tab
+    /// characters.
     override func insertTab(_ sender: Any?) {
-        guard let engine, engine.isInTable else { return }
-        super.insertTab(sender)
+        guard let engine else { return }
+        if engine.isInTable { return super.insertTab(sender) }
+        engine.indent(by: 1)
+    }
+
+    /// Shift-Tab moves list items out one level; elsewhere it leaves the text view as usual.
+    override func insertBacktab(_ sender: Any?) {
+        guard let engine, engine.canIndent else { return super.insertBacktab(sender) }
+        engine.indent(by: -1)
     }
 
     override func mouseDown(with event: NSEvent) {
@@ -536,9 +544,17 @@ final class InkNoteTextView: UITextView, EditorHost {
             commands.append(UIKeyCommand(input: UIKeyCommand.inputDownArrow, modifierFlags: [], action: #selector(slashDown)))
             commands.append(UIKeyCommand(input: UIKeyCommand.inputEscape, modifierFlags: [], action: #selector(slashEscape)))
         }
+        if engine?.canIndent == true {
+            // Tab and Shift-Tab indent list items instead of moving the focus (ADR 0086).
+            commands.append(UIKeyCommand(input: "\t", modifierFlags: [], action: #selector(indentIn)))
+            commands.append(UIKeyCommand(input: "\t", modifierFlags: .shift, action: #selector(indentOut)))
+        }
         for command in commands { command.wantsPriorityOverSystemBehavior = true }
         return commands + (super.keyCommands ?? [])
     }
+
+    @objc private func indentIn() { engine?.indent(by: 1) }
+    @objc private func indentOut() { engine?.indent(by: -1) }
 
     @objc private func returnPressed() {
         guard let engine else { return insertText("\n") }
