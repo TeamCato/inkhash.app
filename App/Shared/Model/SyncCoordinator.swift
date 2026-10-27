@@ -180,7 +180,7 @@ final class SyncCoordinator {
                     guard let self, workspace.id == self.registry.current.id else { return }
                     self.library.synced(note, meta: meta)
                 }
-                if let message = describe(report), isCurrent { status.message = message }
+                if let message = describe(report, store: store), isCurrent { status.message = message }
                 if try await converter.finish(workspace, report: report, client: client, key: key) { again = true }
             } catch let error where WorkspaceConverter.endsTheRound(error) {
                 throw error
@@ -226,14 +226,27 @@ final class SyncCoordinator {
             : "\(unlinked.count) Workspaces gibt es in Kennel nicht mehr. Sie bleiben auf diesem Gerät."
     }
 
-    /// Notes Kennel refused or that are in conflict; nil when all went well.
-    private func describe(_ report: SyncReport) -> String? {
+    /// Notes Kennel refused or that are in conflict, with Kennel's reason; nil when all went well.
+    private func describe(_ report: SyncReport, store: LocalStore) -> String? {
         if let first = report.rejected.first {
-            let title = library.record(first)?.note.displayTitle ?? Note.untitled
+            let title = (try? store.note(id: first))?.displayTitle ?? Note.untitled
+            let why = Set(report.reasons.values).sorted().map(Self.explain).joined(separator: "; ")
+            let suffix = why.isEmpty ? "" : " (\(why))"
             return report.rejected.count == 1
-                ? "Kennel lehnt „\(title)“ ab."
-                : "Kennel lehnt \(report.rejected.count) Notizen ab, darunter „\(title)“."
+                ? "Kennel lehnt „\(title)“ ab\(suffix)."
+                : "Kennel lehnt \(report.rejected.count) Notizen ab, darunter „\(title)“\(suffix)."
         }
         return report.conflicts > 0 ? "Konflikt mit Kennel." : nil
+    }
+
+    /// Kennel's reason for a refused note in words (Kennel ADR 0026, inkhash ADR 0052).
+    static func explain(_ reason: String) -> String {
+        switch reason {
+        case "plain": "der Workspace ist in Kennel unverschlüsselt"
+        case "sealed": "der Workspace ist in Kennel verschlüsselt"
+        case "no vault": "in Kennel ist keine Verschlüsselung eingerichtet"
+        case "too large", "too-large": "zu groß für Kennel"
+        default: reason
+        }
     }
 }

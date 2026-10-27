@@ -423,3 +423,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Nach dem Freischalten tragen alle alten Workspaces ein Schloss; ein Workspace, der in Kennel lesbar ist, wird abgelehnt („Kennel lehnt … ab“), oder ein Gerät verliert die Verknüpfung, nachdem ein anderes umgewandelt hat.
 **Ursache.** `WorkspaceLink.sealed` wurde beim Verknüpfen gesetzt (alte Links ohne Feld: verschlüsselt) und nie mit Kennel abgeglichen; ein verschwundener Kennel-Workspace löste die Verknüpfung, ohne nach dem Nachfolger zu sehen.
 **Wache.** Jeder Abgleich übernimmt `sealed` aus Kennels Liste (`DeviceSetup.adoptEncryption`, ADR 0085) und lässt verwaiste Verknüpfungen dem Nachfolger folgen (`WorkspaceConverter.follow`). Test `EncryptionFromKennelTests`.
+
+## P-071 · „Kennel lehnt Notizen ab“ ohne Grund
+
+**Symptom.** Auf einem Mac sagt die Statuszeile „Kennel lehnt 6 Notizen ab“, ohne Grund; aus der Ferne lässt sich nicht sagen, ob der Workspace falsch als verschlüsselt geführt wird, die Verschlüsselung fehlt oder eine Notiz zu groß ist.
+**Ursache.** `Syncer` warf Kennels Antwort weg (`badStatus(400, body)`), die Statuszeile kannte nur die Zahl. Den Titel suchte sie nur in der Bibliothek des offenen Workspace.
+**Wache.** `SyncReport.reasons` hält Kennels `reason` (bzw. `too-large`) je Notiz, die Statuszeile nennt ihn in Worten (`SyncCoordinator.explain`). Test `RejectReasonTests`.

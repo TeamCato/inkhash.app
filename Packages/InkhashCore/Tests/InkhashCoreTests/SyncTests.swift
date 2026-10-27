@@ -422,3 +422,12 @@ private final class AppCopy {
         notes[note.id] = note
     }
 }
+
+/// Kennel's reason for a refused note reaches the status line (PITFALLS P-071).
+final class RejectReasonTests: XCTestCase {
+    func testReasonComesFromTheBody() {
+        XCTAssertEqual(SyncReport.reason(in: #"{"error":"bad-request","reason":"plain"}"#), "plain")
+        XCTAssertEqual(SyncReport.reason(in: #"{"error":"too-large"}"#), "too-large")
+        XCTAssertNil(SyncReport.reason(in: "<html>"))
+    }
+}

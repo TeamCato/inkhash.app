@@ -68,12 +68,22 @@ public struct SyncReport: Equatable, Sendable {
     public var conflicts: Int
     /// Notes the server refused (400, 413). They stay dirty on the device and are tried again next time.
     public var rejected: [UUID]
+    /// Why, as Kennel said it (`reason` of a 400, `too-large` of a 413), by note. See PITFALLS P-071.
+    public var reasons: [UUID: String]
 
-    public init(pushed: Int, pulled: Int, conflicts: Int, rejected: [UUID] = []) {
+    public init(pushed: Int, pulled: Int, conflicts: Int, rejected: [UUID] = [], reasons: [UUID: String] = [:]) {
         self.pushed = pushed
         self.pulled = pulled
         self.conflicts = conflicts
         self.rejected = rejected
+        self.reasons = reasons
+    }
+
+    /// Kennel's reason in an error body: `reason` if it gave one, else the code.
+    public static func reason(in body: String) -> String? {
+        guard let data = body.data(using: .utf8),
+              let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return nil }
+        return (object["reason"] as? String) ?? (object["error"] as? String) ?? (object["code"] as? String)
     }
 }
 
@@ -173,9 +183,10 @@ public enum Syncer {
                 try store.saveConflict(server)
                 try writer.save(try store.note(id: id) ?? note, meta: LocalMeta(dirty: true, conflict: true))
                 report.conflicts += 1
-            } catch let APIError.badStatus(code, _) where code == 400 || code == 413 {
+            } catch let APIError.badStatus(code, body) where code == 400 || code == 413 {
                 // One note the server refuses must not hold back the others. See PITFALLS P-045.
                 report.rejected.append(note.id)
+                report.reasons[note.id] = SyncReport.reason(in: body) ?? (code == 413 ? "too-large" : "HTTP \(code)")
             }
         }
         // The push is itself a change. A second pull advances the cursor past it.
