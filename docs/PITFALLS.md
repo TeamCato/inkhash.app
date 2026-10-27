@@ -417,3 +417,9 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 **Symptom.** Steht vor der Schreibstelle schon gestylter Text, landet der Cursor nach dem Schließen von `**`, `~~` oder `==` mitten im gerade gestylten Wort; was man weiter tippt, steht im Wort.
 **Ursache.** `RichText.reconcile` gab dem Parser die Cursorstelle im Textfeld. Der Parser rechnet aber im Markdown, und dort stehen vor dem Cursor die Marker der früheren Stile.
 **Wache.** `RichText.markdown(from:cursor:type:)` rechnet die Stelle ins Markdown um. Test `BlockEditingTests.testTypedDecorationMarkersBecomeStyles` und `testCursorAfterAnEarlierStyle`.
+
+## P-070 · Verknüpfung rät „verschlüsselt“
+
+**Symptom.** Nach dem Freischalten tragen alle alten Workspaces ein Schloss; ein Workspace, der in Kennel lesbar ist, wird abgelehnt („Kennel lehnt … ab“), oder ein Gerät verliert die Verknüpfung, nachdem ein anderes umgewandelt hat.
+**Ursache.** `WorkspaceLink.sealed` wurde beim Verknüpfen gesetzt (alte Links ohne Feld: verschlüsselt) und nie mit Kennel abgeglichen; ein verschwundener Kennel-Workspace löste die Verknüpfung, ohne nach dem Nachfolger zu sehen.
+**Wache.** Jeder Abgleich übernimmt `sealed` aus Kennels Liste (`DeviceSetup.adoptEncryption`, ADR 0085) und lässt verwaiste Verknüpfungen dem Nachfolger folgen (`WorkspaceConverter.follow`). Test `EncryptionFromKennelTests`.

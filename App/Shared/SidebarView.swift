@@ -585,6 +585,19 @@ struct WorkspaceSwitcher: View {
                     WorkspaceMenuLabel(workspace: workspace, isCurrent: workspace.id == model.registry.current.id)
                 }
             }
+            // Kennel workspaces not here yet, one tap away (ADR 0085).
+            let unlinked = model.isSyncEnabled ? model.overview.unlinked(in: model.registry.setup) : []
+            if !unlinked.isEmpty {
+                Section("Aus Kennel hinzufügen") {
+                    ForEach(unlinked) { remote in
+                        Button {
+                            Task { await model.addFromKennel([remote]) }
+                        } label: {
+                            Label(remote.name + (remote.isSealed ? " · verschlüsselt" : ""), systemImage: remote.symbol ?? "tray")
+                        }
+                    }
+                }
+            }
             Divider()
             Button("Workspace anlegen …", systemImage: "plus") { newWorkspace = true }
             Button("Workspaces und Kennel …", systemImage: "gearshape") { showSettings = true }

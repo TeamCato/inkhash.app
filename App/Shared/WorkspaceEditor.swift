@@ -35,6 +35,10 @@ struct WorkspaceEditor: View {
     /// „In Kennel ablegen …“ or „Anderer Speicher …“ of an existing workspace.
     @State private var storageSheet: StorageSheet.Mode?
     @State private var confirmHereOnly = false
+    /// „Mit Kennel-Workspace verbinden …“ of a workspace that lies only here.
+    @State private var linking = false
+    /// „Unverschlüsselt weiterführen …“ of an encrypted workspace.
+    @State private var confirmPlain = false
     /// The Kennel workspace „In Kennel löschen …“ asks about, kept while the sheet is up even once it is gone.
     @State private var kennelDelete: RemoteWorkspace?
     @State private var busy = false
@@ -77,9 +81,10 @@ struct WorkspaceEditor: View {
                 ) {
                     // `AnyView`: the picker's choice type depends on what it holds below.
                     AnyView(Group {
+                        // Taking an existing one comes first: it is what a second device usually wants (ADR 0085).
+                        if place == .kennel { alreadyInKennel }
                         if place == .kennel { encryptionSection }
                         lookSections
-                        if place == .kennel { alreadyInKennel }
                     })
                 }
             }
@@ -132,7 +137,11 @@ struct WorkspaceEditor: View {
         .sheet(item: $storageSheet) { mode in
             if let workspace { StorageSheet(workspace: workspace, mode: mode) }
         }
-        // Up here, not on the „Ort“ section: a refresh that rebuilds the section must not take the sheet with it.
+        // Up here, not on the „Ort“ section (P-066): a refresh that rebuilds the section must not take the sheet with it.
+        .sheet(isPresented: $linking) {
+            if let workspace { LinkToKennelSheet(workspace: model.registry.workspace(workspace.id) ?? workspace) }
+        }
+        // Also up here, not on the „Ort“ section: a refresh that rebuilds the section must not take the sheet with it.
         .sheet(item: $kennelDelete) { remote in
             KennelDeleteSheet(
                 remote: remote, storage: model.overview.storage(of: remote)?.name,
@@ -315,6 +324,11 @@ struct WorkspaceEditor: View {
                         .foregroundStyle(Ink.warning)
                 }
             }
+            .confirmationDialog("Unverschlüsselt weiterführen?", isPresented: $confirmPlain, titleVisibility: .visible) {
+                Button("Unverschlüsselt weiterführen") { convertToPlain(workspace.id) }
+            } message: {
+                Text("Alle Notizen ziehen in einen lesbaren Workspace mit demselben Namen im selben Speicher. Danach löscht inkhash den verschlüsselten in Kennel. Deine anderen Geräte folgen von selbst.")
+            }
             .confirmationDialog("Nur noch auf diesem Gerät?", isPresented: $confirmHereOnly, titleVisibility: .visible) {
                 Button("Nur noch hier") { model.keepOnlyHere(workspace.id) }
             } message: {
@@ -326,10 +340,17 @@ struct WorkspaceEditor: View {
     private func placeActions(_ workspace: Workspace, remote: RemoteWorkspace?) -> [KennelPlaceAction] {
         guard let link = workspace.link else {
             guard model.isSyncEnabled else { return [] }
-            return [KennelPlaceAction("In Kennel ablegen …") { storageSheet = .place }]
+            var actions = [KennelPlaceAction("In Kennel ablegen …") { storageSheet = .place }]
+            if !model.overview.unlinked(in: model.registry.setup).isEmpty {
+                actions.append(KennelPlaceAction("Mit Kennel-Workspace verbinden …") { linking = true })
+            }
+            return actions
         }
         if remote?.move?.isRunning == true { return [] }
         var actions: [KennelPlaceAction] = []
+        if model.isSyncEnabled, link.sealed, workspace.retiring == nil, model.overview.module?.plainWorkspaces == true, remote != nil {
+            actions.append(KennelPlaceAction("Unverschlüsselt weiterführen …") { confirmPlain = true })
+        }
         if model.isSyncEnabled, !link.sealed, model.overview.module?.workspaceMove == true, let remote {
             actions.append(KennelPlaceAction("Anderer Speicher …") { storageSheet = .move(current: KennelStorages.summaryID(of: remote, standardID: model.overview.standardStorageID)) })
         }
@@ -364,6 +385,15 @@ struct WorkspaceEditor: View {
         loaded = true
         name = workspace?.name ?? ""
         symbol = workspace?.symbol ?? "tray"
+    }
+
+    private func convertToPlain(_ id: UUID) {
+        busy = true
+        failure = nil
+        Task {
+            failure = await model.convertToPlain(id)
+            busy = false
+        }
     }
 
     private func add(_ remote: RemoteWorkspace) {
@@ -541,6 +571,73 @@ struct StorageSheet: View {
             }
             busy = false
             if failure == nil { dismiss() }
+        }
+    }
+}
+
+/// „Mit Kennel-Workspace verbinden …“: a workspace that lies only here syncs with a Kennel workspace not on this device
+/// yet, e.g. after its link got lost. The notes of both meet; nothing is lost (ADR 0085).
+struct LinkToKennelSheet: View {
+    @Environment(AppModel.self) private var model
+    @Environment(\.dismiss) private var dismiss
+    let workspace: Workspace
+    @State private var choice: String?
+    @State private var busy = false
+
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section {
+                    ForEach(model.overview.unlinked(in: model.registry.setup)) { remote in
+                        Button {
+                            choice = remote.id
+                        } label: {
+                            HStack {
+                                Label(remote.name, systemImage: remote.symbol ?? "tray")
+                                if remote.isSealed {
+                                    Image(systemName: "lock.fill")
+                                        .font(.system(size: 11))
+                                        .foregroundStyle(Ink.muted)
+                                        .accessibilityLabel("Verschlüsselt")
+                                }
+                                Spacer()
+                                Image(systemName: "checkmark")
+                                    .foregroundStyle(.tint)
+                                    .opacity(choice == remote.id ? 1 : 0)
+                            }
+                            .contentShape(Rectangle())
+                        }
+                        .buttonStyle(.plain)
+                    }
+                } header: {
+                    Text("In Kennel")
+                } footer: {
+                    Text("„\(workspace.name)“ gleicht danach mit diesem Workspace ab und übernimmt seinen Namen. Notizen, die beide schon haben, kommen nicht doppelt; die übrigen kommen dazu.")
+                }
+            }
+            .formStyle(.grouped)
+            .navigationTitle("Mit Kennel verbinden")
+            .toolbar {
+                ToolbarItem(placement: .cancellationAction) {
+                    Button("Abbrechen") { dismiss() }
+                }
+                ToolbarItem(placement: .confirmationAction) {
+                    Button("Verbinden") { apply() }
+                        .disabled(busy || choice == nil)
+                }
+            }
+        }
+        .kennelBrand(.inkhash)
+        .macSheetSize(minWidth: 440, minHeight: 360)
+    }
+
+    private func apply() {
+        guard let remote = model.overview.remotes.first(where: { $0.id == choice }) else { return }
+        busy = true
+        Task {
+            await model.link(workspace.id, to: remote)
+            busy = false
+            dismiss()
         }
     }
 }

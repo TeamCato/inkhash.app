@@ -1,6 +1,6 @@
 # 0082 Ende-zu-Ende wieder, über den Tresor im Kern
 
-Status: angenommen. Dominik am 2026-10-24 („In inkhash kann ich irgendwie keine verschlüsselten storages anlegen oder
+Status: angenommen, ergänzt durch ADR 0085. Dominik am 2026-10-24 („In inkhash kann ich irgendwie keine verschlüsselten storages anlegen oder
 nutzen!?“). Folgt teamCato ADR 0013 (jedes Modul kann Ende-zu-Ende) und Kennel ADR 0058 (inkhashs Tresor ist der im
 Kern). Löst ab: ADR 0077 Punkt 5 Satz „Ein neuer Kennel-Workspace ist immer unverschlüsselt“, Punkt 8 und Punkt 9 (das
 automatische Umwandeln), und teamCato ADR 0009 Punkt 10 für inkhash. Format und Vertrag aus ADR 0052 bleiben.

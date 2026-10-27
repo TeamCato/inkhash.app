@@ -23,9 +23,10 @@ struct VaultSheetView: View {
     @State private var hasReset = false
 
     #if os(macOS)
-    /// On the Mac every app unlocks once itself (Kennel ADR 0065): say where the QR code can come from.
+    /// On the Mac every app unlocks once itself (Kennel ADR 0065): say where the QR code can come from, without naming
+    /// other apps (ADR 0085).
     static let hint: String? =
-        "In Xoot schon freigeschaltet? Dort zeigt Einstellungen › Kennel › Verschlüsselung „Eigenes Gerät hinzufügen …“ einen QR-Code. Hat dieser Mac keine Kamera, nimm den Wiederherstellungsschlüssel."
+        "Auf einem anderen Gerät schon freigeschaltet? In inkhash zeigt dort Einstellungen › Kennel › Verschlüsselung „Eigenes Gerät hinzufügen …“ einen QR-Code. Hat dieser Mac keine Kamera, nimm den Wiederherstellungsschlüssel."
     #else
     static let hint: String? = nil
     #endif

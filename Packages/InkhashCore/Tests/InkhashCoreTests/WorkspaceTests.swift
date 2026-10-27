@@ -388,3 +388,31 @@ actor FakeWorkspaceServer: WorkspaceTransport {
         return data
     }
 }
+
+/// Kennel decides whether a workspace is encrypted, not the link (ADR 0085).
+@MainActor
+final class EncryptionFromKennelTests: XCTestCase {
+    func testLinkTakesKennelsWordAndMerges() {
+        let server = UUID()
+        let wrong = Workspace(name: "Haushalt", symbol: "house", link: WorkspaceLink(server: server, remote: "a", sealed: true))
+        let right = Workspace(name: "Privat", symbol: "house", link: WorkspaceLink(server: server, remote: "b", sealed: true))
+        var setup = DeviceSetup(servers: [ServerEntry(id: server, url: "http://kennel.local")], workspaces: [wrong, right], current: wrong.id)
+        let changed = setup.adoptEncryption(
+            of: [RemoteWorkspace(id: "a", name: "Haushalt", sealed: false), RemoteWorkspace(id: "b", name: "Privat", sealed: true)],
+            on: server)
+        XCTAssertEqual(changed, [wrong.id])
+        XCTAssertEqual(setup.workspaces[0].link?.sealed, false)
+        // Merged with what Kennel holds, not started over.
+        XCTAssertEqual(setup.workspaces[0].retiring, RetiringRemote(remote: "a", cursor: 0, deletes: false))
+        XCTAssertEqual(setup.workspaces[1].link?.sealed, true)
+        XCTAssertNil(setup.workspaces[1].retiring)
+    }
+
+    func testOtherServersAndUnknownRemotesStay() {
+        let server = UUID()
+        let other = Workspace(name: "Alt", symbol: "tray", link: WorkspaceLink(server: UUID(), remote: "a", sealed: true))
+        var setup = DeviceSetup(servers: [ServerEntry(id: server, url: "http://kennel.local")], workspaces: [other], current: other.id)
+        XCTAssertTrue(setup.adoptEncryption(of: [RemoteWorkspace(id: "a", name: "Alt", sealed: false)], on: server).isEmpty)
+        XCTAssertEqual(setup.workspaces[0].link?.sealed, true)
+    }
+}

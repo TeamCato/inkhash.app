@@ -92,6 +92,9 @@ final class SyncCoordinator {
             overview.module = module
             let list = try await client.workspaceList()
             overview.remotes = list.workspaces
+            // Kennel decides what is encrypted (ADR 0085); a workspace whose Kennel copy went follows its successor.
+            registry.adoptEncryption(of: list.workspaces, on: kennel.id)
+            try await converter.follow(kennel: kennel, client: client, remotes: list.workspaces)
             if module.workspaceStorage == true {
                 overview.storages = (try? await client.noteStorages()) ?? overview.storages
             }
@@ -117,6 +120,28 @@ final class SyncCoordinator {
         }
     }
 
+    /// „Unverschlüsselt weiterführen …“: begins the conversion of an encrypted workspace, then syncs so its notes go
+    /// to the plain successor (ADR 0085). Nil when it began, else why not.
+    func convertToPlain(_ id: UUID) async -> String? {
+        guard let kennel = registry.kennel, let client = sessions.client(for: kennel.id) else { return "Nicht mit Kennel verbunden." }
+        do {
+            guard let module = try await client.kennel.health().inkhash else { return "inkhash ist in Kennel ausgeschaltet." }
+            if vaults.key(for: kennel.id) == nil { await vaults.check(kennel.id) }
+            if let problem = try await converter.convert(
+                id, kennel: kennel, client: client, module: module, key: vaults.key(for: kennel.id))
+            {
+                return problem
+            }
+        } catch APIError.unauthorized {
+            sessions.expire(kennel.id, ifStill: client.token)
+            return "Die Anmeldung ist abgelaufen."
+        } catch {
+            return StatusLine.describe(error)
+        }
+        await sync()
+        return nil
+    }
+
     /// The vault key, only while a workspace here is encrypted. Checked against Kennel until it is open here.
     private func vaultKey(for server: UUID) async -> VaultKey? {
         guard registry.workspaces.contains(where: { $0.link?.sealed == true }) else { return nil }
@@ -139,15 +164,16 @@ final class SyncCoordinator {
                 // A reset vault counts the epoch up: encrypted libraries start over, plain ones stay (ADR 0052).
                 let epoch = link.sealed ? key?.epoch ?? 0 : 0
                 let bindingKey = Workspaces.bindingKey(accountID: kennel.accountID, remote: link.remote, epoch: epoch)
+                let transport: any NoteTransport =
+                    if link.sealed, let key { SealedTransport(wire: scoped, sealer: Sealer(key)) } else { scoped }
                 if workspace.retiring != nil {
-                    // The successor of an encrypted workspace holds these notes already: merge, do not start over.
-                    try await Relinker.adopt(store, from: scoped, bindingKey: bindingKey)
+                    // The successor holds these notes already, or the link took Kennel's word on encryption: merge, do
+                    // not start over (ADR 0077, 0085).
+                    try await Relinker.adopt(store, from: transport, bindingKey: bindingKey)
                 } else {
                     // Idempotent. Another workspace on Kennel starts over (ADR 0017).
                     try Library.bind(store, to: bindingKey)
                 }
-                let transport: any NoteTransport =
-                    if link.sealed, let key { SealedTransport(wire: scoped, sealer: Sealer(key)) } else { scoped }
                 let report = try await Syncer.sync(
                     store: store, transport: transport, sealedWith: link.sealed ? key?.keyId : nil
                 ) { [weak self] note, meta in

@@ -405,11 +405,28 @@ final class AppModel {
         status = "„\(workspace.name)“ liegt jetzt nur noch auf diesem Gerät."
     }
 
-    /// Syncs a local workspace with an existing Kennel workspace; the notes of both meet there (ADR 0017). An
-    /// encrypted one syncs with the vault open here (ADR 0082).
-    func link(_ id: UUID, to remote: RemoteWorkspace) {
-        guard let kennel = registry.kennel else { return }
-        registry.setLink(id, to: WorkspaceLink(server: kennel.id, remote: remote.id, sealed: remote.isSealed))
+    /// „Mit Kennel-Workspace verbinden …“: a workspace that lies only here syncs with an existing Kennel workspace; the
+    /// notes of both meet there, nothing is lost (ADR 0017, 0085). An encrypted one syncs once it is unlocked here.
+    func link(_ id: UUID, to remote: RemoteWorkspace) async {
+        guard let workspace = registry.workspace(id), attach(id, to: remote) else { return }
+        status = "„\(workspace.name)“ gleicht jetzt mit „\(remote.name)“ in Kennel ab."
+        await sync()
+    }
+
+    /// Links without syncing. Merged like a successor: notes Kennel has already, e.g. from before a lost link, do not
+    /// come in twice. False if the workspace is linked already.
+    @discardableResult
+    private func attach(_ id: UUID, to remote: RemoteWorkspace) -> Bool {
+        guard let kennel = registry.kennel, registry.workspace(id)?.link == nil else { return false }
+        registry.moveOn(
+            id, to: WorkspaceLink(server: kennel.id, remote: remote.id, sealed: remote.isSealed),
+            retiring: RetiringRemote(remote: remote.id, cursor: 0, deletes: false))
+        return true
+    }
+
+    /// „Unverschlüsselt weiterführen …“ (ADR 0085). Nil when it began, else why not.
+    func convertToPlain(_ id: UUID) async -> String? {
+        await syncer.convertToPlain(id)
     }
 
     /// Moves the Kennel workspace behind a linked workspace to another storage (`nil`: the account's). Kennel moves in
@@ -614,7 +631,7 @@ final class AppModel {
             case .place(let id, let storageID):
                 if let problem = await placeInKennel(id, storageID: storageID, syncing: false) { return problem }
             case .link(let id, let remote):
-                link(id, to: remote)
+                attach(id, to: remote)
             case .add(let remotes):
                 if let kennel = registry.kennel { _ = registry.addLinked(remotes, on: kennel.id) }
             }

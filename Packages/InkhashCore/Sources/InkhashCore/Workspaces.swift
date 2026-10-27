@@ -162,6 +162,25 @@ public struct DeviceSetup: Codable, Equatable, Sendable {
         }
     }
 
+    /// Kennel says whether a workspace is encrypted, not the link: a link may hold a guess from before, e.g. „encrypted“
+    /// for links older than the choice per workspace. A link that differs takes Kennel's word and merges with what
+    /// Kennel holds instead of starting over (ADR 0085). Returns the workspaces that changed.
+    @discardableResult
+    public mutating func adoptEncryption(of remotes: [RemoteWorkspace], on server: UUID) -> [UUID] {
+        let sealed = Dictionary(remotes.map { ($0.id, $0.isSealed) }, uniquingKeysWith: { first, _ in first })
+        var changed: [UUID] = []
+        for index in workspaces.indices {
+            guard let link = workspaces[index].link, link.server == server, let truth = sealed[link.remote],
+                  truth != link.sealed else { continue }
+            workspaces[index].link?.sealed = truth
+            if workspaces[index].retiring == nil {
+                workspaces[index].retiring = RetiringRemote(remote: link.remote, cursor: 0, deletes: false)
+            }
+            changed.append(workspaces[index].id)
+        }
+        return changed
+    }
+
     /// Adds a workspace here for each server workspace, linked to it, with its name and symbol.
     /// On a fresh device the one empty local workspace takes the first, instead of staying behind
     /// as an empty extra. `isEmpty` says whether a workspace has no notes. Returns the ids used.

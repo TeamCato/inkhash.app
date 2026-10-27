@@ -208,6 +208,14 @@ final class WorkspaceRegistry {
         return added
     }
 
+    /// Kennel's word on which workspaces are encrypted (ADR 0085). Returns the workspaces that changed.
+    @discardableResult
+    func adoptEncryption(of remotes: [RemoteWorkspace], on server: UUID) -> [UUID] {
+        let changed = setup.adoptEncryption(of: remotes, on: server)
+        if !changed.isEmpty { persist() }
+        return changed
+    }
+
     /// Takes what a look sync made of `snapshot`. See `DeviceSetup.adopt`.
     func adopt(_ synced: DeviceSetup, since snapshot: DeviceSetup) {
         guard synced != snapshot else { return }
