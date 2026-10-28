@@ -74,9 +74,9 @@ Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür w
 
 ## Tresor und verschlüsselte Notizen
 
-Siehe ADR 0052 und 0054. Der Tresor hält den Schlüssel des Accounts, verpackt mit einem Wiederherstellungsschlüssel, den nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl der Resets. `DELETE /v1/apps/inkhash/vault` antwortet bei falschem Passwort mit 403 `wrong-password` und zählt Fehlversuche wie das Anmelden; ohne Tresor 404.
+Siehe ADR 0052 und 0054. Der Tresor hält den Schlüssel des Accounts, verpackt mit einem Wiederherstellungsschlüssel, den nur die Geräte kennen. Der Server prüft nur die Form: `keyId` eine UUID, `kdf.name` `pbkdf2-sha256`, `kdf.rounds` 100 000 bis 10 000 000, `kdf.salt` Base64 bis 64 Zeichen, `wrapped` Base64 bis 256 Zeichen, sonst 400 mit `reason` (`keyId`, `kdf`, `wrapped`, `vault`). `epoch` setzt der Server: die Zahl früherer Resets. Zurücksetzen gibt es seit ADR 0087 nicht mehr (`DELETE /v1/apps/inkhash/vault` ist 405), `epoch` bleibt also stehen.
 
-Kopplungen (ADR 0054) liegen nur im Speicher des Servers und gehören zum Account der Sitzung; ein anderer Account bekommt 404. `<id>` ist eine UUID, sonst 400 `reason: "pairing"`. `sealed` ist Base64 bis 512 Zeichen, sonst 400 `reason: "sealed"`. Der Server kann `sealed` nicht öffnen: Das Geheimnis dafür steht nur im QR-Code. Ein Reset des Tresors, das Löschen des Accounts und ein Neustart des Servers verwerfen offene Kopplungen.
+Kopplungen (ADR 0054) liegen nur im Speicher des Servers und gehören zum Account der Sitzung; ein anderer Account bekommt 404. `<id>` ist eine UUID, sonst 400 `reason: "pairing"`. `sealed` ist Base64 bis 512 Zeichen, sonst 400 `reason: "sealed"`. Der Server kann `sealed` nicht öffnen: Das Geheimnis dafür steht nur im QR-Code. Das Löschen des Accounts und ein Neustart des Servers verwerfen offene Kopplungen.
 
 Verschlüsselte Workspaces (alle von vorher und `main`) nehmen nur verschlüsselte Notizen an:
 
@@ -88,7 +88,7 @@ So geht sie beim `PUT` hin. Zurück kommt `{ "schemaVersion": 2, "id", "revision
 
 Ein verschlüsselter Workspace nimmt keine Klartext-Notizen an: Eine Notiz mit `schemaVersion: 1` ist 400 `reason: "sealed"`, mit oder ohne Tresor. Ohne Tresor ist eine Notiz mit `schemaVersion: 2` 400 `reason: "no vault"`, ein Blob ebenso. Die App legt keine Tresore und keine verschlüsselten Workspaces mehr an (ADR 0077). Klartext-Notizen aus dem Umzug eines alten inkhashd bleiben lesbar, bis ein Gerät sie verschlüsselt neu schreibt.
 
-Ein unverschlüsselter Workspace (`sealed: false`, ADR 0075) nimmt nur Klartext-Notizen in der Form unter „Notiz“ und braucht keinen Tresor; der Server prüft dort nur `id`, `kind` und höchstens 2 MB. Eine versiegelte Notiz ist dort 400 `reason: "plain"`. Seine Blobs heißen nach ihrem SHA-256; nur mit Tresor nimmt er auch versiegelte, für sein Bild. Ein Reset des Tresors lässt ihn unberührt.
+Ein unverschlüsselter Workspace (`sealed: false`, ADR 0075) nimmt nur Klartext-Notizen in der Form unter „Notiz“ und braucht keinen Tresor; der Server prüft dort nur `id`, `kind` und höchstens 2 MB. Eine versiegelte Notiz ist dort 400 `reason: "plain"`. Seine Blobs heißen nach ihrem SHA-256; nur mit Tresor nimmt er auch versiegelte, für sein Bild.
 
 Blobs eines Accounts mit Tresor heißen in verschlüsselten Workspaces nach dem HMAC, den nur die Geräte bilden können, nicht nach ihrem SHA-256. Der Server prüft dann den Hash nicht, lehnt aber einen Blob ab, dessen Name sein eigener SHA-256 ist: Das wäre Klartext (400 `reason: "sealed"`). Hat ein Workspace keine Klartext-Notiz mehr, löscht der Server dort beim nächsten Zugriff einmal alle Klartext-Blobs außer dem aktuellen Bild des Workspace. Ein ersetztes oder entferntes Klartext-Bild löscht `PATCH` gleich mit.
 

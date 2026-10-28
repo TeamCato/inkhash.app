@@ -349,7 +349,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Server-Tests und Swift-Tests sind grün, trotzdem lehnt der Server, was die App schickt, oder die App versteht seine Antwort nicht. Bei verschlüsselten Notizen fällt das erst auf einem zweiten Gerät auf.
 **Ursache.** Jede Seite testete gegen ihr eigenes Bild des Vertrags: der Server mit JSON von Hand, die App mit einem Fake-Transport.
-**Wache.** `make test` startet den echten Server auf einem freien Port und lässt `ContractTests` mit `APIClient`, `SealedTransport` und `SealedLooks` dagegen laufen (`tools/contract-test.sh`): Umstieg auf den Tresor, zweites Gerät, Konflikt, Retry, Bild, Wiederherstellungsschlüssel, Kopplung, Reset. Neue Routen bekommen dort einen Fall.
+**Wache.** `make test` startet den echten Server auf einem freien Port und lässt `ContractTests` mit `APIClient`, `SealedTransport` und `SealedLooks` dagegen laufen (`tools/contract-test.sh`): Umstieg auf den Tresor, zweites Gerät, Konflikt, Retry, Bild, Wiederherstellungsschlüssel, Kopplung, Sperren. Neue Routen bekommen dort einen Fall.
 
 ## P-059 · Code-Block per Kürzel kommt nie an
 
@@ -398,7 +398,7 @@ Anhängen, nicht umschreiben. Die Wache ist der Teil, der schützt.
 
 **Symptom.** Auf dem iPhone: Tresor-Abfrage mit „Später“ weggeschoben, dann in den Einstellungen des Servers „Tresor öffnen…“. Das Fenster erscheint kurz, dann schließen sich Tresor und Einstellungen zusammen, bevor man den Schlüssel eingeben kann.
 **Ursache.** `VaultSection` hing `.sheet` und `.task` an die `Section`. In einer `Form` gibt SwiftUI die Modifier einer `Section` an jede Zeile, an Kopf und Fuß weiter: Ein Tipp präsentierte dasselbe Sheet dreimal, UIKit nahm das zurück und die Einstellungen mit. Die Prüfung des Tresors lief ebenso dreimal.
-**Wache.** Sheets hängen an ihrem Knopf, nie an einer `Section`; „Tresor anlegen…“ und „Tresor öffnen…“ sind ein Knopf, damit das Zurücksetzen (needsKey → needsSetup) das offene Sheet nicht abbaut. Die Prüfung macht `ServerDetailView`. Test `VaultUITests.testOpenVaultFromSettingsAfterPostponing` im iPhone-Simulator gegen Kennels Testserver (`make ui-test`).
+**Wache.** Sheets hängen an ihrem Knopf, nie an einer `Section`; „Tresor anlegen…“ und „Tresor öffnen…“ sind ein Knopf, damit ein Wechsel des Zustands (z. B. needsKey → ready) das offene Sheet nicht abbaut. Die Prüfung macht `ServerDetailView`. Test `VaultUITests.testOpenVaultFromSettingsAfterPostponing` im iPhone-Simulator gegen Kennels Testserver (`make ui-test`).
 
 ## P-067 · Aufgaben gehen auf dem iPhone nicht auf
 

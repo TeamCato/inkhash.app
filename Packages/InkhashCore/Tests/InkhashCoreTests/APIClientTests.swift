@@ -71,16 +71,6 @@ final class APIClientTests: XCTestCase {
         XCTAssertEqual((sent?["note"] as? [String: Any])?["sealed"] as? String, "BBBB")
     }
 
-    func testResetNeedsTheRightPassword() async {
-        let (client, _) = HTTPStub.client { _ in HTTPStub.json(403, #"{"error":"wrong-password"}"#) }
-        do {
-            try await client.resetVault(password: "falsch")
-            XCTFail("expected an error")
-        } catch {
-            XCTAssertEqual(error as? APIError, .wrongPassword)
-        }
-    }
-
     func testNewWorkspaceSendsItsLayoutOnlyWhenChosen() async throws {
         let reply = #"{"id":"w1","name":"Haushalt","sealed":false,"storageId":"s1"}"#
         let (client, requests) = HTTPStub.client { _ in HTTPStub.json(201, reply) }

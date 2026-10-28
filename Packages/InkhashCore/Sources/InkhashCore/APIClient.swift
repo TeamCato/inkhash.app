@@ -350,18 +350,6 @@ public struct APIClient: NoteTransport, Sendable {
         return try InkhashJSON.decode(VaultRecord.self, from: data)
     }
 
-    /// Resets the vault with the login password: the account's notes on the server are moved away.
-    public func resetVault(password: String) async throws {
-        do {
-            _ = try await send(
-                "/vault", method: "DELETE",
-                body: try InkhashJSON.encode(["password": password]), contentType: "application/json"
-            )
-        } catch let APIError.badStatus(code, body) where code == 403 && body.contains("wrong-password") {
-            throw APIError.wrongPassword
-        }
-    }
-
     // MARK: Pairing, ADR 0054
 
     private struct PairingBody: Codable {

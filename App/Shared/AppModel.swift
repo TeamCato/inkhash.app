@@ -713,8 +713,11 @@ final class AppModel {
         await vaultAction { await self.vaults.unlock($0, pairingCode: pairingCode) }
     }
 
-    func resetVault(password: String) async -> String? {
-        await vaultAction { await self.vaults.reset($0, password: password) }
+    /// „Sperren …“: this device forgets the key until it is unlocked again (ADR 0087). Only the keychain can fail here.
+    func lockVault() async {
+        if let failure = await vaultAction({ await self.vaults.lock($0) }) {
+            statusLine.message = failure
+        }
     }
 
     func offerPairing() async -> Result<KennelPairing, KennelProblem> {

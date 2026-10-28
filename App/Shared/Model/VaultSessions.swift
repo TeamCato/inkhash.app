@@ -15,8 +15,8 @@ enum VaultState: Equatable {
     case failed(String)
 }
 
-/// The vault through KennelKit, the same for every teamCato app: one recovery key, one pairing, one reset (teamCato ADR
-/// 0013). The account key is kept by `KennelVaultKeyStore`; sync gets it as inkhash's `VaultKey` with the epoch of
+/// The vault through KennelKit, the same for every teamCato app: one recovery key, one pairing, no reset (teamCato ADR
+/// 0013, 0016). The account key is kept by `KennelVaultKeyStore`; sync gets it as inkhash's `VaultKey` with the epoch of
 /// inkhash's `/vault`, so notes and blobs keep their format (ADR 0052).
 @MainActor
 @Observable
@@ -80,7 +80,7 @@ final class VaultSessions {
         }
     }
 
-    /// inkhash's `/vault` counts resets: a new epoch binds encrypted libraries anew (ADR 0052).
+    /// inkhash's `/vault` counted resets: a new epoch bound encrypted libraries anew (ADR 0052). Without resets it stays.
     private func ready(_ open: KennelOpenVault, server: UUID, client: APIClient) async throws {
         let epoch = try await client.vault()?.epoch ?? 0
         states[server] = .ready(VaultKey(keyId: open.accountKey.keyId, material: open.accountKey.material, epoch: epoch))
@@ -101,9 +101,12 @@ final class VaultSessions {
         await act(server) { _ = try await $0.open(pairingCode: pairingCode) }
     }
 
-    /// With the sign-in password; Kennel archives the encrypted notes and counts the epoch up (Kennel ADR 0058).
-    func reset(_ server: UUID, password: String) async -> String? {
-        await act(server) { try await $0.reset(password: password) }
+    /// Forgets the key on this device, also one an older inkhash kept; Kennel and other devices stay as they are.
+    func lock(_ server: UUID) async -> String? {
+        await act(server) {
+            try $0.lock()
+            SecretStore.clear(account: Self.legacyAccount(server))
+        }
     }
 
     func offerPairing(_ server: UUID) async -> Result<KennelPairing, KennelProblem> {

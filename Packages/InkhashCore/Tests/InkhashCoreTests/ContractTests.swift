@@ -184,8 +184,8 @@ final class ContractTests: XCTestCase {
     }
 
     /// ADR 0082, Kennel ADR 0058: the vault another app made through KennelKit (as Xoot does) encrypts inkhash's
-    /// workspaces; a paired second device reads them; a reset from any app leaves them unreadable.
-    func testTheSharedVaultEncryptsWorkspacesAndAResetFromAnyAppLocksThem() async throws {
+    /// workspaces; a paired second device reads them; locking one device leaves the other open (teamCato ADR 0016).
+    func testTheSharedVaultEncryptsWorkspacesAndLockingADeviceKeepsTheOthersOpen() async throws {
         let session = try await accountSession()
         let client = APIClient(session: session)
         let health = try await client.kennel.health()
@@ -221,19 +221,13 @@ final class ContractTests: XCTestCase {
             XCTAssertTrue(try XCTUnwrap(other.note(id: note.id)).sameContent(as: try XCTUnwrap(store.note(id: note.id))))
         }
 
-        // Reset in the other app: the old key is gone from Kennel, the notes are archived, the epoch counts up.
-        try await otherApp.reset(password: "secretsecret")
-        let afterReset = try await client.vault()
-        XCTAssertNil(afterReset)
-        let fresh = try await secondDevice.create(recoveryKey: .generate())
-        let renewed = try await client.vault()
-        let newRecord = try XCTUnwrap(renewed)
-        XCTAssertGreaterThan(newRecord.epoch ?? 0, key.epoch)
-        let newKey = VaultKey(keyId: newRecord.keyId, material: fresh.accountKey.material, epoch: newRecord.epoch ?? 0)
-        let later = try freshStore()
-        _ = try await Syncer.sync(
-            store: later, transport: SealedTransport(wire: scoped, sealer: Sealer(newKey)), sealedWith: newKey.keyId)
-        XCTAssertEqual(try later.list().count, 0, "nothing of before can be read with the new vault")
+        // Locking the other app's device forgets the key there only; Kennel keeps the vault and its epoch.
+        try otherApp.lock()
+        XCTAssertNil(try otherApp.openHere())
+        XCTAssertEqual(try secondDevice.openHere()?.accountKey, paired.accountKey)
+        let afterLock = try await client.vault()
+        XCTAssertEqual(afterLock?.keyId, record.keyId)
+        XCTAssertEqual(afterLock?.epoch ?? 0, key.epoch)
     }
 
     func testEditsConflictsAndRetriesWithSealedNotes() async throws {
@@ -293,7 +287,7 @@ final class ContractTests: XCTestCase {
         XCTAssertEqual(synced.workspaces[0].name, "Zuhause")
     }
 
-    func testNewRecoveryKeyPairingAndReset() async throws {
+    func testNewRecoveryKeyAndPairing() async throws {
         let client = try await account()
         let (key, record) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
         _ = try await client.putVault(record)
@@ -338,27 +332,6 @@ final class ContractTests: XCTestCase {
         } catch let APIError.vaultExists(existing) {
             XCTAssertEqual(existing.keyId, key.keyId)
         }
-
-        // Forgotten: reset with the login password, then a new vault in the next epoch.
-        do {
-            try await client.resetVault(password: "falschfalsch")
-            XCTFail("expected wrongPassword")
-        } catch APIError.wrongPassword {}
-        try await client.resetVault(password: "secretsecret")
-        let gone = try await client.vault()
-        XCTAssertNil(gone)
-        let (fresh, freshRecord) = try VaultCrypto.create(recoveryKey: .generate(), rounds: Self.rounds)
-        let stored = try await client.putVault(freshRecord)
-        XCTAssertEqual(stored.epoch, 1)
-        let page = try await client.changes(after: 0)
-        XCTAssertTrue(page.changes.isEmpty)
-
-        // The device binds anew and sends its notes again under the new key.
-        let freshKey = VaultKey(keyId: fresh.keyId, material: fresh.material, epoch: stored.epoch ?? 0)
-        try Library.bind(store, to: Workspaces.bindingKey(accountID: "x", remote: "main", epoch: freshKey.epoch))
-        let report = try await Syncer.sync(store: store, transport: SealedTransport(wire: client, sealer: Sealer(freshKey)), sealedWith: freshKey.keyId)
-        XCTAssertEqual(report.pushed, 3)
-        XCTAssertEqual(store.sealedKey(), freshKey.keyId)
     }
 
     func testOwnPasswordChange() async throws {

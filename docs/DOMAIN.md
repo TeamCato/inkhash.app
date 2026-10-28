@@ -55,7 +55,7 @@ Diese Wörter heißen im Code so.
 | App-Link | `inkhash://kennel/join?server=…&code=…`, öffnet „Mit Kennel verbinden“ vorbelegt (ADR 0071, 0077). |
 | Im Netz gefunden | Kennel, die sich per Bonjour (`_kennel._tcp`) im Heimnetz ankündigen; ein Vorschlag fürs Adressfeld (`KennelConnectSection` aus KennelKitUI, ADR 0072, 0074). |
 | sealed | Eine Notiz oder ein Blob, verschlüsselt mit dem Schlüssel des Accounts (`Sealer`). `schemaVersion: 2` auf dem Draht. |
-| epoch | Zahl der Resets eines Tresors. Ändert die Bindung der Bibliotheken (`Workspaces.bindingKey`). |
+| epoch | Zahl früherer Resets eines Tresors; zählt seit ADR 0087 nicht mehr. Teil der Bindung der Bibliotheken (`Workspaces.bindingKey`). |
 | Unverschlüsselter Workspace | Ein Workspace in Kennel, dessen Notizen als Klartext gehen und lesbar im Speicher liegen (`WorkspaceLink.sealed == false`). Jeder neue ist es (ADR 0075, 0077). |
 | Speicher eines Workspace | Der Speicher in Kennel, in dem die Notizen eines Server-Workspace liegen: der des Accounts oder ein eigener, den inkhash nutzen darf (ADR 0075). |
 
