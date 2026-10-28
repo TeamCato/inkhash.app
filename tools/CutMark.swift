@@ -6,11 +6,11 @@ import CoreImage
 //
 //   cut-mark <AppIconArtwork.png> <mark.png>
 //
-// The deep blue washes in the corners of the artwork belong to the icon, not to the mark; everything
-// outside a centred circle fades out. See ADR 0066 and 0080.
+// The plate edges of the artwork belong to the icon, not to the mark; everything
+// outside a centred circle fades out. See ADR 0066, 0080 and 0088.
 
-/// Radius of the circle that keeps the #, as a share of the artwork's side. The corner washes start beyond it.
-let keepRadius = 0.44
+/// Radius of the circle that keeps the #, as a share of the artwork's side. The bar ends reach almost to it.
+let keepRadius = 0.48
 /// Width of the soft edge of that circle, as a share of the side.
 let keepFeather = 0.04
 let outputSize = 512
