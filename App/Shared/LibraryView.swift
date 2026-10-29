@@ -94,7 +94,9 @@ struct RootView: View {
             TaskListView()
         } else {
             VStack(spacing: 18) {
-                InkhashLogo(axis: .stacked, markSide: 88, wordSize: 34)
+                // A watermark on the paper, not a headline: small and close to the background.
+                InkhashLogo(axis: .stacked, markSide: 48, wordSize: 19)
+                    .opacity(0.22)
                 Text(model.isSyncEnabled
                     ? "Text auf dem Mac, Stift auf dem iPad.\nAbgeglichen über deinen Kennel."
                     : "Text auf dem Mac, Stift auf dem iPad.\nAlles bleibt auf diesem Gerät.")
