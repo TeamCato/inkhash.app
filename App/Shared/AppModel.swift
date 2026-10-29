@@ -251,7 +251,7 @@ final class AppModel {
         if selectedID == id { selectedID = nil }
     }
 
-    /// Gone from this device for good. Only from the trash and only once the server knows it is deleted.
+    /// Deleted for good, from the trash, on every device that syncs this workspace. See ADR 0089.
     func purge(id: UUID) {
         if library.purge(id, syncs: registry.current.link != nil), selectedID == id { selectedID = nil }
     }

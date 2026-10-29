@@ -66,6 +66,8 @@ public struct Note: Equatable, Sendable, Identifiable {
     public var createdAt: String?
     public var updatedAt: String
     public var deletedAt: String?
+    /// Set when the note was deleted for good: an emptied tombstone that every device removes. See ADR 0089.
+    public var purgedAt: String?
     public var markdown: String?
     public var transcript: String?
     public var tags: [String]
@@ -85,6 +87,7 @@ public struct Note: Equatable, Sendable, Identifiable {
         createdAt: String? = nil,
         updatedAt: String,
         deletedAt: String? = nil,
+        purgedAt: String? = nil,
         markdown: String? = nil,
         transcript: String? = nil,
         tags: [String] = [],
@@ -101,6 +104,7 @@ public struct Note: Equatable, Sendable, Identifiable {
         self.createdAt = createdAt
         self.updatedAt = updatedAt
         self.deletedAt = deletedAt
+        self.purgedAt = purgedAt
         self.markdown = markdown
         self.transcript = transcript
         self.tags = tags
@@ -125,6 +129,22 @@ public struct Note: Equatable, Sendable, Identifiable {
             // equals the same note after `touch` wrote the fallback down.
             && (createdAt == nil || other.createdAt == nil || createdAt == other.createdAt)
             && (deletedAt == nil) == (other.deletedAt == nil)
+            && (purgedAt == nil) == (other.purgedAt == nil)
+    }
+
+    /// The emptied tombstone that deleting for good leaves behind. Keeps only what syncing needs. See ADR 0089.
+    public func purged(at now: String) -> Note {
+        Note(
+            id: id,
+            kind: kind,
+            revision: revision,
+            updatedAt: now,
+            deletedAt: deletedAt ?? now,
+            purgedAt: now,
+            markdown: kind == .text ? "" : nil,
+            transcript: kind == .ink ? "" : nil,
+            pages: kind == .ink ? [] : nil
+        )
     }
 
     /// When the note was made, as shown. See ADR 0048.
@@ -316,7 +336,7 @@ public struct Note: Equatable, Sendable, Identifiable {
 
 extension Note: Codable {
     enum CodingKeys: String, CodingKey {
-        case schemaVersion, id, kind, title, revision, createdAt, updatedAt, deletedAt
+        case schemaVersion, id, kind, title, revision, createdAt, updatedAt, deletedAt, purgedAt
         case markdown, transcript, tags, pages, folder, favorite, paper
     }
 
@@ -335,6 +355,7 @@ extension Note: Codable {
         self.createdAt = try container.decodeIfPresent(String.self, forKey: .createdAt)
         self.updatedAt = try container.decode(String.self, forKey: .updatedAt)
         self.deletedAt = try container.decodeIfPresent(String.self, forKey: .deletedAt)
+        self.purgedAt = try container.decodeIfPresent(String.self, forKey: .purgedAt)
         self.markdown = try container.decodeIfPresent(String.self, forKey: .markdown)
         self.transcript = try container.decodeIfPresent(String.self, forKey: .transcript)
         self.tags = try container.decodeIfPresent([String].self, forKey: .tags) ?? []
@@ -360,6 +381,8 @@ extension Note: Codable {
         } else {
             try container.encodeNil(forKey: .deletedAt)
         }
+        // Left out on living notes, so they look as they did before ADR 0089.
+        try container.encodeIfPresent(purgedAt, forKey: .purgedAt)
         if let markdown {
             try container.encode(markdown, forKey: .markdown)
         } else {

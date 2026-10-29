@@ -175,11 +175,16 @@ final class SyncCoordinator {
                     try Library.bind(store, to: bindingKey)
                 }
                 let report = try await Syncer.sync(
-                    store: store, transport: transport, sealedWith: link.sealed ? key?.keyId : nil
-                ) { [weak self] note, meta in
-                    guard let self, workspace.id == self.registry.current.id else { return }
-                    self.library.synced(note, meta: meta)
-                }
+                    store: store, transport: transport, sealedWith: link.sealed ? key?.keyId : nil,
+                    onSave: { [weak self] note, meta in
+                        guard let self, workspace.id == self.registry.current.id else { return }
+                        self.library.synced(note, meta: meta)
+                    },
+                    onRemove: { [weak self] id in
+                        guard let self, workspace.id == self.registry.current.id else { return }
+                        self.library.removedBySync(id)
+                    }
+                )
                 if let message = describe(report, store: store), isCurrent { status.message = message }
                 if try await converter.finish(workspace, report: report, client: client, key: key) { again = true }
             } catch let error where WorkspaceConverter.endsTheRound(error) {

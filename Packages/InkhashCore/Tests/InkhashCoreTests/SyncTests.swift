@@ -166,6 +166,123 @@ final class SyncTests: XCTestCase {
         XCTAssertEqual(try store.meta(for: note.id).dirty, false)
     }
 
+    func testPurgeReachesEveryDeviceAndEmptiesTheServer() async throws {
+        let transport = FakeTransport()
+        let here = try freshStore()
+        var note = Note.newText(now: "2026-10-29T08:00:00Z")
+        note.applyMarkdown("# Geheim\nweg damit\n")
+        try here.save(note: note, meta: LocalMeta(dirty: true, conflict: false))
+        _ = try await Syncer.sync(store: here, transport: transport)
+        let there = try freshStore()
+        _ = try await Syncer.sync(store: there, transport: transport)
+
+        var trashed = try XCTUnwrap(here.note(id: note.id))
+        trashed.deletedAt = "2026-10-29T09:00:00Z"
+        try here.save(note: trashed.purged(at: "2026-10-29T09:00:00Z"), meta: LocalMeta(dirty: true, conflict: false))
+        var removedHere: [UUID] = []
+        let report = try await Syncer.sync(store: here, transport: transport, onRemove: { removedHere.append($0) })
+        XCTAssertEqual(report.pushed, 1)
+        XCTAssertNil(try here.note(id: note.id))
+        XCTAssertEqual(removedHere, [note.id])
+        let stored = try XCTUnwrap(transport.notes[note.id])
+        XCTAssertNotNil(stored.purgedAt)
+        XCTAssertNotNil(stored.deletedAt)
+        XCTAssertEqual(stored.markdown, "")
+        XCTAssertEqual(stored.title, "")
+
+        var removedThere: [UUID] = []
+        _ = try await Syncer.sync(store: there, transport: transport, onRemove: { removedThere.append($0) })
+        XCTAssertNil(try there.note(id: note.id))
+        XCTAssertEqual(removedThere, [note.id])
+
+        let late = try freshStore()
+        _ = try await Syncer.sync(store: late, transport: transport)
+        XCTAssertNil(try late.note(id: note.id), "a device that never had it does not keep the tombstone")
+    }
+
+    func testPurgeOfNoteKennelNeverSawOnlyLeavesTheDevice() async throws {
+        let store = try freshStore()
+        var note = Note.newText(now: "2026-10-29T08:00:00Z")
+        note.deletedAt = "2026-10-29T09:00:00Z"
+        try store.save(note: note.purged(at: "2026-10-29T09:00:00Z"), meta: LocalMeta(dirty: true, conflict: false))
+        let transport = FakeTransport()
+        _ = try await Syncer.sync(store: store, transport: transport)
+        XCTAssertNil(try store.note(id: note.id))
+        XCTAssertTrue(transport.events.isEmpty)
+    }
+
+    func testRestoreElsewhereBeatsAPurge() async throws {
+        let transport = FakeTransport()
+        var server = Note.newText(now: "2026-10-29T08:00:00Z")
+        server.applyMarkdown("bleibt\n")
+        server.revision = 3
+        transport.seed(server, cursor: 3)
+        let store = try freshStore()
+        var local = server
+        local.revision = 2
+        local.deletedAt = "2026-10-29T09:00:00Z"
+        try store.save(note: local.purged(at: "2026-10-29T09:00:00Z"), meta: LocalMeta(dirty: true, conflict: false))
+        try store.setCursor(3)
+        _ = try await Syncer.sync(store: store, transport: transport)
+        let kept = try XCTUnwrap(store.note(id: server.id))
+        XCTAssertNil(kept.deletedAt)
+        XCTAssertNil(kept.purgedAt)
+        XCTAssertEqual(kept.markdown, "bleibt\n")
+        XCTAssertNil(transport.notes[server.id]?.purgedAt)
+    }
+
+    func testPurgeOfANewerTombstoneGoesUpOnItsRevision() async throws {
+        let transport = FakeTransport()
+        var server = Note.newText(now: "2026-10-29T08:00:00Z")
+        server.applyMarkdown("im Papierkorb\n")
+        server.revision = 3
+        server.deletedAt = "2026-10-29T08:30:00Z"
+        transport.seed(server, cursor: 3)
+        let store = try freshStore()
+        var local = server
+        local.revision = 2
+        try store.save(note: local.purged(at: "2026-10-29T09:00:00Z"), meta: LocalMeta(dirty: true, conflict: false))
+        try store.setCursor(3)
+        _ = try await Syncer.sync(store: store, transport: transport)
+        XCTAssertNil(try store.note(id: server.id))
+        XCTAssertNotNil(transport.notes[server.id]?.purgedAt)
+        XCTAssertEqual(transport.notes[server.id]?.revision, 4)
+    }
+
+    func testEditHereBeatsAPurgeElsewhere() async throws {
+        let transport = FakeTransport()
+        var note = Note.newText(now: "2026-10-29T08:00:00Z")
+        note.applyMarkdown("alt\n")
+        note.revision = 1
+        transport.seed(note, cursor: 1)
+        let store = try freshStore()
+        _ = try await Syncer.sync(store: store, transport: transport)
+        var edited = try XCTUnwrap(store.note(id: note.id))
+        edited.applyMarkdown("neu\n")
+        try store.save(note: edited, meta: LocalMeta(dirty: true, conflict: false))
+
+        var gone = note
+        gone.deletedAt = "2026-10-29T09:00:00Z"
+        _ = try await transport.putNote(gone.purged(at: "2026-10-29T09:00:00Z"), baseRevision: 1)
+
+        _ = try await Syncer.sync(store: store, transport: transport)
+        let kept = try XCTUnwrap(store.note(id: note.id))
+        XCTAssertEqual(kept.markdown, "neu\n")
+        XCTAssertEqual(try store.meta(for: note.id).dirty, false)
+        XCTAssertEqual(transport.notes[note.id]?.markdown, "neu\n")
+        XCTAssertNil(transport.notes[note.id]?.deletedAt)
+    }
+
+    func testPurgedAtIsLeftOutOfLivingNotes() throws {
+        let note = Note.newText(now: "2026-10-29T08:00:00Z")
+        let json = String(decoding: try InkhashJSON.encode(note), as: UTF8.self)
+        XCTAssertFalse(json.contains("purgedAt"))
+        let tombstone = note.purged(at: "2026-10-29T09:00:00Z")
+        let decoded = try InkhashJSON.decode(Note.self, from: try InkhashJSON.encode(tombstone))
+        XCTAssertEqual(decoded.purgedAt, "2026-10-29T09:00:00Z")
+        XCTAssertEqual(decoded.deletedAt, "2026-10-29T09:00:00Z")
+    }
+
     func testRestoredLocalNoteIsCreatedOnTheServer() async throws {
         let store = try freshStore()
         var note = Note.newText(now: "2026-09-30T06:00:00Z")

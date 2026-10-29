@@ -128,7 +128,7 @@ public struct NoteListing {
         switch section {
         case .notes: pool = livingRecords
         case .favorites: pool = livingRecords.filter(\.note.favorite)
-        case .trash: pool = records.filter { $0.note.deletedAt != nil }
+        case .trash: pool = trashRecords
         }
         let sorted = pool.sorted { $0.note.updatedAt > $1.note.updatedAt }
         let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -185,7 +185,7 @@ public struct NoteListing {
     }
 
     public var trashCount: Int {
-        records.filter { $0.note.deletedAt != nil }.count
+        trashRecords.count
     }
 
     /// The living notes of one kind, newest first.
@@ -202,6 +202,11 @@ public struct NoteListing {
             .sorted { $0.note.updatedAt > $1.note.updatedAt }
             .prefix(limit)
             .map { $0 }
+    }
+
+    /// Deleted, but not for good: a note deleted for good waits for the sync out of sight. See ADR 0089.
+    private var trashRecords: [NoteRecord] {
+        records.filter { $0.note.deletedAt != nil && $0.note.purgedAt == nil }
     }
 
     private var livingRecords: [NoteRecord] {

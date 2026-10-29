@@ -81,7 +81,7 @@ final class NoteLibraryTests: LibraryTestCase {
         XCTAssertEqual(library.record(local.id)?.conflict, true)
     }
 
-    func testEmptyTrashRemovesOnlyWhatIsSettled() throws {
+    func testEmptyTrashLeavesTombstonesForTheSync() throws {
         var gone = try syncedText("# Weg\n")
         gone.deletedAt = "2026-10-02T08:00:00Z"
         try store.save(note: gone, meta: .clean)
@@ -90,7 +90,22 @@ final class NoteLibraryTests: LibraryTestCase {
         try store.save(note: waiting, meta: LocalMeta(dirty: true, conflict: false))
         library.reload()
         library.emptyTrash(syncs: true)
+        for id in [gone.id, waiting.id] {
+            let record = try XCTUnwrap(library.record(id))
+            XCTAssertNotNil(record.note.purgedAt)
+            XCTAssertTrue(record.dirty)
+            XCTAssertEqual(record.note.markdown, "")
+        }
+        XCTAssertEqual(library.listing.trashCount, 0)
+    }
+
+    func testEmptyTrashWithoutKennelRemovesAtOnce() throws {
+        var gone = try syncedText("# Weg\n")
+        gone.deletedAt = "2026-10-02T08:00:00Z"
+        try store.save(note: gone, meta: LocalMeta(dirty: true, conflict: false))
+        library.reload()
+        library.emptyTrash(syncs: false)
         XCTAssertNil(library.record(gone.id))
-        XCTAssertNotNil(library.record(waiting.id))
+        XCTAssertNil(try store.note(id: gone.id))
     }
 }

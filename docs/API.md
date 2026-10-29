@@ -64,6 +64,8 @@ Passt `baseRevision` nicht, ist der Inhalt aber genau der gespeicherte (`kind`, 
 
 Ein `PUT` mit passender `baseRevision` auf eine gelöschte Notiz holt sie zurück: `deletedAt` ist danach wieder `null`.
 
+**Endgültig gelöscht (ADR 0089).** Eine Notiz mit `purgedAt` (Zeitstempel wie `createdAt`) ist ein geleerter Grabstein: `deletedAt` gesetzt, Titel, Text, Abschrift, Schlagwörter, Seiten und Ordner leer. Ein Gerät schickt ihn als gewöhnliches `PUT` mit `deleted: true`; der Server ersetzt damit den alten Inhalt wie bei jeder neuen Fassung und kennt `purgedAt` nicht, er behält es wie jedes andere Feld (in versiegelten Notizen liegt es in `sealed`). Ein Gerät, das eine Notiz mit `purgedAt` holt, entfernt sie, außer es hat sie seit dem letzten Abgleich wiederhergestellt oder bearbeitet. Bei lebenden Notizen fehlt der Schlüssel.
+
 `title` setzt der Client: automatisch aus dem Inhalt oder von Hand, siehe ADR 0019. Der Server prüft nur die Länge.
 
 Der Server setzt `updatedAt` und `revision` selbst. Mitgeschickte Werte dafür werden ignoriert. Notiz-IDs sind kleingeschriebene UUIDs. Account-IDs ebenfalls. Blob-Namen sind 64 hexadezimale Zeichen, kleingeschrieben.

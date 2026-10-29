@@ -333,7 +333,7 @@ struct SidebarView: View {
                                 Button("Endgültig löschen", role: .destructive) { model.emptyTrash() }
                                 Button("Abbrechen", role: .cancel) {}
                             } message: {
-                                Text("Notizen, deren Löschung noch nicht abgeglichen ist, bleiben bis nach dem Abgleich liegen.")
+                                Text("Sie verschwinden auch auf deinen anderen Geräten mit diesem Workspace.")
                             }
                             .buttonStyle(.plain)
                             .font(.system(size: 12))

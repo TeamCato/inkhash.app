@@ -146,13 +146,17 @@ public enum Syncer {
     /// With `sealedWith`, the key of the account's vault, a library that has not finished moving to
     /// that key reads every note again, and what still lies plain on the server goes up sealed.
     /// Once nothing plain is left, the library remembers the key. See ADR 0052.
+    ///
+    /// A note deleted for good goes up as an emptied tombstone and then leaves the device; one
+    /// another device deleted for good leaves it too. `onRemove` hears of each. See ADR 0089.
     public static func sync(
         store: LocalStore,
         transport: any NoteTransport,
         sealedWith key: String? = nil,
-        onSave: @escaping @MainActor (Note, LocalMeta) -> Void = { _, _ in }
+        onSave: @escaping @MainActor (Note, LocalMeta) -> Void = { _, _ in },
+        onRemove: @escaping @MainActor (UUID) -> Void = { _ in }
     ) async throws -> SyncReport {
-        let writer = Writer(store: store, onSave: onSave)
+        let writer = Writer(store: store, onSave: onSave, onRemove: onRemove)
         var report = SyncReport(pushed: 0, pulled: 0, conflicts: 0)
         if let key, store.sealedKey() != key {
             try store.setCursor(0)
@@ -173,7 +177,9 @@ public enum Syncer {
             let meta = try store.meta(for: id)
             guard meta.dirty, !meta.conflict else { continue }
             do {
-                if let saved = try await push(note, reseal: unsealed.contains(id), writer: writer, transport: transport) {
+                if note.purgedAt != nil {
+                    if try await pushPurge(note, writer: writer, transport: transport) { report.pushed += 1 }
+                } else if let saved = try await push(note, reseal: unsealed.contains(id), writer: writer, transport: transport) {
                     try writer.saveAfterPush(saved, pushed: note)
                     report.pushed += 1
                 }
@@ -202,11 +208,17 @@ public enum Syncer {
     struct Writer {
         let store: LocalStore
         let onSave: @MainActor (Note, LocalMeta) -> Void
+        let onRemove: @MainActor (UUID) -> Void
 
         func save(_ note: Note, meta: LocalMeta) throws {
             try store.save(note: note, meta: meta)
             if !meta.conflict { try store.clearConflict(id: note.id) }
             onSave(note, meta)
+        }
+
+        func remove(_ id: UUID) throws {
+            try store.remove(id: id)
+            onRemove(id)
         }
 
         /// The server took `pushed` as `saved`. An edit made meanwhile stays dirty, now on top of
@@ -239,6 +251,10 @@ public enum Syncer {
         var seen = Set<UUID>()
         for change in page.changes where seen.insert(change.noteId).inserted {
             let server = try await transport.fetchNote(id: change.noteId)
+            if server.purgedAt != nil {
+                try forget(server, into: &report, writer: writer)
+                continue
+            }
             try await ensureBlobs(of: server, store: store, transport: transport)
             if let local = try store.note(id: server.id) {
                 let meta = try store.meta(for: local.id)
@@ -258,6 +274,50 @@ public enum Syncer {
                 report.pulled += 1
             }
         }
+    }
+
+    /// Another device deleted the note for good. It goes here too, unless it was restored or
+    /// edited here meanwhile: then that wins and goes up on the tombstone's revision. See ADR 0089.
+    private static func forget(_ server: Note, into report: inout SyncReport, writer: Writer) throws {
+        guard let local = try writer.store.note(id: server.id) else { return }
+        if try writer.store.meta(for: local.id).dirty, local.deletedAt == nil {
+            try writer.save(local.withRevision(server.revision), meta: LocalMeta(dirty: true, conflict: false))
+        } else {
+            try writer.remove(local.id)
+            report.pulled += 1
+        }
+    }
+
+    /// Sends the emptied tombstone of a note deleted for good, then removes it here. True if the
+    /// server heard of it. See ADR 0089.
+    private static func pushPurge(_ note: Note, writer: Writer, transport: any NoteTransport) async throws -> Bool {
+        guard note.revision > 0 else {
+            // Never reached the server: nothing to tell it.
+            try writer.remove(note.id)
+            return false
+        }
+        do {
+            _ = try await transport.putNote(note, baseRevision: note.revision)
+        } catch let APIError.conflict(server) {
+            if server.deletedAt == nil {
+                // Restored on another device meanwhile. That wins, the note comes back.
+                try await ensureBlobs(of: server, store: writer.store, transport: transport)
+                try writer.save(server, meta: .clean)
+                return false
+            }
+            if server.purgedAt == nil {
+                do {
+                    _ = try await transport.putNote(note.withRevision(server.revision), baseRevision: server.revision)
+                } catch APIError.conflict {
+                    // Changed again meanwhile. It stays dirty and is tried next time.
+                    return false
+                }
+            }
+        } catch APIError.notFound {
+            // The server lost it. Nothing is left there to empty.
+        }
+        try writer.remove(note.id)
+        return true
     }
 
     /// `reseal`: the note lies plain on the server. A deleted one then goes up whole, sealed and

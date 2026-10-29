@@ -215,29 +215,31 @@ final class NoteLibrary {
         }
     }
 
-    /// Gone from this device for good: only from the trash and only once nothing waits for the
-    /// server. `syncs` says whether the workspace is linked at all. True if it went.
+    /// Deleted for good, from the trash only. Without Kennel, or for a note Kennel never saw, it goes at once.
+    /// Otherwise it waits out of sight as an emptied tombstone that the sync takes to every device, which then
+    /// removes it. `syncs` says whether the workspace is linked at all. True if it went. See ADR 0089.
     @discardableResult
     func purge(_ id: UUID, syncs: Bool) -> Bool {
-        guard let record = record(id), Self.purgeable(record, syncs: syncs) else {
-            status.message = "Erst nach dem Abgleich endgültig löschbar."
+        guard let record = record(id), record.note.deletedAt != nil, record.note.purgedAt == nil else { return false }
+        guard !record.conflict else {
+            status.message = "Erst den Konflikt lösen."
             return false
         }
         do {
-            try store.remove(id: id)
-            records.removeAll { $0.id == id }
-            return true
+            try purge(record, syncs: syncs)
         } catch {
             status.message = "Die Notiz ließ sich nicht entfernen."
             return false
         }
+        changed()
+        return true
     }
 
     func emptyTrash(syncs: Bool) {
         var failed = 0
-        for record in records where Self.purgeable(record, syncs: syncs) {
+        for record in records where record.note.deletedAt != nil && record.note.purgedAt == nil && !record.conflict {
             do {
-                try store.remove(id: record.id)
+                try purge(record, syncs: syncs)
             } catch {
                 failed += 1
             }
@@ -246,6 +248,7 @@ final class NoteLibrary {
             status.message = failed == 1 ? "Eine Notiz ließ sich nicht entfernen." : "\(failed) Notizen ließen sich nicht entfernen."
         }
         reload()
+        changed()
     }
 
     /// Throws away a note that never reached the server; one that did goes to the trash.
@@ -289,10 +292,20 @@ final class NoteLibrary {
         reveal(folder)
     }
 
-    /// True once nothing waits for the server: the deletion is synced, never had to be, or the
-    /// workspace does not sync at all.
-    private static func purgeable(_ record: NoteRecord, syncs: Bool) -> Bool {
-        record.note.deletedAt != nil && (!record.dirty || record.note.revision == 0 || !syncs)
+    private func purge(_ record: NoteRecord, syncs: Bool) throws {
+        if !syncs || record.note.revision == 0 {
+            try store.remove(id: record.id)
+            records.removeAll { $0.id == record.id }
+        } else {
+            let tombstone = record.note.purged(at: InkhashTime.now())
+            try store.save(note: tombstone, meta: LocalMeta(dirty: true, conflict: false))
+            set(NoteRecord(note: tombstone, dirty: true, conflict: false))
+        }
+    }
+
+    /// The sync removed a note another device deleted for good, or sent this device's tombstone. See ADR 0089.
+    func removedBySync(_ id: UUID) {
+        records.removeAll { $0.id == id }
     }
 
     // MARK: Folders

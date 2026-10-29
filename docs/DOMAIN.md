@@ -39,7 +39,7 @@ Diese Wörter heißen im Code so.
 | Baum | Die Seitenleiste: Ordner aus den Pfaden, Notizen als Blätter. Zugeklappte Knoten nur auf dem Gerät (`sidebar.json`, ADR 0022). |
 | favorite | Favorit, an der Notiz, wird abgeglichen. |
 | createdAt | Erstellungsdatum an der Notiz, setzt der Client, von Hand änderbar, wird abgeglichen. Fehlt es, gilt `updatedAt` (ADR 0048). In der Oberfläche „Erstellt“. |
-| Papierkorb | Notizen mit `deletedAt`. Wiederherstellbar. |
+| Papierkorb | Notizen mit `deletedAt`. Wiederherstellbar. Endgültig löschen und Leeren gelten auf allen Geräten des Workspace (ADR 0089). |
 | Account | Name und Passwort an einem Server. Sieht nur die eigenen Notizen. |
 | gebunden | Account und Server-Workspace, mit denen die Bibliothek zuletzt abgeglichen hat. Ein Wechsel setzt alle Revisionen auf 0. |
 | Sitzung | Zufalls-Token nach dem Anmelden. Liegt in der Keychain, nicht das Setup-Token. |
