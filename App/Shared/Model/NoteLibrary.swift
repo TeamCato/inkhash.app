@@ -192,14 +192,6 @@ final class NoteLibrary {
 
     // MARK: Notes
 
-    /// Where notes made from inside `parent` go: a folder named after it, next to it.
-    /// `test / doc` gives `test / doc`. See ADR 0037.
-    func childFolder(of parent: Note) -> String {
-        guard let name = Folders.segment(parent.displayTitle) else { return parent.folder }
-        let folder = Folders.join(parent.folder, name)
-        return Folders.isValid(folder) ? folder : parent.folder
-    }
-
     func moveToTrash(_ id: UUID) {
         change(id) { note in
             note.deletedAt = InkhashTime.now()
@@ -273,20 +265,30 @@ final class NoteLibrary {
         }
     }
 
+    /// Moves a note together with the notes hanging below it, so they stay below it. See ADR 0090.
     func move(id: UUID, to folder: String) {
-        guard Folders.isValid(folder) else { return }
-        change(id) { note in
-            guard note.folder != folder else { return false }
-            note.folder = folder
-            return true
+        guard Folders.isValid(folder), let note = record(id)?.note, note.folder != folder else { return }
+        let living = records.filter { $0.note.deletedAt == nil }.map(\.note)
+        let now = InkhashTime.now()
+        for member in [id] + NoteFamily.descendants(of: id, among: living) {
+            guard let index = index(of: member) else { continue }
+            records[index].note.folder = folder
+            persistChange(at: index, now: now)
         }
+        changed()
     }
 
-    /// Sets the folder path of a note from what someone typed: "project xy / meeting z".
+    /// Sets the folder path of a note from what someone typed: "project xy / meeting z". A note
+    /// that hangs below another one and gets a path of its own stops hanging there. See ADR 0090.
     func setFolder(id: UUID, typed: String) {
         guard let folder = Folders.path(typed) else {
             status.message = "Der Pfad ist zu lang."
             return
+        }
+        change(id) { note in
+            guard note.parent != nil, note.folder != folder else { return false }
+            note.parent = nil
+            return true
         }
         move(id: id, to: folder)
         reveal(folder)

@@ -1,6 +1,6 @@
 # 0037 Ausschnitte in alle Richtungen, Absätze als Auswahl, neue Notizen darunter
 
-Status: angenommen
+Status: angenommen. Die Ablage neuer Notizen ändert 0090: sie hängen im Baum unter der Ausgangsnotiz statt in einem Ordner ihres Namens.
 
 Ändert 0035 (Text-Ausschnitt mit `section`, Ziel der neuen Notiz, Titel). Ergänzt 0032.
 

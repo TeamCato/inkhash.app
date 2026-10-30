@@ -223,12 +223,19 @@ final class AppModel {
         add(placed(note, in: folder), revealing: folder)
     }
 
-    /// A new note made from inside another one, for an excerpt: it stays closed, the open note keeps the
-    /// screen. Same folder as the note it was made from, with a fixed title. See ADR 0032 and 0035.
-    func createQuietly(_ note: Note, folder: String, title: String) -> Note {
+    /// A new note made from inside another one while embedding: it stays closed, the open note keeps the
+    /// screen. It lies in the same folder and hangs below the note it was made from, which opens to show
+    /// it. No title: it follows what gets written. See ADR 0019, 0037 and 0090.
+    func createChild(_ note: Note, of parent: Note) -> Note {
         var note = note
-        note.folder = Folders.isValid(folder) ? folder : ""
-        note.title = String(title.prefix(80))
+        note.folder = parent.folder
+        note.title = ""
+        // The picker of a note that is not in the library yet has nothing to hang below.
+        if library.record(parent.id) != nil {
+            note.parent = parent.id
+            library.reveal(parent.folder)
+            library.setExpanded(NoteTree.expansionKey(for: parent.id), true)
+        }
         library.add(note)
         return library.record(note.id)?.note ?? note
     }

@@ -36,7 +36,8 @@ Diese Wörter heißen im Code so.
 | Nachfolger | Der unverschlüsselte Workspace, in den ein verschlüsselter umgewandelt wurde. Andere Geräte erkennen ihn an Name und geteilten Notiz-IDs. |
 | main | Der Workspace, den jeder Account auf dem Server hat. Auch ohne Präfix erreichbar. |
 | folder | Pfad an der Notiz, Segmente mit `/`. Leer heißt Wurzel des Workspace. In der Oberfläche „Pfad“, geschrieben mit ` / ` (ADR 0022). |
-| Baum | Die Seitenleiste: Ordner aus den Pfaden, Notizen als Blätter. Zugeklappte Knoten nur auf dem Gerät (`sidebar.json`, ADR 0022). |
+| Baum | Die Seitenleiste: Ordner aus den Pfaden, Notizen als Blätter, Kinder unter ihrer Ausgangsnotiz. Zugeklappte Knoten nur auf dem Gerät (`sidebar.json`, ADR 0022, 0090). |
+| parent | Die Ausgangsnotiz: aus ihr heraus wurde eine Notiz beim Einbetten neu angelegt. Im Baum hängt das Kind unter ihr, solange beide im selben Pfad liegen (`NoteFamily`, ADR 0090). |
 | favorite | Favorit, an der Notiz, wird abgeglichen. |
 | createdAt | Erstellungsdatum an der Notiz, setzt der Client, von Hand änderbar, wird abgeglichen. Fehlt es, gilt `updatedAt` (ADR 0048). In der Oberfläche „Erstellt“. |
 | Papierkorb | Notizen mit `deletedAt`. Wiederherstellbar. Endgültig löschen und Leeren gelten auf allen Geräten des Workspace (ADR 0089). |

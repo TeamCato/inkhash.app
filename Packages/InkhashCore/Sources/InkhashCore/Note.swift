@@ -77,6 +77,8 @@ public struct Note: Equatable, Sendable, Identifiable {
     public var favorite: Bool
     /// Colour and pattern under the writing. Nil is `Paper.standard`. See ADR 0042.
     public var paper: Paper?
+    /// The note this one was made from inside, when embedding. It hangs below that note in the tree. See ADR 0090.
+    public var parent: UUID?
 
     public init(
         schemaVersion: Int = Note.schema,
@@ -94,7 +96,8 @@ public struct Note: Equatable, Sendable, Identifiable {
         pages: [InkPage]? = nil,
         folder: String = "",
         favorite: Bool = false,
-        paper: Paper? = nil
+        paper: Paper? = nil,
+        parent: UUID? = nil
     ) {
         self.schemaVersion = schemaVersion
         self.id = id
@@ -112,6 +115,7 @@ public struct Note: Equatable, Sendable, Identifiable {
         self.folder = folder
         self.favorite = favorite
         self.paper = paper
+        self.parent = parent
     }
 
     /// Equal in everything a person wrote. Ignores revision and timestamps.
@@ -125,6 +129,7 @@ public struct Note: Equatable, Sendable, Identifiable {
             && folder == other.folder
             && favorite == other.favorite
             && paper == other.paper
+            && parent == other.parent
             // A missing date is the fallback, not a different date: a note from before ADR 0048
             // equals the same note after `touch` wrote the fallback down.
             && (createdAt == nil || other.createdAt == nil || createdAt == other.createdAt)
@@ -337,7 +342,7 @@ public struct Note: Equatable, Sendable, Identifiable {
 extension Note: Codable {
     enum CodingKeys: String, CodingKey {
         case schemaVersion, id, kind, title, revision, createdAt, updatedAt, deletedAt, purgedAt
-        case markdown, transcript, tags, pages, folder, favorite, paper
+        case markdown, transcript, tags, pages, folder, favorite, paper, parent
     }
 
     public init(from decoder: Decoder) throws {
@@ -365,6 +370,8 @@ extension Note: Codable {
         self.favorite = try container.decodeIfPresent(Bool.self, forKey: .favorite) ?? false
         // Notes from before ADR 0042 have the standard paper.
         self.paper = try container.decodeIfPresent(Paper.self, forKey: .paper)
+        // Notes from before ADR 0090 carry none; an unreadable one hangs nowhere.
+        self.parent = try container.decodeIfPresent(String.self, forKey: .parent).flatMap(UUID.init(uuidString:))
     }
 
     public func encode(to encoder: Encoder) throws {
@@ -403,6 +410,8 @@ extension Note: Codable {
         try container.encode(favorite, forKey: .favorite)
         // Left out, not null, so notes on the standard paper look as they did before.
         try container.encodeIfPresent(paper, forKey: .paper)
+        // Left out on notes without one, so they look as they did before ADR 0090.
+        try container.encodeIfPresent(parent?.uuidString.lowercased(), forKey: .parent)
     }
 }
 

@@ -196,7 +196,7 @@ struct SidebarView: View {
                 Group {
                     switch row.item {
                     case .folder(let node, let expanded): folderRow(node, expanded: expanded)
-                    case .note(let record): noteRow(record)
+                    case .note(let record, let expanded): noteRow(record, expanded: expanded)
                     }
                 }
                 .padding(.leading, CGFloat(row.depth) * TreeGuides.indent)
@@ -209,7 +209,7 @@ struct SidebarView: View {
     }
 
     private func isSelected(_ item: TreeRow.Item) -> Bool {
-        if case .note(let record) = item { return record.id == model.selectedID }
+        if case .note(let record, _) = item { return record.id == model.selectedID }
         return false
     }
 
@@ -243,7 +243,7 @@ struct SidebarView: View {
                     .foregroundStyle(Ink.ink)
                     .lineLimit(1)
                 Spacer()
-                count(node.notes.count)
+                count(node.noteCount)
             }
             .contentShape(Rectangle())
         }
@@ -273,7 +273,8 @@ struct SidebarView: View {
         }
     }
 
-    fileprivate func noteRow(_ record: NoteRecord) -> some View {
+    /// `expanded` is nil for a note without notes hanging below it. See ADR 0090.
+    fileprivate func noteRow(_ record: NoteRecord, expanded: Bool? = nil) -> some View {
         let note = record.note
         let selected = model.selectedID == record.id
         // The kind icon stands where folders have their chevron; the guide lines show the nesting.
@@ -294,6 +295,20 @@ struct SidebarView: View {
                     .font(.system(size: 9))
                     .foregroundStyle(Ink.accent)
                     .accessibilityLabel("Favorit")
+            }
+            if let expanded {
+                Button {
+                    withAnimation(.easeInOut(duration: 0.15)) {
+                        model.library.setExpanded(NoteTree.expansionKey(for: record.id), !expanded)
+                    }
+                } label: {
+                    chevronSlot(expanded)
+                        .frame(width: 24, height: 24)
+                        .contentShape(Rectangle())
+                }
+                // Borderless, so a tap folds the note instead of choosing it.
+                .buttonStyle(.borderless)
+                .accessibilityLabel(expanded ? "Eingebettete Notizen zuklappen" : "Eingebettete Notizen aufklappen")
             }
         }
         .tag(note.id)

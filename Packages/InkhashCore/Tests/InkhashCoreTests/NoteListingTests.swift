@@ -2,10 +2,13 @@ import XCTest
 @testable import InkhashCore
 
 final class NoteListingTests: XCTestCase {
-    private func record(_ markdown: String, folder: String = "", at time: String, favorite: Bool = false, deleted: Bool = false) -> NoteRecord {
+    private func record(
+        _ markdown: String, folder: String = "", at time: String, favorite: Bool = false, deleted: Bool = false, parent: NoteRecord? = nil
+    ) -> NoteRecord {
         var note = Note.newText(now: time)
         note.applyMarkdown(markdown)
         note.folder = folder
+        note.parent = parent?.id
         note.favorite = favorite
         note.updatedAt = time
         if deleted { note.deletedAt = time }
@@ -69,6 +72,83 @@ final class NoteListingTests: XCTestCase {
         } else {
             XCTFail("first row should be the folder")
         }
+    }
+
+    func testEmbeddedNotesHangBelowTheirParentAndFold() throws {
+        let doc = record("Doc\n", folder: "test", at: "2026-10-01T06:00:00Z")
+        let sketch = record("Skizze\n", folder: "test", at: "2026-10-02T06:00:00Z", parent: doc)
+        let detail = record("Detail\n", folder: "test", at: "2026-10-03T06:00:00Z", parent: sketch)
+        let other = record("Andere\n", folder: "test", at: "2026-10-04T06:00:00Z")
+        let tree = NoteListing(records: [doc, sketch, detail, other], keptFolders: []).folderTree(query: "")
+        let test = try XCTUnwrap(tree.folders.first)
+
+        XCTAssertEqual(test.notes.map(\.id), [other.id, doc.id])
+        XCTAssertEqual(test.noteCount, 4)
+
+        let open = tree.rows { _ in true }
+        XCTAssertEqual(open.map(\.id), [
+            "folder:test", "note:\(other.id.uuidString)", "note:\(doc.id.uuidString)",
+            "note:\(sketch.id.uuidString)", "note:\(detail.id.uuidString)",
+        ])
+        XCTAssertEqual(open.map(\.depth), [0, 1, 1, 2, 3])
+        if case .note(_, let expanded) = open[1].item { XCTAssertNil(expanded) } else { XCTFail("a note") }
+        if case .note(_, let expanded) = open[2].item { XCTAssertEqual(expanded, true) } else { XCTFail("a note") }
+
+        let folded = tree.rows { $0 != NoteTree.expansionKey(for: doc.id) }
+        XCTAssertEqual(folded.map(\.id), ["folder:test", "note:\(other.id.uuidString)", "note:\(doc.id.uuidString)"])
+    }
+
+    func testEmbeddedNoteStandsAloneWithoutItsParentInTheSameFolder() {
+        let doc = record("Doc #a\n", folder: "test", at: "2026-10-01T06:00:00Z")
+        let moved = record("Weg #b\n", folder: "anders", at: "2026-10-02T06:00:00Z", parent: doc)
+        let orphan = record("Waise #b\n", folder: "test", at: "2026-10-03T06:00:00Z", parent: doc)
+        let trashedDoc = record("Alt\n", folder: "test", at: "2026-10-04T06:00:00Z", deleted: true)
+        let left = record("Übrig #b\n", folder: "test", at: "2026-10-05T06:00:00Z", parent: trashedDoc)
+        let listing = NoteListing(records: [doc, moved, orphan, trashedDoc, left], keptFolders: [])
+
+        let tree = listing.folderTree(query: "")
+        XCTAssertEqual(tree.folders.map(\.path), ["anders", "test"])
+        XCTAssertEqual(tree.folders[0].notes.map(\.id), [moved.id])
+        XCTAssertEqual(tree.folders[1].notes.map(\.id), [left.id, doc.id])
+        XCTAssertEqual(tree.folders[1].notes[1].children.map(\.id), [orphan.id])
+
+        // A tag filter that leaves the parent out shows the child on its own.
+        let filtered = listing.folderTree(query: "#b")
+        XCTAssertEqual(filtered.folders[1].notes.map(\.id), [left.id, orphan.id])
+    }
+
+    func testFamilyIgnoresLoopsAndFindsDescendants() {
+        var a = Note.newText(now: "2026-10-01T06:00:00Z")
+        var b = Note.newText(now: "2026-10-01T06:00:00Z")
+        var c = Note.newText(now: "2026-10-01T06:00:00Z")
+        let d = Note.newText(now: "2026-10-01T06:00:00Z")
+        a.parent = b.id
+        b.parent = a.id
+        c.parent = a.id
+        XCTAssertEqual(NoteFamily.parents(among: [a, b, c, d]), [c.id: a.id])
+
+        b.parent = nil
+        var e = Note.newText(now: "2026-10-01T06:00:00Z")
+        e.parent = c.id
+        XCTAssertEqual(NoteFamily.descendants(of: b.id, among: [a, b, c, d, e]), [a.id, c.id, e.id])
+        XCTAssertEqual(NoteFamily.descendants(of: d.id, among: [a, b, c, d, e]), [])
+    }
+
+    func testParentSurvivesTheWireAndCountsAsContent() throws {
+        var child = Note.newText(now: "2026-10-01T06:00:00Z")
+        let plain = try JSONEncoder().encode(child)
+        XCTAssertFalse(String(decoding: plain, as: UTF8.self).contains("parent"))
+
+        let parent = UUID()
+        child.parent = parent
+        let data = try JSONEncoder().encode(child)
+        XCTAssertTrue(String(decoding: data, as: UTF8.self).contains(parent.uuidString.lowercased()))
+        let back = try JSONDecoder().decode(Note.self, from: data)
+        XCTAssertEqual(back.parent, parent)
+
+        var detached = back
+        detached.parent = nil
+        XCTAssertFalse(detached.sameContent(as: back))
     }
 
     func testLinkableFoldsCaseAndAccents() {

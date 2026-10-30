@@ -108,4 +108,27 @@ final class NoteLibraryTests: LibraryTestCase {
         XCTAssertNil(library.record(gone.id))
         XCTAssertNil(try store.note(id: gone.id))
     }
+
+    func testMovingANoteTakesItsEmbeddedNotesAlong() throws {
+        var doc = Note.newText(now: "2026-10-01T08:00:00Z")
+        doc.folder = "test"
+        var sketch = Note.newText(now: "2026-10-01T08:00:00Z")
+        sketch.folder = "test"
+        sketch.parent = doc.id
+        var detail = Note.newText(now: "2026-10-01T08:00:00Z")
+        detail.folder = "test"
+        detail.parent = sketch.id
+        for note in [doc, sketch, detail] { library.add(note) }
+
+        library.setFolder(id: doc.id, typed: "projekte / neu")
+        XCTAssertEqual([doc, sketch, detail].map { library.record($0.id)?.note.folder }, Array(repeating: "projekte/neu", count: 3))
+        XCTAssertEqual(library.record(sketch.id)?.note.parent, doc.id)
+
+        // A path of its own takes a note out from below its parent, with what hangs below it.
+        library.setFolder(id: sketch.id, typed: "anders")
+        XCTAssertNil(library.record(sketch.id)?.note.parent)
+        XCTAssertEqual(library.record(detail.id)?.note.folder, "anders")
+        XCTAssertEqual(library.record(detail.id)?.note.parent, sketch.id)
+        XCTAssertEqual(library.record(doc.id)?.note.folder, "projekte/neu")
+    }
 }

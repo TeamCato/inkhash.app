@@ -31,44 +31,86 @@ public enum LibrarySection: Hashable, Sendable {
     case trash
 }
 
+/// A note in the tree with the notes made from inside it hanging below. See ADR 0090.
+public struct NoteBranch: Identifiable, Sendable {
+    public var record: NoteRecord
+    public var children: [NoteBranch]
+    public var id: UUID { record.id }
+
+    /// This note and every note below it.
+    public var count: Int { 1 + children.reduce(0) { $0 + $1.count } }
+}
+
 /// A folder with its subfolders and the notes lying directly in it.
 public struct NoteTree: Identifiable, Sendable {
     public var path: String
     public var folders: [NoteTree]
-    public var notes: [NoteRecord]
+    /// Notes of this folder that hang below no other note, each with its children.
+    public var notes: [NoteBranch]
     public var id: String { path }
 
     public var isEmpty: Bool { folders.isEmpty && notes.isEmpty }
 
+    /// Every note lying directly in this folder, children included.
+    public var noteCount: Int { notes.reduce(0) { $0 + $1.count } }
+
+    /// The key a note with children is folded shut under. Never a folder path: those cannot start with "/".
+    public static func expansionKey(for id: UUID) -> String {
+        "/" + id.uuidString.lowercased()
+    }
+
     /// Builds the tree over `notes`. `kept` adds folders that hold no note yet.
     public static func build(notes: [NoteRecord], kept: [String]) -> NoteTree {
         let paths = Folders.tree(kept: kept, used: notes.map(\.note.folder))
+        let parents = NoteFamily.parents(among: notes.map(\.note))
         var byFolder: [String: [NoteRecord]] = [:]
+        var byParent: [UUID: [NoteRecord]] = [:]
         for record in notes {
-            byFolder[record.note.folder, default: []].append(record)
+            if let parent = parents[record.id] {
+                byParent[parent, default: []].append(record)
+            } else {
+                byFolder[record.note.folder, default: []].append(record)
+            }
+        }
+        func newestFirst(_ records: [NoteRecord]) -> [NoteRecord] {
+            records.sorted { $0.note.updatedAt > $1.note.updatedAt }
+        }
+        func branch(_ record: NoteRecord) -> NoteBranch {
+            NoteBranch(record: record, children: newestFirst(byParent[record.id] ?? []).map(branch))
         }
         func node(_ path: String) -> NoteTree {
             NoteTree(
                 path: path,
                 folders: paths.filter { $0 != path && Folders.parent(of: $0) == path }.map(node),
-                notes: (byFolder[path] ?? []).sorted { $0.note.updatedAt > $1.note.updatedAt }
+                notes: newestFirst(byFolder[path] ?? []).map(branch)
             )
         }
         return node("")
     }
 
     /// The tree as the sidebar draws it: one flat row per visible folder or note, subfolders before
-    /// notes, nothing below a collapsed folder. Flat on purpose, see PITFALLS P-056.
+    /// notes, nothing below a collapsed folder or note. Flat on purpose, see PITFALLS P-056.
     public func rows(isExpanded: (String) -> Bool) -> [TreeRow] {
         var rows: [TreeRow] = []
+        func walk(_ branch: NoteBranch, depth: Int) {
+            guard !branch.children.isEmpty else {
+                rows.append(TreeRow(item: .note(branch.record, expanded: nil), depth: depth))
+                return
+            }
+            let expanded = isExpanded(Self.expansionKey(for: branch.id))
+            rows.append(TreeRow(item: .note(branch.record, expanded: expanded), depth: depth))
+            if expanded {
+                for child in branch.children { walk(child, depth: depth + 1) }
+            }
+        }
         func walk(_ node: NoteTree, depth: Int) {
             for folder in node.folders {
                 let expanded = isExpanded(folder.path)
                 rows.append(TreeRow(item: .folder(folder, expanded: expanded), depth: depth))
                 if expanded { walk(folder, depth: depth + 1) }
             }
-            for record in node.notes {
-                rows.append(TreeRow(item: .note(record), depth: depth))
+            for branch in node.notes {
+                walk(branch, depth: depth)
             }
         }
         walk(self, depth: 0)
@@ -80,7 +122,8 @@ public struct NoteTree: Identifiable, Sendable {
 public struct TreeRow: Identifiable, Sendable {
     public enum Item: Sendable {
         case folder(NoteTree, expanded: Bool)
-        case note(NoteRecord)
+        /// `expanded` is nil for a note without children.
+        case note(NoteRecord, expanded: Bool?)
     }
 
     public var item: Item
@@ -90,7 +133,7 @@ public struct TreeRow: Identifiable, Sendable {
     public var id: String {
         switch item {
         case .folder(let node, _): "folder:\(node.path)"
-        case .note(let record): "note:\(record.id.uuidString)"
+        case .note(let record, _): "note:\(record.id.uuidString)"
         }
     }
 }

@@ -3,8 +3,8 @@ import PencilKit
 import SwiftUI
 
 /// Picks what an excerpt shows: a rectangle of a handwriting page or paragraphs of a text note, from
-/// any note of the workspace, or a new note written right here. New notes go into a folder named after
-/// the note they are made from, with an automatic title. See ADR 0032, 0035 and 0037.
+/// any note of the workspace, or a new note written right here. New notes hang below the note they are
+/// made from in the tree, with an automatic title. See ADR 0032, 0035, 0037 and 0090.
 struct ExcerptPicker: View {
     @Environment(AppModel.self) private var model
     /// The note the excerpt goes into. It is not offered: a note does not show itself.
@@ -110,7 +110,7 @@ struct ExcerptPicker: View {
                     newRow("Neue Handschrift", symbol: "pencil.tip.crop.circle.badge.plus", kind: .ink)
                     newRow("Neue Textnotiz", symbol: "doc.badge.plus", kind: .text)
                 } footer: {
-                    Text("Liegt dann unter \(Folders.display(childFolder)).")
+                    Text("Hängt dann im Baum unter „\(parent.displayTitle)“.")
                         .font(.caption)
                         .foregroundStyle(Ink.muted)
                 }
@@ -151,11 +151,6 @@ struct ExcerptPicker: View {
         }
     }
 
-    /// `test / doc` makes new notes in `test / doc`, next to the note `doc` in `test`.
-    private var childFolder: String {
-        model.library.childFolder(of: parent)
-    }
-
     private func create(_ kind: NoteKind) {
         let fresh: Note?
         switch kind {
@@ -163,8 +158,7 @@ struct ExcerptPicker: View {
         case .text: fresh = Note.newText()
         }
         guard let fresh else { return }
-        // No title: it follows what gets written, see ADR 0019.
-        let note = model.createQuietly(fresh, folder: childFolder, title: "")
+        let note = model.createChild(fresh, of: parent)
         hint = nil
         step = .writing(note.id)
     }
