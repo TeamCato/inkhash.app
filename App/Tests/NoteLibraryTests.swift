@@ -131,4 +131,41 @@ final class NoteLibraryTests: LibraryTestCase {
         XCTAssertEqual(library.record(detail.id)?.note.parent, sketch.id)
         XCTAssertEqual(library.record(doc.id)?.note.folder, "projekte/neu")
     }
+
+    func testTrashTakesEmbeddedNotesAlongAndBack() throws {
+        var doc = Note.newText(now: "2026-10-01T08:00:00Z")
+        doc.folder = "test"
+        var sketch = Note.newText(now: "2026-10-01T08:00:00Z")
+        sketch.folder = "test"
+        sketch.parent = doc.id
+        var detail = Note.newText(now: "2026-10-01T08:00:00Z")
+        detail.folder = "test"
+        detail.parent = sketch.id
+        let other = Note.newText(now: "2026-10-01T08:00:00Z")
+        for note in [doc, sketch, detail, other] { library.add(note) }
+
+        XCTAssertEqual(Set(library.moveToTrash(doc.id)), [doc.id, sketch.id, detail.id])
+        XCTAssertEqual(Set(library.listing.listed(.trash, query: "").map(\.id)), [doc.id, sketch.id, detail.id])
+
+        library.restore(id: doc.id)
+        XCTAssertEqual(library.listing.trashCount, 0)
+
+        // A child trashed on its own earlier stays in the trash when the parent comes back.
+        library.moveToTrash(detail.id)
+        // Trash times have whole seconds; this one lies clearly before the parent's.
+        var earlier = try XCTUnwrap(library.record(detail.id)?.note)
+        earlier.deletedAt = "2026-10-01T09:00:00Z"
+        try store.save(note: earlier, meta: LocalMeta(dirty: true, conflict: false))
+        library.reload()
+        library.moveToTrash(doc.id)
+        library.restore(id: doc.id)
+        XCTAssertEqual(library.listing.listed(.trash, query: "").map(\.id), [detail.id])
+
+        library.moveToTrash(doc.id)
+        XCTAssertTrue(library.purge(doc.id, syncs: false))
+        XCTAssertNil(library.record(doc.id))
+        XCTAssertNil(library.record(sketch.id))
+        XCTAssertNil(library.record(detail.id))
+        XCTAssertNotNil(library.record(other.id))
+    }
 }

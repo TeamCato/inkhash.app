@@ -248,8 +248,8 @@ final class AppModel {
 
     /// Moves a note to the trash. It stays restorable there; see ADR 0020.
     func delete(id: UUID) {
-        library.moveToTrash(id)
-        if selectedID == id { selectedID = nil }
+        let gone = library.moveToTrash(id)
+        if let selected = selectedID, gone.contains(selected) { selectedID = nil }
     }
 
     /// Throws away a note made in the excerpt picker. Never synced, so it leaves no trace.
@@ -260,7 +260,7 @@ final class AppModel {
 
     /// Deleted for good, from the trash, on every device that syncs this workspace. See ADR 0089.
     func purge(id: UUID) {
-        if library.purge(id, syncs: registry.current.link != nil), selectedID == id { selectedID = nil }
+        if library.purge(id, syncs: registry.current.link != nil) { dropMissingSelection() }
     }
 
     func emptyTrash() {
@@ -330,7 +330,8 @@ final class AppModel {
     }
 
     private func dropMissingSelection() {
-        if let selected = selectedID, library.record(selected) == nil { selectedID = nil }
+        // A note deleted for good may wait as a tombstone for the sync; it is gone all the same.
+        if let selected = selectedID, library.record(selected).map({ $0.note.purgedAt != nil }) ?? true { selectedID = nil }
     }
 
     // MARK: Workspaces

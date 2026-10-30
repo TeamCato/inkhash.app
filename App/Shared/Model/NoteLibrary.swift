@@ -192,24 +192,44 @@ final class NoteLibrary {
 
     // MARK: Notes
 
-    func moveToTrash(_ id: UUID) {
-        change(id) { note in
-            note.deletedAt = InkhashTime.now()
-            return true
+    /// Moves a note to the trash with every note hanging below it. Returns the ids that went. See ADR 0090.
+    @discardableResult
+    func moveToTrash(_ id: UUID) -> [UUID] {
+        guard let note = record(id)?.note, note.deletedAt == nil else { return [] }
+        let living = records.map(\.note).filter { $0.deletedAt == nil }
+        let family = [id] + NoteFamily.descendants(of: id, among: living)
+        let now = InkhashTime.now()
+        for member in family {
+            guard let index = index(of: member) else { continue }
+            records[index].note.deletedAt = now
+            persistChange(at: index, now: now)
         }
+        changed()
+        return family
     }
 
+    /// Brings a note back with the notes that went to the trash together with it. See ADR 0090.
     func restore(id: UUID) {
-        change(id) { note in
-            guard note.deletedAt != nil else { return false }
-            note.deletedAt = nil
-            return true
+        guard let deletedAt = record(id)?.note.deletedAt else { return }
+        let family = [id] + NoteFamily.descendants(of: id, among: trashedNotes).filter { record($0)?.note.deletedAt == deletedAt }
+        let now = InkhashTime.now()
+        for member in family {
+            guard let index = index(of: member) else { continue }
+            records[index].note.deletedAt = nil
+            persistChange(at: index, now: now)
         }
+        changed()
+    }
+
+    /// In the trash, not yet deleted for good.
+    private var trashedNotes: [Note] {
+        records.map(\.note).filter { $0.deletedAt != nil && $0.purgedAt == nil }
     }
 
     /// Deleted for good, from the trash only. Without Kennel, or for a note Kennel never saw, it goes at once.
     /// Otherwise it waits out of sight as an emptied tombstone that the sync takes to every device, which then
-    /// removes it. `syncs` says whether the workspace is linked at all. True if it went. See ADR 0089.
+    /// removes it. `syncs` says whether the workspace is linked at all. The notes hanging below it in the
+    /// trash go with it (ADR 0090). True if it went. See ADR 0089.
     @discardableResult
     func purge(_ id: UUID, syncs: Bool) -> Bool {
         guard let record = record(id), record.note.deletedAt != nil, record.note.purgedAt == nil else { return false }
@@ -217,8 +237,10 @@ final class NoteLibrary {
             status.message = "Erst den Konflikt lösen."
             return false
         }
+        let below = NoteFamily.descendants(of: id, among: trashedNotes).compactMap { self.record($0) }.filter { !$0.conflict }
         do {
             try purge(record, syncs: syncs)
+            for child in below { try purge(child, syncs: syncs) }
         } catch {
             status.message = "Die Notiz ließ sich nicht entfernen."
             return false

@@ -18,9 +18,13 @@ aufklappbar unter ihr.
   `sidebar.json` wie die Ordner (0022), unter dem Schlüssel `/<id>`, den kein Pfad haben kann.
 - Bekommt die Ausgangsnotiz einen anderen Pfad, ziehen ihre Kinder mit. Schreibt man einem Kind selbst einen anderen
   Pfad, löst es sich von der Ausgangsnotiz.
+- Löschen nimmt die Kinder mit: Legt man die Ausgangsnotiz in den Papierkorb, gehen alle Notizen darunter mit.
+  Wiederherstellen holt die zurück, die mit ihr gegangen sind (gleiches `deletedAt`); ein Kind, das schon vorher im
+  Papierkorb lag, bleibt dort. Endgültig löschen nimmt die Kinder im Papierkorb ebenfalls mit (0089). Dominik am
+  2026-10-30.
 - Kennel braucht dafür nichts Neues: Er behält `parent` wie jedes andere Feld der Notiz, versiegelt oder nicht. Eine
   ältere App sieht das Kind als gewöhnliche Notiz im Pfad der Ausgangsnotiz.
 
 ## Nicht
 Keine Umwandlung der Ordner, die nach 0037 entstanden sind; sie bleiben Ordner. Kein Ziehen einer Notiz unter eine
-andere von Hand. Kinder gehen nicht mit der Ausgangsnotiz in den Papierkorb.
+andere von Hand.
